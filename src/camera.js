@@ -42,7 +42,10 @@ export function createCameraControls(camera, dom, terrain) {
     if (modeEl) modeEl.textContent = mode === 'fly' ? 'Режим: свободный полёт' : 'Режим: орбита';
     if (help) help.dataset.mode = mode;
     if (speedEl) speedEl.textContent = mode === 'fly' ? `Скорость: ${speed < 10 ? speed.toFixed(1) : Math.round(speed)} м/с` : '';
-    if (clickEl) clickEl.style.display = mode === 'fly' && !fly.isLocked ? 'flex' : 'none';
+    // флаг isLocked у PointerLockControls меняется уже после события 'lock',
+    // поэтому проверяем состояние браузера напрямую
+    const locked = document.pointerLockElement === dom;
+    if (clickEl) clickEl.style.display = mode === 'fly' && !locked ? 'block' : 'none';
   }
 
   function setMode(m) {
@@ -64,10 +67,9 @@ export function createCameraControls(camera, dom, terrain) {
     refreshUI();
   }
 
-  fly.addEventListener('lock', refreshUI);
-  fly.addEventListener('unlock', refreshUI);
+  document.addEventListener('pointerlockchange', refreshUI);
   // клик по сцене в режиме полёта снова захватывает мышь
-  dom.addEventListener('click', () => { if (mode === 'fly' && !fly.isLocked) fly.lock(); });
+  dom.addEventListener('click', () => { if (mode === 'fly' && document.pointerLockElement !== dom) fly.lock(); });
   if (clickEl) clickEl.addEventListener('click', () => fly.lock());
 
   // Ctrl + W и подобные сочетания браузер не даёт перехватить; для спуска

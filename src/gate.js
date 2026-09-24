@@ -315,7 +315,7 @@ export function createGate(scene, terrain, walls) {
   scene.add(chainMesh(links, ctx.ironMat));
 
   // ======================= ВОДА ВО РВУ =======================
-  const moat = createMoatWater(scene);
+  const moat = createMoatWater(scene, terrain);
 
   // ======================= БАРБАКАН =======================
   buildBarbican(ctx, oak, terrain, rnd);
@@ -335,10 +335,33 @@ export function createGate(scene, terrain, walls) {
 }
 
 // Вода во рву: небольшой Water с отражениями (или простой материал на низком качестве)
-function createMoatWater(scene) {
+function createMoatWater(scene, terrain) {
   const a0 = GATE_RADIUS + DITCH.alongStart - 2, a1 = GATE_RADIUS + DITCH.alongEnd + 2;
-  const hw = MOAT.damStart + 3.5;
-  const geo = new THREE.PlaneGeometry(hw * 2, a1 - a0, 1, 1);
+  const hw = MOAT.damStart + 4;
+  // сетка 0.5 м; клетка входит, если хотя бы один угол ниже воды — берег закроет край
+  const step = 0.5, pos = [], idx = [];
+  const nx = Math.ceil((2 * hw) / step), nz = Math.ceil((a1 - a0) / step);
+  const id = new Int32Array((nx + 1) * (nz + 1)).fill(-1);
+  const below = (i, j) => terrain.heightAt(-hw + i * step, a0 + j * step) < MOAT.level + 0.05;
+  const vert = (i, j) => {
+    const k = j * (nx + 1) + i;
+    if (id[k] < 0) { id[k] = pos.length / 3; pos.push(-hw + i * step, -(a0 + j * step), 0); }
+    return id[k];
+  };
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    if (!(below(i, j) || below(i + 1, j) || below(i, j + 1) || below(i + 1, j + 1))) continue;
+    const v00 = vert(i, j), v10 = vert(i + 1, j), v01 = vert(i, j + 1), v11 = vert(i + 1, j + 1);
+    idx.push(v00, v10, v01, v10, v11, v01);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  if (geo.getAttribute('normal').getZ(0) < 0) {
+    const ia = geo.index.array;
+    for (let k = 0; k < ia.length; k += 3) { const t = ia[k + 1]; ia[k + 1] = ia[k + 2]; ia[k + 2] = t; }
+    geo.computeVertexNormals();
+  }
   let mesh;
   if (Q.waterReflection) {
     mesh = new Water(geo, {
@@ -368,7 +391,7 @@ function createMoatWater(scene) {
     mesh = new THREE.Mesh(geo, new THREE.MeshPhysicalMaterial({ color: 0x1b2f22, roughness: 0.06, normalMap: nm, normalScale: new THREE.Vector2(0.3, 0.3) }));
   }
   mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(0, MOAT.level, (a0 + a1) / 2);
+  mesh.position.set(0, MOAT.level, 0);
   mesh.receiveShadow = true;
   mesh.name = 'moat';
   scene.add(mesh);
@@ -404,6 +427,17 @@ function buildBarbican(ctx, oak, terrain, rnd) {
       segs.push({ a, D, N, from: 0, to: L / 2 - B.gateHalf });
       segs.push({ a, D, N, from: L / 2 + B.gateHalf, to: L });
     } else segs.push({ a, D, N, from: i === 0 ? 0 : -T / 2, to: i === 0 ? L + T / 2 : L });
+  }
+  // северная стена вдоль рва с проходом к мосту — двор барбакана замкнут
+  {
+    const a = pts[3], b = pts[0];
+    const D = b.clone().sub(a);
+    const L = D.length();
+    D.normalize();
+    const N = new V3(0, 0, -1);
+    const gap = 2.3;
+    segs.push({ a, D, N, from: -T / 2, to: L / 2 - gap });
+    segs.push({ a, D, N, from: L / 2 + gap, to: L + T / 2 });
   }
   const yb = (p, N, s) => Math.min(terrain.heightAt(p.x + N.x * s, p.z + N.z * s), terrain.heightAt(p.x, p.z)) - 0.8;
   for (const sg of segs) {

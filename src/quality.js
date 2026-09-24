@@ -53,24 +53,24 @@ const PRESETS = {
   high: {
     label: 'Высокое',
     post: true,
-    pixelRatio: 1.5,
-    minPixelRatio: 0.75,
+    pixelRatio: 2, // полное разрешение экрана (на экранах с масштабом 125–200% — чётче)
+    minPixelRatio: 0.85,
     shadowMapSize: 4096,
     shadowRadius: 3,
-    msaa: 0,
+    msaa: 4,
     ao: true,
-    aoHalfRes: true,
+    aoHalfRes: false,
     godRays: true,
     bloom: true,
-    grassDensity: 1,
-    grassRadius: 80,
-    treeDetailDistance: 200,
+    grassDensity: 1.3,
+    grassRadius: 95,
+    treeDetailDistance: 320,
     treeCount: 1,
     waterReflection: true,
-    reflectionSize: 512,
-    reflectionEvery: 2,
+    reflectionSize: 1024,
+    reflectionEvery: 1,
     textureSize: 1024,
-    terrainDetail: 1,
+    terrainDetail: 1.15,
     rockDetail: true,
     pointLights: true,
   },
@@ -86,7 +86,7 @@ function detectLevel() {
     const ext = gl.getExtension('WEBGL_debug_renderer_info');
     const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
     if (/intel|uhd|iris|hd graphics|swiftshader|llvmpipe|mesa|microsoft basic|radeon\(tm\) graphics|vega|adreno|mali|apple gpu/i.test(name)) return 'low';
-    return 'medium';
+    return 'high'; // отдельная видеокарта — максимум; при нехватке FPS сработает автоупрощение
   } catch (e) {
     return 'low';
   }
