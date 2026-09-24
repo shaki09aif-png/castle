@@ -18,6 +18,21 @@
       }
       #hud h1 { font-size: 19px; margin: 0 0 4px; font-weight: normal; }
       #fps { position: fixed; right: 12px; top: 10px; color: #fff; font: 13px monospace; text-shadow: 0 1px 2px #000; }
+      #help {
+        position: fixed; left: 12px; bottom: 12px; color: #f3ead6; background: rgba(20, 16, 12, 0.62);
+        border: 1px solid rgba(233, 220, 192, 0.25); border-radius: 8px; padding: 10px 14px; font-size: 13px;
+        line-height: 1.55; max-width: 330px; pointer-events: none; backdrop-filter: blur(3px);
+      }
+      #help.hidden { display: none; }
+      #help b { color: #ffd98a; font-weight: normal; }
+      #help .fly-only, #help .orbit-only { display: none; }
+      #help[data-mode='fly'] .fly-only, #help[data-mode='orbit'] .orbit-only { display: block; }
+      #help .muted { opacity: 0.7; }
+      #mode { font-size: 14px; margin-bottom: 4px; color: #fff; }
+      #click-to-fly {
+        position: fixed; inset: 0; display: none; align-items: center; justify-content: center; cursor: pointer;
+        color: #fff; font-size: 20px; text-shadow: 0 2px 6px #000; background: rgba(0, 0, 0, 0.18);
+      }
     </style>
   </head>
   <body>
@@ -25,9 +40,26 @@
     <div id="hud">
       <h1>Рыцарский замок XIII века</h1>
       <div id="stage"></div>
-      <div style="opacity:0.8">ЛКМ — вращение · колесо — приближение · ПКМ — сдвиг</div>
     </div>
     <div id="fps"></div>
+    <div id="click-to-fly">Кликните, чтобы продолжить полёт</div>
+    <div id="help" data-mode="orbit">
+      <div id="mode">Режим: орбита</div>
+      <div class="orbit-only">
+        <b>ЛКМ</b> — вращение · <b>колесо</b> — приближение<br />
+        <b>ПКМ</b> — сдвиг камеры<br />
+        <b>F</b> — свободный полёт
+      </div>
+      <div class="fly-only">
+        <b>Клик</b> — захватить мышь · <b>Esc</b> — отпустить<br />
+        <b>W A S D</b> — движение · <b>мышь</b> — обзор<br />
+        <b>Пробел</b> — вверх · <b>C</b> или <b>Ctrl</b> — вниз<br />
+        <b>Shift</b> — ускорение · <b>колесо</b> — скорость полёта<br />
+        <b>F</b> — вернуться к орбите
+        <div id="speed"></div>
+      </div>
+      <div class="muted">H — скрыть подсказку</div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

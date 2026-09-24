@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { setAnisotropy, setLoadedAssets } from './textures.js';
 import { loadAssets } from './assets.js';
 import { createLighting } from './lighting.js';
@@ -15,7 +14,7 @@ import { createVillage } from './village.js';
 import { createDetails } from './details.js';
 import { insideBuilding } from './layout.js';
 import { createPostFX } from './postfx.js';
-import { HILL_TOP } from './layout.js';
+import { createCameraControls } from './camera.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
 const STAGE = 'Этап 7: деревня, мост, мельница, поля, люди, мелкие детали';
@@ -85,25 +84,16 @@ async function init() {
   await step('постобработка');
   const post = createPostFX(renderer, scene, camera);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, HILL_TOP - 6, 20);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.minDistance = 1.5;
-  controls.maxDistance = 1300;
-  controls.maxPolarAngle = Math.PI * 0.495;
-  controls.zoomSpeed = 1.2;
-  controls.update();
-
-  // камера не уходит под землю, точка вращения не улетает далеко от замка
-  function clampCamera() {
-    const t = controls.target;
-    const r = Math.hypot(t.x, t.z);
-    if (r > 700) { t.x *= 700 / r; t.z *= 700 / r; }
-    const tg = terrain.heightAt(t.x, t.z) + 0.3;
-    if (t.y < tg) t.y = tg;
-    const g = terrain.heightAt(camera.position.x, camera.position.z) + 1.2;
-    if (camera.position.y < g) camera.position.y = g;
+  const cam = createCameraControls(camera, renderer.domElement, terrain);
+  const controls = cam.orbit; // для отладки и скриншотов
+  // точка, вокруг которой строятся тени: цель орбиты или место впереди в полёте
+  const focus = new THREE.Vector3();
+  function shadowFocus() {
+    if (cam.mode === 'orbit') return controls.target;
+    camera.getWorldDirection(focus);
+    focus.multiplyScalar(25).add(camera.position);
+    focus.y = Math.max(focus.y, terrain.heightAt(focus.x, focus.z));
+    return focus;
   }
 
   function resize() {
@@ -135,9 +125,9 @@ async function init() {
   const frame = () => {
     timer.update();
     const t = timer.getElapsed();
-    controls.update();
-    clampCamera();
-    lighting.update(t, camera, controls.target);
+    const dt = timer.getDelta();
+    cam.update(dt);
+    lighting.update(t, camera, shadowFocus());
     river.update(t);
     vegetation.update(t, camera);
     walls.update(t);
@@ -147,7 +137,7 @@ async function init() {
     court.update(t);
     village.update(t);
     details.update(t);
-    post.render(timer.getDelta());
+    post.render(dt);
 
     frames++;
     const now = performance.now();
@@ -166,7 +156,7 @@ async function init() {
 
   // доступ из консоли браузера для отладки
   window.castle = {
-    scene, camera, controls, renderer, terrain, assets,
+    scene, camera, controls, cam, renderer, terrain, assets,
     snapshot() {
       frame();
       return renderer.domElement.toDataURL('image/jpeg', 0.9);

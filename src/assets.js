@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { makeCanvas } from './textures.js';
 
-const BASE = 'assets/';
+// пути к файлам из public/assets с учётом адреса сайта (/castle/ на GitHub Pages)
+const BASE = import.meta.env.BASE_URL + 'assets/';
 
 // Встроенная HDRI для окружающего освещения (лежит в репозитории).
 export const BUILTIN_ENV = {
