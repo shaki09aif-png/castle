@@ -106,11 +106,11 @@ export function wallNodePoint(deg) {
 // Центр башни вынесен наружу от линии стены — башня фланкирует стену.
 // extra — насколько верхняя площадка выше боевого хода стены.
 const TOWER_SPECS = {
-  35: { shape: 'round', r: 4.3, extra: 7.5 },
-  140: { shape: 'square', r: 3.9, extra: 6.2 },
+  35: { shape: 'round', r: 4.3, extra: 7.5, flag: true, flagColor: '#7a1c1c' },
+  140: { shape: 'square', r: 3.9, extra: 6.2, flag: true, flagColor: '#1f3f8a' },
   190: { shape: 'round', r: 5.0, extra: 10, corbel: true, flag: true, flagColor: '#1f3f8a' },
-  237: { shape: 'square', r: 4.3, extra: 7.4, corbel: true },
-  286: { shape: 'round', r: 3.7, extra: 5.8 },
+  237: { shape: 'square', r: 4.3, extra: 7.4, corbel: true, flag: true, flagColor: '#7a1c1c' },
+  286: { shape: 'round', r: 3.7, extra: 5.8, flag: true, flagColor: '#1f3f8a' },
   338: { shape: 'round', r: 4.6, extra: 8.6, corbel: true, flag: true },
 };
 

@@ -231,9 +231,10 @@ export function horse(colorB, x, y, z, yaw, col, rnd) {
   colorB.curLimb = [0, 0];
   // хвост из двух частей
   const tr = L(r, 0, 1.45, -0.95, 0.5);
+  const tailRoot = y + 1.45; // для покачивания хвоста в шейдере
   colorB.add(new THREE.CylinderGeometry(0.05, 0.06, 0.2, 8).translate(0, -0.1, 0), tr, mane);
-  colorB.add(HG.tail, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.18, 0)).multiply(new THREE.Matrix4().makeRotationX(-0.45)), mane);
-  colorB.add(HG.tail, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.5, -0.05)).multiply(new THREE.Matrix4().makeRotationX(-0.1)).multiply(new THREE.Matrix4().makeScale(0.8, 1.2, 0.8)), mane);
+  colorB.add(HG.tail, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.18, 0)).multiply(new THREE.Matrix4().makeRotationX(-0.45)), mane, 2, tailRoot);
+  colorB.add(HG.tail, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.5, -0.05)).multiply(new THREE.Matrix4().makeRotationX(-0.1)).multiply(new THREE.Matrix4().makeScale(0.8, 1.2, 0.8)), mane, 2, tailRoot);
   // попона, седло с лукой, стремена
   const cloth = [0x7a1c1c, 0x1d3f8a, 0x3a5a2a][Math.floor(rnd() * 3)];
   colorB.add(new THREE.CylinderGeometry(0.4, 0.4, 0.62, 16, 1, true, -Math.PI * 0.45, Math.PI * 0.9).rotateX(Math.PI / 2), L(r, 0, 1.28, 0.02, 0, 0, 0, 1.0), cloth);

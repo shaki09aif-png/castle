@@ -517,6 +517,14 @@ function wallMaterial() {
           gMoss = (1.0 - smoothstep(0.0, 1.6 + m1.g * 1.4, vGround)) * smoothstep(0.35, 0.6, m1.b + 0.15);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.1, 0.14, 0.05) * (0.7 + m2.r * 0.6), gMoss * 0.8);
           diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(0.0, 0.8, vGround)) * 0.25;
+          // пятна мха и лишайника выше по стене (в сырых местах)
+          float mp = smoothstep(0.66, 0.8, m1.b) * smoothstep(0.5, 0.7, m2.g);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13, 0.17, 0.07) * (0.7 + m2.r * 0.6), mp * 0.5);
+          gMoss = max(gMoss, mp * 0.6);
+          // трещины в старой кладке: тонкие изломанные линии там, где камень выветрен
+          float cr = texture2D(tMacro, vec2(vWallW.x * 0.09 + vWallW.z * 0.09, vWallW.y * 0.07) + m1.rg * 0.08).g;
+          float crack = (1.0 - smoothstep(0.0, 0.014, abs(cr - 0.5))) * smoothstep(0.58, 0.72, m2.b);
+          diffuseColor.rgb *= 1.0 - crack * 0.65;
         }`
       )
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 1.0, gMoss);');

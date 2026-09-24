@@ -7,7 +7,7 @@ import { GeoBuilder } from './walls.js';
 import { Frame, strawMaterial, buildBarrels } from './courtyard.js';
 import { addYardLife, yardExclude, SACK } from './yard.js';
 import { wattleFence, gardenBeds } from './village.js';
-import { ColorBuilder, createPeople } from './people.js';
+import { ColorBuilder, createPeople, addTailSway } from './people.js';
 import { pbrMaterial, makeCanvas, toTexture, foliageTexture } from './textures.js';
 import { mulberry32 } from './noise.js';
 
@@ -408,7 +408,7 @@ export function createDetails(scene, terrain, walls, village) {
   const plantMat = new THREE.MeshStandardMaterial({ color: 0x46702a, roughness: 0.8 });
   const soilMat = new THREE.MeshStandardMaterial({ color: 0x3b2a1c, roughness: 1 });
   const ivyMat = new THREE.MeshStandardMaterial({ map: foliageTexture('broad', [0.1, 0.2, 0.06]), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.7 });
-  const colorMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+  const colorMat = addTailSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
   for (const [bld, mat] of [
     [wood, walls.woodMaterial], [stone, walls.stoneMaterial], [metal, iron], [soil, soilMat], [plants, plantMat],
     [straw, strawMaterial()], [shingle, pbrMaterial('shingle')], [colorB, colorMat], [leaves, ivyMat], [stems, walls.woodMaterial],

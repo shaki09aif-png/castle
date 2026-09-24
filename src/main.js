@@ -20,6 +20,8 @@ import { REFLECT } from './water.js';
 import { createCameraControls } from './camera.js';
 import { createTour } from './tour.js';
 import { createExtras } from './extras.js';
+import { createWeather } from './weather.js';
+import { SWAY_TIME } from './people.js';
 import { FOLIAGE_SUN } from './vegetation.js';
 import { SUN_DIR } from './lighting.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
@@ -149,6 +151,13 @@ async function init() {
     for (const g of glassMeshes) for (const m of [].concat(g.material)) m.emissiveIntensity = 0.55 + night * 1.8; // свечи за витражами
     for (const u of waters) { u.sunDirection.value.copy(SUN_DIR); u.sunColor.value.copy(st.sunCol).multiplyScalar(1 - 0.6 * night); }
   });
+  const weather = createWeather(scene, lighting, { paveMask: court.paveMask, heightAt: terrain.heightAt, renderer });
+  const weatherBtn = document.getElementById('btn-weather'), siegeBtn = document.getElementById('btn-siege');
+  const WEATHER_LABEL = { clear: '☁ Ясно', rain: '🌧 Дождь', fog: '🌫 Туман', snow: '❄ Снег' };
+  const cycleWeather = () => { weather.next(); if (weatherBtn) weatherBtn.textContent = WEATHER_LABEL[weather.mode]; };
+  const toggleSiege = () => { if (!extras.siege) return; const on = extras.siege.toggle(); if (siegeBtn) siegeBtn.textContent = on ? '⚔ Остановить штурм' : '⚔ Штурм'; };
+  if (weatherBtn) weatherBtn.addEventListener('click', cycleWeather);
+  if (siegeBtn) siegeBtn.addEventListener('click', toggleSiege);
   const dayBtn = document.getElementById('btn-day'), gateBtn = document.getElementById('btn-gate');
   const DAY_LABEL = { day: '☀ День', sunset: '🌅 Закат', night: '🌙 Ночь' };
   const cycleDay = () => { lighting.nextMode(); if (dayBtn) dayBtn.textContent = DAY_LABEL[lighting.mode]; };
@@ -156,9 +165,11 @@ async function init() {
   if (dayBtn) dayBtn.addEventListener('click', cycleDay);
   if (gateBtn) gateBtn.addEventListener('click', toggleGate);
   window.addEventListener('keydown', (e) => {
-    if (e.repeat || cam.mode === 'fly' && e.code !== 'KeyN' && e.code !== 'KeyG') return;
+    if (e.repeat || cam.mode === 'fly' && !['KeyN', 'KeyG', 'KeyP', 'KeyB'].includes(e.code)) return;
     if (e.code === 'KeyN') cycleDay();
     if (e.code === 'KeyG') toggleGate();
+    if (e.code === 'KeyP') cycleWeather();
+    if (e.code === 'KeyB') toggleSiege();
   });
   // точка, вокруг которой строятся тени: цель орбиты или место впереди в полёте
   const focus = new THREE.Vector3();
@@ -228,6 +239,8 @@ async function init() {
     details.update(t);
     torches.update(t);
     extras.update(t, dt);
+    weather.update(t, Math.min(dt, 0.1), camera);
+    SWAY_TIME.value = t;
     FLAG_TIME.value = t;
     post.render(dt);
 
@@ -248,7 +261,7 @@ async function init() {
 
   // доступ из консоли браузера для отладки
   window.castle = {
-    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, terrain, assets,
+    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, weather, terrain, assets,
     snapshot() {
       frame();
       return renderer.domElement.toDataURL('image/jpeg', 0.9);

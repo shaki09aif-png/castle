@@ -3,10 +3,11 @@
 // (один объект на материал), движение считает шейдер — FPS почти не меняется.
 import * as THREE from 'three';
 import { GeoBuilder } from './walls.js';
-import { ColorBuilder, person, createPeople } from './people.js';
+import { ColorBuilder, person, createPeople, SWAY_TIME, TAIL_GLSL, addTailSway } from './people.js';
 import { horse } from './yard.js';
 import { HALL, Frame, strawMaterial } from './courtyard.js';
-import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth } from './layout.js';
+import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth, GATEHOUSE, GATE_PASSAGE, BARBICAN, RIVER } from './layout.js';
+import { WINDOWS } from './towers.js';
 import { mulberry32 } from './noise.js';
 
 const V3 = THREE.Vector3;
@@ -36,9 +37,21 @@ function walkerMaterial() {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uPhase = uPhase;
     sh.uniforms.uAmp = uAmp;
+    sh.uniforms.uSwayTime = SWAY_TIME;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aLimb;\nuniform float uPhase;\nuniform float uAmp;')
+      .replace('#include <common>', '#include <common>\nattribute vec2 aLimb;\nattribute vec2 aSway;\nuniform float uPhase;\nuniform float uAmp;\nuniform float uSwayTime;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
+        ${TAIL_GLSL}
+        // колено: нога, уходящая назад, сгибается (для ног |aLimb.x| >= 0.7)
+        if (abs(aLimb.x) > 0.65) {
+          float kneeY = aLimb.y * (abs(aLimb.x) > 0.95 ? 0.5 : 0.59);
+          if (transformed.y < kneeY) {
+            float kb = max(0.0, -sin(uPhase + 0.9) * sign(aLimb.x)) * 0.75 * uAmp / 0.45;
+            float c = cos(kb), s = sin(kb);
+            vec3 q = transformed; q.y -= kneeY;
+            transformed = vec3(q.x, q.y * c - q.z * s + kneeY, q.y * s + q.z * c);
+          }
+        }
         if (aLimb.x != 0.0) {
           float a = sin(uPhase) * uAmp * aLimb.x;
           float c = cos(a), s = sin(a);
@@ -448,18 +461,20 @@ function siegeCamp(ctx, village) {
       }
     }
     metal.addGeometry(new THREE.CylinderGeometry(0.12, 0.12, 2.6, 8).rotateZ(Math.PI / 2), M(p.x, axleY, p.z, face));
-    // метательный рычаг: длинное плечо опущено назад, короткое с противовесом поднято
+    // метательный рычаг: длинное плечо опущено назад, короткое с противовесом поднято.
+    // Рычаг собирается отдельно (вокруг оси) — при «штурме» он делает бросок.
     const arm = new V3().copy(A).multiplyScalar(-Math.cos(0.75)).addScaledVector(UP, -Math.sin(0.75)).normalize();
     const pivot = p.clone().setY(axleY);
     const armLen = 9.5, short = 2.6;
+    const aw = ctx.armWood, am = ctx.armMetal;
     const mid = pivot.clone().addScaledVector(arm, (armLen - short) / 2);
-    wood.addGeometry(new THREE.BoxGeometry(0.34, armLen + short, 0.34), new THREE.Matrix4().compose(mid, new THREE.Quaternion().setFromUnitVectors(UP, arm), new V3(1, 1, 1)));
+    aw.addGeometry(new THREE.BoxGeometry(0.34, armLen + short, 0.34), new THREE.Matrix4().compose(mid, new THREE.Quaternion().setFromUnitVectors(UP, arm), new V3(1, 1, 1)));
     const cwTop = pivot.clone().addScaledVector(arm, -short);
-    wood.box(cwTop.clone().setY(cwTop.y - 1.2), A, UP, R, 0.9, 0.8, 0.8, { grain: true }); // ящик-противовес
-    metal.box(cwTop.clone().setY(cwTop.y - 0.3), A, UP, R, 0.12, 0.3, 0.12);
-    // праща и камни-снаряды
+    aw.box(cwTop.clone().setY(cwTop.y - 1.2), A, UP, R, 0.9, 0.8, 0.8, { grain: true }); // ящик-противовес
+    am.box(cwTop.clone().setY(cwTop.y - 0.3), A, UP, R, 0.12, 0.3, 0.12);
     const tip = pivot.clone().addScaledVector(arm, armLen);
-    wood.addGeometry(new THREE.CylinderGeometry(0.015, 0.015, 2.2, 4), M(tip.x, tip.y - 1.0, tip.z));
+    aw.addGeometry(new THREE.CylinderGeometry(0.015, 0.015, 2.2, 4), M(tip.x, tip.y - 1.0, tip.z));
+    ctx.treb = { pivot, A, R, arm, armLen, face };
     for (let k = 0; k < 7; k++) {
       const q = p.clone().addScaledVector(A, -4.5 + (rnd() - 0.5) * 1.5).addScaledVector(R, 2.5 + (rnd() - 0.5) * 1.5);
       ctx.stone.addGeometry(new THREE.DodecahedronGeometry(0.3 + rnd() * 0.12, 0), M(q.x, gh(q.x, q.z) + 0.3, q.z, rnd() * 3));
@@ -541,6 +556,405 @@ function siegeCamp(ctx, village) {
   return { x: cx, z: cz, face, fw, rt, at, gh };
 }
 
+
+// ===========================================================================
+// ШТУРМ: требушет мечет камни в стену (пыль и обломки при ударе), лучники со
+// стен стреляют по подступам, из машикулей над воротами льют кипящую смолу
+// ===========================================================================
+function puffTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 2, 32, 32, 31);
+  gr.addColorStop(0, 'rgba(255,255,255,0.9)');
+  gr.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+class Puffs {
+  constructor(scene, count, color) {
+    const tex = puffTexture();
+    this.items = [];
+    for (let i = 0; i < count; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color, transparent: true, depthWrite: false, opacity: 0, fog: true }));
+      s.visible = false;
+      s.renderOrder = 6;
+      scene.add(s);
+      this.items.push({ s, life: 0, age: 1, v: new V3(), size: 1, grow: 1, a: 0.6 });
+    }
+    this.next = 0;
+  }
+  spawn(pos, vel, size, grow, life, alpha = 0.6) {
+    const it = this.items[this.next++ % this.items.length];
+    it.s.position.copy(pos);
+    it.v.copy(vel);
+    Object.assign(it, { size, grow, life, age: 0, a: alpha });
+    it.s.visible = true;
+  }
+  update(dt) {
+    for (const it of this.items) {
+      if (!it.s.visible) continue;
+      it.age += dt;
+      const u = it.age / it.life;
+      if (u >= 1) { it.s.visible = false; continue; }
+      it.s.position.addScaledVector(it.v, dt);
+      it.v.multiplyScalar(1 - dt * 0.8);
+      const sc = it.size + it.grow * u;
+      it.s.scale.set(sc, sc, 1);
+      it.s.material.opacity = it.a * Math.sin(Math.PI * Math.min(1, u * 2.5)) * (1 - u);
+    }
+  }
+}
+
+function createSiege(scene, ctx, walls, terrain, armMats) {
+  const T = ctx.treb;
+  if (!T) return null;
+  const gh = terrain.heightAt;
+  // рычаг требушета — отдельная группа вокруг оси
+  const armGrp = new THREE.Group();
+  armGrp.position.copy(T.pivot);
+  for (const [b, mat] of [[ctx.armWood, armMats.wood], [ctx.armMetal, armMats.iron]]) {
+    if (!b.pos.length) continue;
+    const g = b.build();
+    g.translate(-T.pivot.x, -T.pivot.y, -T.pivot.z);
+    const m = new THREE.Mesh(g, mat);
+    m.castShadow = false; // движется — не участвует в (кэшированных) тенях
+    m.receiveShadow = true;
+    m.name = 'extras';
+    armGrp.add(m);
+  }
+  scene.add(armGrp);
+  // знак поворота: при броске длинное плечо идёт вверх
+  const test = T.arm.clone().applyAxisAngle(T.R, 0.1);
+  const sgn = test.y > T.arm.y ? 1 : -1;
+  const THROW = 2.75, RELEASE = 2.0;
+  const armDirAt = (ang) => T.arm.clone().applyAxisAngle(T.R, sgn * ang);
+
+  // цель — внешняя сторона стены, обращённая к лагерю
+  const toCamp = new V3(T.pivot.x, 0, T.pivot.z).normalize();
+  let best = -1, target = new V3();
+  const Pw = walls.points, Nw = walls.segNrm, Wk = walls.walk;
+  for (let i = 1; i < Pw.length - 2; i++) {
+    const d = Nw[i].dot(toCamp);
+    if (d > best) { best = d; target = Pw[i].clone().lerp(Pw[i + 1], 0.5).addScaledVector(Nw[i], 1.3).setY((Wk[i] + Wk[i + 1]) / 2 - 3.5); }
+  }
+  const stoneGeo = new THREE.DodecahedronGeometry(0.45, 1);
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a8278, roughness: 1 });
+  const rock = new THREE.Mesh(stoneGeo, stoneMat);
+  rock.visible = false;
+  scene.add(rock);
+  const dust = new Puffs(scene, 26, 0x9a8a76);
+  const steam = new Puffs(scene, 14, 0xd8d4cc);
+  // обломки
+  const debrisN = 12;
+  const deb = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.16, 0), stoneMat, debrisN);
+  deb.frustumCulled = false;
+  deb.visible = false;
+  scene.add(deb);
+  const debris = Array.from({ length: debrisN }, () => ({ p: new V3(), v: new V3(), rest: false }));
+
+  // стрелы со стен
+  const nArrows = 14;
+  const arrowGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.9, 4).rotateX(Math.PI / 2);
+  const arrows = new THREE.InstancedMesh(arrowGeo, new THREE.MeshBasicMaterial({ color: 0x2a2018 }), nArrows);
+  arrows.frustumCulled = false;
+  arrows.visible = false;
+  scene.add(arrows);
+  const shooters = [];
+  for (let i = 1; i < Pw.length - 2; i++) {
+    if (Nw[i].dot(toCamp) > 0.2) {
+      const c = Pw[i].clone().lerp(Pw[i + 1], 0.5);
+      shooters.push(c.addScaledVector(Nw[i], 0.8).setY((Wk[i] + Wk[i + 1]) / 2 + 1.6));
+    }
+  }
+  if (!shooters.length) shooters.push(new V3(0, 95, 40));
+  const arrowSt = Array.from({ length: nArrows }, () => ({ p0: new V3(), v: new V3(), t: 0, dur: 0, stuck: 0, on: false }));
+  const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpV = new V3(), fwd = new V3(0, 0, 1);
+
+  // смола из машикулей над воротами
+  const P = GATE_PASSAGE, G = GATEHOUSE;
+  const platY = walls.walkAt(G.node.x, G.node.z) + G.extra;
+  const pitchTop = new V3(G.x + 0.9, platY - 0.2, P.frontZ + (G.corbelOut || 0.6) * 0.6);
+  const pitchBottom = P.thresholdY + 0.05;
+  const pitchMat = new THREE.MeshBasicMaterial({ color: 0x3a1c08, fog: true });
+  const pitch = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, 1, 8).translate(0, -0.5, 0), pitchMat);
+  pitch.position.copy(pitchTop);
+  pitch.visible = false;
+  scene.add(pitch);
+  const G_ACC = 14;
+
+  let active = false, clock = 0, flight = null, arrowClock = 0, pitchClock = 0;
+  function launch() {
+    const p0 = T.pivot.clone().addScaledVector(armDirAt(RELEASE), T.armLen);
+    const dur = 4.2;
+    const aim = target.clone().add(new V3((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 3));
+    const v = aim.clone().sub(p0).divideScalar(dur).add(new V3(0, 0.5 * G_ACC * dur, 0));
+    flight = { p0, v, t: 0, dur, aim };
+    rock.visible = true;
+  }
+  function impact(at) {
+    rock.visible = false;
+    for (let k = 0; k < 14; k++) {
+      const v = new V3((Math.random() - 0.5) * 6, 1 + Math.random() * 4, (Math.random() - 0.5) * 6).addScaledVector(toCamp, 2);
+      dust.spawn(at.clone().add(new V3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2)), v, 1.5 + Math.random() * 1.5, 6 + Math.random() * 4, 3 + Math.random() * 2, 0.55);
+    }
+    deb.visible = true;
+    for (const d of debris) {
+      d.p.copy(at);
+      d.v.set((Math.random() - 0.5) * 7, 2 + Math.random() * 5, (Math.random() - 0.5) * 7).addScaledVector(toCamp, 3 + Math.random() * 3);
+      d.rest = false;
+    }
+  }
+  function shootArrow() {
+    const a = arrowSt.find((x) => !x.on);
+    if (!a) return;
+    const from = shooters[Math.floor(Math.random() * shooters.length)];
+    const to = new V3((Math.random() - 0.5) * 30, 0, BARBICAN.zS + 8 + Math.random() * 45);
+    to.y = gh(to.x, to.z);
+    const dur = 1.6 + Math.random() * 0.8;
+    a.p0.copy(from);
+    a.v.copy(to).sub(from).divideScalar(dur).add(new V3(0, 0.5 * 9.8 * dur, 0));
+    Object.assign(a, { t: 0, dur, stuck: 0, on: true });
+  }
+
+  return {
+    target,
+    toCamp,
+    get active() { return active; },
+    toggle() {
+      active = !active;
+      if (active) { clock = 0; arrows.visible = true; }
+      return active;
+    },
+    update(dt) {
+      dust.update(dt);
+      steam.update(dt);
+      // требушет: цикл 11 с — бросок, пауза, медленный взвод
+      if (active || clock > 0) {
+        clock += dt;
+        const c = clock % 11;
+        let ang;
+        if (c < 0.9) { const u = c / 0.9; ang = THROW * u * u; } else if (c < 2) ang = THROW; else if (c < 8) { const u = (c - 2) / 6; ang = THROW * (1 - u * u * (3 - 2 * u)); } else ang = 0;
+        if (c >= 0.9 * Math.sqrt(RELEASE / THROW) && !flight && c < 1.2) launch();
+        armGrp.quaternion.setFromAxisAngle(T.R, sgn * ang);
+        if (!active && c >= 8) clock = 0; // остановились во взведённом положении
+      }
+      if (flight) {
+        flight.t += dt;
+        const t = flight.t;
+        rock.position.copy(flight.p0).addScaledVector(flight.v, t).add(new V3(0, -0.5 * G_ACC * t * t, 0));
+        rock.rotation.x += dt * 5;
+        if (t >= flight.dur) { impact(flight.aim); flight = null; }
+      }
+      if (deb.visible) {
+        let moving = false;
+        debris.forEach((d, i) => {
+          if (!d.rest) {
+            d.v.y -= 9.8 * dt;
+            d.p.addScaledVector(d.v, dt);
+            const g = gh(d.p.x, d.p.z) + 0.1;
+            if (d.p.y < g) { d.p.y = g; d.rest = true; } else moving = true;
+          }
+          deb.setMatrixAt(i, tmpM.makeTranslation(d.p.x, d.p.y, d.p.z));
+        });
+        deb.instanceMatrix.needsUpdate = true;
+        if (!moving && !active) deb.visible = false;
+      }
+      // стрелы
+      if (active) {
+        arrowClock -= dt;
+        if (arrowClock <= 0) { shootArrow(); arrowClock = 0.25 + Math.random() * 0.4; }
+      }
+      let anyArrow = false;
+      arrowSt.forEach((a, i) => {
+        if (!a.on) { arrows.setMatrixAt(i, tmpM.makeScale(0, 0, 0)); return; }
+        anyArrow = true;
+        let p, dir;
+        if (a.t < a.dur) {
+          a.t += dt;
+          const t = Math.min(a.t, a.dur);
+          p = a.p0.clone().addScaledVector(a.v, t).add(new V3(0, -4.9 * t * t, 0));
+          dir = a.v.clone().add(new V3(0, -9.8 * t, 0)).normalize();
+          a.last = p; a.dir = dir;
+        } else {
+          a.stuck += dt;
+          p = a.last; dir = a.dir;
+          if (a.stuck > 4) a.on = false;
+        }
+        tmpQ.setFromUnitVectors(fwd, dir);
+        arrows.setMatrixAt(i, tmpM.compose(p, tmpQ, tmpV.set(1, 1, 1)));
+      });
+      arrows.instanceMatrix.needsUpdate = true;
+      if (!anyArrow && !active) arrows.visible = false;
+      // кипящая смола: льётся 3 с каждые 12 с, внизу пар
+      if (active) pitchClock += dt; else pitchClock = 0;
+      const pc = pitchClock % 12;
+      const pouring = active && pc > 3 && pc < 6.5;
+      pitch.visible = pouring;
+      if (pouring) {
+        const len = Math.min(1, (pc - 3) / 0.6) * (pitchTop.y - pitchBottom);
+        pitch.scale.set(1, Math.max(0.01, len), 1);
+        if (Math.random() < dt * 10) steam.spawn(new V3(pitchTop.x + (Math.random() - 0.5), pitchBottom + 0.3, pitchTop.z + (Math.random() - 0.5)), new V3(0, 1.4, 0), 0.8, 3, 2.5, 0.45);
+      }
+    },
+  };
+}
+
+
+// ===========================================================================
+// ЖИЗНЬ ВОКРУГ: лодка с рыбаком, гуси у воды, коровы на пастбище, брызги
+// у мельничного колеса, огни в окнах ночью
+// ===========================================================================
+function cow(B, x, y, z, yaw, rnd) {
+  const r = M(x, y, z, yaw);
+  const L = (px, py, pz, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0) =>
+    r.clone().multiply(new THREE.Matrix4().compose(new V3(px, py, pz), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, 0, rz)), new V3(sx, sy, sz)));
+  const spotted = rnd() < 0.5;
+  const base = spotted ? 0xe8e2d8 : [0x6a4028, 0x8a5a34, 0x4a3020][Math.floor(rnd() * 3)];
+  B.add(new THREE.CapsuleGeometry(0.42, 1.0, 5, 12).rotateX(Math.PI / 2), L(0, 1.05, 0, 1, 1.05, 1), base);
+  if (spotted) for (let k = 0; k < 5; k++) B.add(GEO.sph, L((rnd() - 0.5) * 0.7, 1.1 + (rnd() - 0.3) * 0.5, (rnd() - 0.5) * 1.3, 0.25, 0.22, 0.3), 0x1e1a18);
+  const graze = rnd() < 0.6;
+  const hy = graze ? 0.45 : 1.15, hz = graze ? 1.05 : 1.0;
+  B.add(new THREE.CylinderGeometry(0.2, 0.3, 0.6, 10), L(0, (hy + 1.2) / 2, 0.8, 1, 1, 1, graze ? 1.0 : 0.5), base);
+  B.add(GEO.box, L(0, hy, hz, 0.3, 0.32, 0.5, graze ? 0.7 : 0.1), base);
+  B.add(GEO.box, L(0, hy - (graze ? 0.12 : 0.05), hz + (graze ? 0.2 : 0.26), 0.26, 0.2, 0.16, graze ? 0.7 : 0.1), 0xc89a8a);
+  for (const sd of [-1, 1]) {
+    B.add(GEO.cone, L(sd * 0.16, hy + 0.2, hz - 0.12, 0.035, 0.18, 0.035, 0, sd * -0.9), 0xe0d8c0);
+    B.add(GEO.box, L(sd * 0.2, hy + 0.08, hz - 0.1, 0.14, 0.05, 0.08), base);
+  }
+  for (const [lx, lz] of [[-0.22, 0.55], [0.22, 0.55], [-0.22, -0.6], [0.22, -0.6]]) {
+    B.add(GEO.cylLo, L(lx, 0.36, lz, 0.075, 0.72, 0.075), base);
+    B.add(GEO.cylLo, L(lx, 0.04, lz, 0.08, 0.08, 0.08), 0x2a2420);
+  }
+  B.add(GEO.sph, L(0, 0.6, -0.35, 0.2, 0.14, 0.2), 0xd8a0a0); // вымя
+  const tailRoot = y + 1.3;
+  B.add(GEO.cylLo, L(0, 0.95, -0.98, 0.03, 0.7, 0.03), base, 2, tailRoot);
+  B.add(GEO.sph, L(0, 0.58, -0.98, 0.06, 0.12, 0.06), 0x1e1a18, 2, tailRoot);
+}
+
+function createCountryLife(scene, ctx, village) {
+  const { terrain, colorB, rnd } = ctx;
+  const gh = terrain.heightAt;
+  const movers = [];
+  if (!village) return { update() {} };
+  const br = village.bridge;
+  // --- лодка с рыбаком: неспешно ходит вдоль реки ниже моста ---
+  {
+    const path = [];
+    for (let k = 0; k <= 8; k++) {
+      const x = br.a.x + 30 + k * 14;
+      const z = riverZ(x) + Math.sin(k * 0.9) * 2;
+      path.push(new V3(x, RIVER.waterLevel + 0.05, z));
+    }
+    const hull = new THREE.SphereGeometry(1, 14, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+    const w = makeWalker(scene, (B) => {
+      B.add(hull, M(0, 0.32, 0, 0, 0.72, 0.42, 2.3), 0x5a3a1e);
+      B.add(GEO.box, M(0, 0.3, 0, 0, 1.36, 0.04, 4.1), 0x3a2414);
+      B.add(GEO.box, M(0, 0.45, 0.6, 0, 1.3, 0.05, 0.25), 0x6a4a2a);
+      for (const sd of [-1, 1]) B.add(GEO.cylLo, M(sd * 1.0, 0.45, 0.3, 0, 0.02, 1.9, 0.02, 1.2, sd * 1.1), 0x6a4a2a);
+      person(B, { x: 0, y: 0.32, z: -0.7, yaw: Math.PI / 2, role: 'servant', seed: 401, pose: 'work' });
+      B.add(GEO.cylLo, M(1.3, 1.9, -0.7, 0, 0.012, 3.0, 0.012, 0, -0.9), 0x6a4a2a); // удочка
+      B.add(GEO.cylLo, M(2.55, 1.2, -0.7, 0, 0.003, 2.0, 0.003), 0xe0e0e0); // леска
+    }, path, { speed: 0.7, loop: false, amp: 0, y: true });
+    w.mesh.receiveShadow = true;
+    movers.push({ w, bob: 0.06 });
+  }
+  // --- гуси бродят у берега ---
+  {
+    const x0 = br.a.x - 20;
+    const ring = [];
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      const x = x0 + Math.cos(a) * 6;
+      const zb = riverZ(x) - (riverHalfWidth(x) + 4) + Math.sin(a) * 2.5;
+      ring.push(new V3(x, 0, zb));
+    }
+    for (let i = 0; i < 5; i++) {
+      const w = makeWalker(scene, (B) => {
+        B.curLimb = [0, 0];
+        B.add(GEO.sph, M(0, 0.32, 0, 0, 0.17, 0.16, 0.28), 0xf0ece4);
+        B.add(GEO.cyl, M(0, 0.5, 0.2, 0, 0.045, 0.3, 0.045, -0.35), 0xf0ece4);
+        B.add(GEO.sph, M(0, 0.66, 0.27, 0, 0.065, 0.06, 0.08), 0xf0ece4);
+        B.add(GEO.cone, M(0, 0.65, 0.37, 0, 0.025, 0.09, 0.025, Math.PI / 2), 0xe08a20);
+        for (const sd of [-1, 1]) { B.curLimb = [sd, 0.18]; B.add(GEO.cylLo, M(sd * 0.06, 0.09, 0, 0, 0.012, 0.18, 0.012), 0xe08a20); }
+        B.curLimb = [0, 0];
+      }, ring, { speed: 0.35, stride: 0.25, amp: 0.4 });
+      movers.push({ w });
+    }
+  }
+  // --- коровы на пастбище у деревни ---
+  {
+    let center = null;
+    for (let k = 0; k < 600 && !center; k++) {
+      const x = br.b.x + (rnd() - 0.5) * 160, z = br.b.z + 20 + rnd() * 90;
+      const g = terrain.groundAt(x, z);
+      if (village.exclude(x, z) || g.slope > 0.12 || g.river < 10 || g.road > 0.01) continue;
+      let ok = true;
+      for (let j = 0; j < 8 && ok; j++) {
+        const a = (j / 8) * Math.PI * 2;
+        const px = x + Math.cos(a) * 10, pz = z + Math.sin(a) * 10;
+        if (village.exclude(px, pz) || terrain.groundAt(px, pz).slope > 0.15) ok = false;
+      }
+      if (ok) center = new V3(x, 0, z);
+    }
+    if (center) {
+      for (let i = 0; i < 6; i++) {
+        const x = center.x + (rnd() - 0.5) * 16, z = center.z + (rnd() - 0.5) * 16;
+        cow(colorB, x, gh(x, z) - 0.02, z, rnd() * Math.PI * 2, rnd);
+      }
+      const p = center.clone().add(new V3(6, 0, -5));
+      ctx.people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: rnd() * 6, role: 'peasant' }); // пастух
+      ctx.pasture = center;
+    }
+  }
+  // --- брызги у мельничного колеса ---
+  const mw = village.millWheel;
+  const spray = mw ? new Puffs(scene, 22, 0xe8f0f4) : null;
+  let sprayClock = 0;
+  return {
+    update(t, dt) {
+      for (const m of movers) {
+        m.w.update(dt, gh);
+        if (m.bob) { m.w.mesh.position.y += Math.sin(t * 1.3) * m.bob; m.w.mesh.rotation.z = Math.sin(t * 1.1) * 0.03; }
+      }
+      if (spray) {
+        sprayClock -= dt;
+        if (sprayClock <= 0) {
+          sprayClock = 0.12;
+          const p = mw.c.clone().addScaledVector(mw.f.N, (Math.random() - 0.5) * 1.2);
+          p.y = RIVER.waterLevel + 0.25;
+          p.addScaledVector(mw.f.X, (Math.random() - 0.3) * mw.r * 0.8);
+          spray.spawn(p, new V3((Math.random() - 0.5) * 0.8, 0.6 + Math.random() * 0.8, (Math.random() - 0.5) * 0.8), 0.4, 1.4, 1.2, 0.35);
+        }
+        spray.update(dt);
+      }
+    },
+  };
+}
+
+// Огни в окнах (башни, донжон, дома деревни) — включаются ночью
+function createWindowLights(scene) {
+  if (!WINDOWS.length) return { set() {} };
+  const g = new THREE.PlaneGeometry(1, 1);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffb04a, fog: true });
+  const im = new THREE.InstancedMesh(g, mat, WINDOWS.length);
+  const q = new THREE.Quaternion();
+  WINDOWS.forEach((w, i) => {
+    q.setFromUnitVectors(new V3(0, 0, 1), w.n);
+    const flick = 0.75 + Math.random() * 0.25;
+    im.setMatrixAt(i, new THREE.Matrix4().compose(w.c.clone().addScaledVector(w.n, 0.045), q, new V3(w.w * 0.92, w.h * 0.92, 1)));
+    im.setColorAt(i, new THREE.Color(1, 0.8 * flick, 0.45 * flick).multiplyScalar(flick));
+  });
+  im.visible = false;
+  im.name = 'window-lights';
+  scene.add(im);
+  return { set(k) { im.visible = k > 0.35; } };
+}
+
 // ===========================================================================
 export function createExtras(scene, terrain, walls, village) {
   const rnd = mulberry32(5151);
@@ -549,11 +963,13 @@ export function createExtras(scene, terrain, walls, village) {
   const metal = new GeoBuilder(1), straw = new GeoBuilder(1);
   const colorB = new ColorBuilder(), glowB = new ColorBuilder();
   const people = [];
-  const ctx = { terrain, wood, stone, metal, straw, colorB, glowB, people, rnd };
+  const armWood = new GeoBuilder(walls.woodMaterial.userData.tileMeters), armMetal = new GeoBuilder(1);
+  const ctx = { terrain, wood, stone, metal, straw, colorB, glowB, people, rnd, armWood, armMetal };
   hallInterior(ctx);
   const camp = siegeCamp(ctx, village);
+  const country = createCountryLife(scene, ctx, village); // коровы — в общую сетку, поэтому до сборки
   const iron = new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 });
-  const colorMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+  const colorMat = addTailSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
   // огонь, свечи, пламя костров — светятся сами (без источников света)
   const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
   for (const [bld, mat, name] of [
@@ -567,17 +983,24 @@ export function createExtras(scene, terrain, walls, village) {
     m.name = name;
     scene.add(m);
   }
+  const siege = createSiege(scene, ctx, walls, terrain, { wood: walls.woodMaterial, iron });
+  const windows = createWindowLights(scene);
   const peopleUpd = createPeople(scene, people);
   const walkers = createWalkers(scene, terrain, walls);
   const birds = createBirds(scene);
   return {
     camp,
     birds,
+    siege,
     update(t, dt) {
+      dt = Math.min(dt, 0.1);
       peopleUpd.update(t);
-      walkers.update(Math.min(dt, 0.1));
+      walkers.update(dt);
       birds.update(t);
+      if (siege) siege.update(dt);
+      country.update(t, dt);
     },
-    setNight(k) { birds.mesh.visible = k < 0.5; },
+    setNight(k) { birds.mesh.visible = k < 0.5; windows.set(k); },
+    get pasture() { return ctx.pasture; },
   };
 }

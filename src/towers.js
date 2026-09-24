@@ -162,9 +162,13 @@ export function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3) {
 }
 
 // Окно со ставнями: тёмный проём, каменная рама, распахнутые деревянные ставни
+// Все окна со ставнями (башни, донжон, дома деревни) — ночью в них горит свет
+export const WINDOWS = [];
+
 export function windowWithShutters(stone, wood, dark, metal, p, n, y, w = 0.7, h = 1.1, openAng = 1.9) {
   const t = new V3().crossVectors(UP, n).normalize();
   const c = new V3(p.x, y, p.z);
+  WINDOWS.push({ c: c.clone(), n: n.clone(), w, h });
   dark.box(c.clone().addScaledVector(n, 0.02), t, UP, n, w / 2, h / 2, 0.02);
   // средник-колонка (двойное окно)
   stone.box(c.clone().addScaledVector(n, 0.04), t, UP, n, 0.05, h / 2, 0.05);

@@ -8,6 +8,31 @@ import { mulberry32 } from './noise.js';
 
 const V3 = THREE.Vector3;
 
+// Общее время для покачивания хвостов (коровы, лошади) в статичных сетках
+export const SWAY_TIME = { value: 0 };
+// GLSL: хвосты (aSway.x = 2, aSway.y — высота корня хвоста) описывают петлю
+export const TAIL_GLSL = `
+  if (aSway.x > 1.5 && aSway.x < 2.5) {
+    float tk = clamp((aSway.y - transformed.y) / 0.9, 0.0, 1.0);
+    float ph = uSwayTime * 1.9 + aSway.y * 7.3 + position.x * 0.0;
+    transformed.x += sin(ph) * 0.2 * tk;
+    transformed.z += cos(ph * 0.8) * 0.14 * tk;
+  }`;
+// добавить покачивание хвостов в материал с цветами вершин
+export function addTailSway(mat) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    sh.uniforms.uSwayTime = SWAY_TIME;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec2 aSway;\nuniform float uSwayTime;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + TAIL_GLSL);
+  };
+  const key = mat.customProgramCacheKey ? mat.customProgramCacheKey.bind(mat) : () => '';
+  mat.customProgramCacheKey = () => 'tail-' + key();
+  return mat;
+}
+
 export class ColorBuilder {
   constructor() { this.pos = []; this.nrm = []; this.col = []; this.aux = []; this.idx = []; this.limb = []; this.curLimb = [0, 0]; }
   add(geo, m, color, sway = 0, seed = 0) {

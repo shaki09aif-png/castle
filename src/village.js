@@ -3,6 +3,7 @@
 // мельница с вращающимся колесом, поля узкими полосами (средневековая
 // трёхпольная система: пашня, всходы, спелая пшеница, пар).
 import * as THREE from 'three';
+import { WINDOWS } from './towers.js';
 import { GeoBuilder } from './walls.js';
 import { riverInfo } from './terrain.js';
 import { riverZ, RIVER } from './layout.js';
@@ -171,6 +172,7 @@ function peasantHouse(B, terrain, x, z, yaw, L, W, rnd) {
     if (Math.abs(wx) > hl - 0.6) continue;
     const c = f.p(wx, floorY + 1.55, hw + 0.03);
     B.dark.box(c, f.X, UP, f.N, 0.3, 0.28, 0.02);
+    WINDOWS.push({ c: c.clone(), n: f.N.clone(), w: 0.6, h: 0.56 });
     for (const sd of [-1, 1]) {
       const hinge = c.clone().addScaledVector(f.X, sd * 0.32);
       const open = f.X.clone().multiplyScalar(sd).applyAxisAngle(UP, -sd * 0.5);
@@ -309,7 +311,7 @@ function watermill(B, scene, terrain, xRiver, rnd) {
   }
   void rnd;
   void yaw;
-  return { update: (t) => { wm.rotation.z = -t * 0.55; }, center: hc, f };
+  return { update: (t) => { wm.rotation.z = -t * 0.55; }, center: hc, f, wheel: wheelC.clone(), wheelR: R, chute: chute.clone() };
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +493,7 @@ export function createVillage(scene, terrain, walls) {
     const h = peasantHouse(B, terrain, x, z, yaw, L, W, rnd);
     houses.push({ x, z, r: Math.max(L, W) / 2 + 9 });
     places.push({ h, x, z, back: new V3(nx, 0, nz) });
-    if (rnd() < 0.6) smokes.push(new Smoke(scene, h.f.p(L * 0.2, h.ridge + 0.3, 0), { count: 10, alpha: 0.22, size: 0.7, grow: 3, rise: 0.9 }));
+    { const want = rnd() < 0.6; void want; smokes.push(new Smoke(scene, h.f.p(L * 0.2, h.ridge + 0.3, 0), { count: 8, alpha: 0.22, size: 0.7, grow: 3, rise: 0.9 })); } // дым из каждой трубы
   }
   // огороды за домами, плетни, стога, поленницы
   const barrels = [];
@@ -561,6 +563,7 @@ export function createVillage(scene, terrain, walls) {
     houses: places.map((p) => p.h),
     bridge: br,
     mill: mill.center,
+    millWheel: { c: mill.wheel, r: mill.wheelR, chute: mill.chute, f: mill.f },
     update(t) {
       for (const u of updaters) u(t);
       for (const s of smokes) s.update(t);

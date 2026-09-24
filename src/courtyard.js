@@ -580,7 +580,12 @@ export function createCourtyard(scene, terrain, walls) {
     bellPivot.add(bell);
     bell.castShadow = true;
     scene.add(bellPivot);
-    updaters.push((t) => { bellPivot.rotation.z = Math.sin(t * 0.8) * 0.06; });
+    // колокол звонит каждые 30 с: раскачивается ~8 с, потом затихает
+    updaters.push((t) => {
+      const c = t % 30;
+      const amp = c < 8 ? 0.55 * Math.sin((c / 8) * Math.PI) : 0.03;
+      bellPivot.rotation.z = Math.sin(t * 2.6) * amp;
+    });
     doors.push(null);
   }
 

@@ -132,6 +132,12 @@ function buildStops(terrain, village, extras) {
       tgt: V(0, 0, 0).copy(extras.camp.at(3, 2)).setY(extras.camp.gh(extras.camp.at(3, 2).x, extras.camp.at(3, 2).z) + 3),
       pos: V(0, 0, 0).copy(extras.camp.at(42, 20)).setY(extras.camp.gh(extras.camp.at(42, 20).x, extras.camp.at(42, 20).z) + 17),
     }] : []),
+    ...(extras.siege ? [{
+      title: 'Под стенами при штурме',
+      text: 'Нажмите «Штурм» (B): требушет бросает камни в стену, со стен отвечают лучники, из машикулей над воротами льют кипящую смолу. Толстые стены из камня выдерживали много таких ударов.',
+      tgt: extras.siege.target.clone().setY(extras.siege.target.y + 2),
+      pos: extras.siege.target.clone().addScaledVector(extras.siege.toCamp, 38).add(V(12, 0, 0)).setY(extras.siege.target.y + 10),
+    }] : []),
   ].map((s) => {
     // камера не должна оказаться под землёй
     const g = terrain.heightAt(s.pos.x, s.pos.z) + 1.5;

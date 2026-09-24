@@ -67,9 +67,28 @@ function installFogChunks() {
     vec3 fc = fogColor * ( 1.0 + sunAmt * vec3( 0.95, 0.62, 0.22 ) );
     return mix( col, fc, clamp( f, 0.0, 1.0 ) );
   }
+  #if defined( STANDARD ) || defined( LAMBERT )
+  // Погода на поверхностях: снег ложится на горизонтальные грани, после дождя
+  // земля темнее. Сила эффектов передаётся через цвет «служебного» окружающего
+  // света (ничтожно слабого), чтобы не перекомпилировать шейдеры.
+  vec3 castleWeather( vec3 col, vec3 nView, vec3 amb ) {
+    float snowK = amb.b * 1000.0, wet = amb.g * 1000.0;
+    if ( snowK + wet < 0.002 ) return col;
+    vec3 wn = normalize( ( vec4( nView, 0.0 ) * viewMatrix ).xyz );
+    float up = wn.y;
+    float lum = dot( col, vec3( 0.3, 0.59, 0.11 ) );
+    col *= 1.0 - wet * 0.3 * smoothstep( 0.3, 0.9, up );
+    float cover = smoothstep( 0.3, 0.75, up ) * snowK;
+    vec3 snowC = vec3( 0.9, 0.93, 1.0 ) * clamp( 0.3 + lum * 1.35, 0.12, 1.05 );
+    return mix( col, snowC, cover );
+  }
+  #endif
 #endif`;
   THREE.ShaderChunk.fog_fragment = `
 #ifdef USE_FOG
+  #if defined( STANDARD ) || defined( LAMBERT )
+    gl_FragColor.rgb = castleWeather( gl_FragColor.rgb, normal, ambientLightColor );
+  #endif
   gl_FragColor.rgb = castleFog( gl_FragColor.rgb, vFogWorldPos );
 #endif`;
 }
@@ -355,6 +374,19 @@ export function createLighting(scene, renderer, assets) {
     },
   };
   const ORDER = ['day', 'sunset', 'night'];
+  // Погода: множители к освещению и туману (накладываются на время суток)
+  const WEATHER = {
+    clear: { sun: 1, hemi: 1, fog: 1, grey: 0, cover: 0.5, cl: 1 },
+    rain: { sun: 0.22, hemi: 0.75, fog: 2.6, grey: 0.65, cover: 0.97, cl: 0.5 },
+    fog: { sun: 0.4, hemi: 0.95, fog: 7.5, grey: 0.75, cover: 0.75, cl: 0.85 },
+    snow: { sun: 0.4, hemi: 1.05, fog: 3.2, grey: 0.55, cover: 0.92, cl: 0.9 },
+  };
+  const wcur = { ...WEATHER.clear };
+  let wfrom = null, wto = WEATHER.clear, wk = 1;
+  const surf = new THREE.AmbientLight(new THREE.Color(0, 0, 0), 1); // служебный: влажность и снег для шейдеров
+  scene.add(surf);
+  const greyFog = C(0.5, 0.53, 0.56);
+  const fogBase = scene.fog.density;
   const cur = { ...MODES.day, dir: MODES.day.dir.clone(), sunCol: SUN_COLOR.clone(), hemiSky: hemi.color.clone(), hemiGround: hemi.groundColor.clone(), fog: scene.fog.color.clone(), horizon: HORIZON.clone(), zenith: ZENITH.clone(), skySun: SUN_COLOR.clone() };
   let from = null, to = MODES.day, k = 1, modeName = 'day';
   const listeners = [];
@@ -369,19 +401,22 @@ export function createLighting(scene, renderer, assets) {
     lightRotInv.copy(lightRot).invert();
     forceShadow = true;
     sun.color.copy(cur.sunCol);
-    sun.intensity = cur.sunI;
+    sun.intensity = cur.sunI * wcur.sun;
     hemi.color.copy(cur.hemiSky);
     hemi.groundColor.copy(cur.hemiGround);
-    hemi.intensity = cur.hemiI;
-    scene.environmentIntensity = cur.env;
-    scene.fog.color.copy(cur.fog);
+    hemi.intensity = cur.hemiI * wcur.hemi;
+    scene.environmentIntensity = cur.env * (0.6 + 0.4 * wcur.hemi);
+    // в непогоду туман серее (но ночью остаётся тёмным)
+    scene.fog.color.copy(cur.fog).lerp(greyFog.clone().multiplyScalar(Math.max(0.08, 1 - cur.night * 0.9) * (cur.sunI > 1 ? 1 : 0.6)), wcur.grey);
+    scene.fog.density = fogBase * wcur.fog;
     if (skyU) {
       skyU.sunDir.value.copy(SUN_DIR);
       skyU.horizon.value.copy(cur.horizon);
       skyU.zenith.value.copy(cur.zenith);
       skyU.sunColor.value.copy(cur.skySun);
       skyU.night.value = cur.night;
-      skyU.cloudLight.value = cur.cloud;
+      skyU.cloudLight.value = cur.cloud * wcur.cl;
+      skyU.cloudCover.value = wcur.cover;
     }
     for (const f of listeners) f(cur.night, cur);
   }
@@ -401,13 +436,29 @@ export function createLighting(scene, renderer, assets) {
     setMode,
     nextMode() { setMode(ORDER[(ORDER.indexOf(modeName) + 1) % ORDER.length]); return modeName; },
     onChange(f) { listeners.push(f); },
+    setWeather(name) {
+      if (!WEATHER[name]) return;
+      wfrom = { ...wcur };
+      wto = WEATHER[name];
+      wk = 0;
+    },
+    // влажность и снег на поверхностях (0..1) — для шейдеров
+    setSurface(wet, snow) { surf.color.setRGB(0, wet * 0.001, snow * 0.001); },
     update(t, camera, focus, dt = 0.016) {
+      let dirty = false;
       if (k < 1) {
         k = Math.min(1, k + dt / 3);
         const e = k * k * (3 - 2 * k);
         lerpState(from, to, e);
-        applyState();
+        dirty = true;
       }
+      if (wk < 1) {
+        wk = Math.min(1, wk + dt / 4);
+        const e = wk * wk * (3 - 2 * wk);
+        for (const key of Object.keys(wcur)) wcur[key] = wfrom[key] + (wto[key] - wfrom[key]) * e;
+        dirty = true;
+      }
+      if (dirty) applyState();
       fitShadow(camera, focus);
       if (sky) {
         sky.position.copy(camera.position);
