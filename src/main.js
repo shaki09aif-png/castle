@@ -8,11 +8,12 @@ import { createRiver } from './water.js';
 import { createVegetation } from './vegetation.js';
 import { createWalls } from './walls.js';
 import { createTowers } from './towers.js';
+import { createGate } from './gate.js';
 import { createPostFX } from './postfx.js';
 import { HILL_TOP } from './layout.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
-const STAGE = 'Этап 3: башни с коническими и шатровыми крышами, бойницами и флюгерами';
+const STAGE = 'Этап 4: надвратная башня, подъёмный мост, герса, ров с водой, барбакан';
 
 const loading = document.getElementById('loading');
 const loadingText = loading.querySelector('small');
@@ -60,6 +61,8 @@ async function init() {
   const walls = createWalls(scene, terrain);
   await step('башни');
   const towers = createTowers(scene, terrain, walls);
+  await step('ворота и барбакан');
+  const gate = createGate(scene, terrain, walls);
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain);
   await step('постобработка');
@@ -122,6 +125,7 @@ async function init() {
     vegetation.update(t, camera);
     walls.update(t);
     towers.update(t);
+    gate.update(t);
     post.render(timer.getDelta());
 
     frames++;

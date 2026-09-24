@@ -20,7 +20,7 @@ const ROW_H = 0.3; // шаг рядов черепицы по скату, м
 // для квадратной — 4 грани с плоскими нормалями. off — смещение наружу.
 // u — развёртка (метры вдоль контура) для текстуры кладки.
 // ---------------------------------------------------------------------------
-function outline(tw, off, segs = 56) {
+export function outline(tw, off, segs = 56) {
   const C = new V3(tw.x, 0, tw.z);
   if (tw.shape === 'round') {
     const line = [];
@@ -49,7 +49,7 @@ function outline(tw, off, segs = 56) {
 }
 
 // Вертикальная «лента» по контуру между высотами y0(pt) и y1(pt)
-function band(b, lines, y0, y1, { facing = 1, tilt = 0 } = {}) {
+export function band(b, lines, y0, y1, { facing = 1, tilt = 0 } = {}) {
   for (const line of lines) {
     for (let j = 0; j < line.length - 1; j++) {
       const a = line[j], c = line[j + 1];
@@ -65,7 +65,7 @@ function band(b, lines, y0, y1, { facing = 1, tilt = 0 } = {}) {
 }
 
 // Горизонтальное кольцо между двумя контурами (верх парапета, выступ пояска, пол)
-function ring(b, inner, outer, y, normal) {
+export function ring(b, inner, outer, y, normal) {
   for (let l = 0; l < inner.length; l++) {
     const A = inner[l], B = outer[l];
     for (let j = 0; j < A.length - 1; j++) {
@@ -96,7 +96,7 @@ function surfacePoint(tw, dir, off = 0) {
 // ---------------------------------------------------------------------------
 // Бойница: щель в рамке из тёсаного камня; cross — с поперечной прорезью
 // ---------------------------------------------------------------------------
-function arrowSlit(stone, dark, p, n, y, cross) {
+export function arrowSlit(stone, dark, p, n, y, cross) {
   const t = new V3().crossVectors(UP, n).normalize();
   const c = new V3(p.x, y, p.z);
   dark.box(c.clone().addScaledVector(n, 0.012), t, UP, n, 0.06, 0.62, 0.02);
@@ -110,7 +110,7 @@ function arrowSlit(stone, dark, p, n, y, cross) {
 // Дверь со стрельчатым верхом: доски, железные полосы, петли, кольцо-ручка,
 // рама из тёсаного камня с клинчатой аркой
 // ---------------------------------------------------------------------------
-function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3) {
+export function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3) {
   const t = new V3().crossVectors(UP, n).normalize();
   const hs = h - 0.866 * w; // высота пят арки
   const archY = (x) => hs + Math.sqrt(Math.max(0, w * w - (Math.abs(x) + w / 2) ** 2)) - 0.0;
@@ -161,7 +161,7 @@ function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3) {
 }
 
 // Окно со ставнями: тёмный проём, каменная рама, распахнутые деревянные ставни
-function windowWithShutters(stone, wood, dark, metal, p, n, y, w = 0.7, h = 1.1, openAng = 1.9) {
+export function windowWithShutters(stone, wood, dark, metal, p, n, y, w = 0.7, h = 1.1, openAng = 1.9) {
   const t = new V3().crossVectors(UP, n).normalize();
   const c = new V3(p.x, y, p.z);
   dark.box(c.clone().addScaledVector(n, 0.02), t, UP, n, w / 2, h / 2, 0.02);
@@ -194,7 +194,7 @@ function rowUV(k, u, isTop) {
   return [u, isTop ? v1 : v0];
 }
 
-function coneRoof(b, C, eaveR, eaveY, H, photo) {
+export function coneRoof(b, C, eaveR, eaveY, H, photo) {
   const Ls = Math.hypot(eaveR, H);
   const rows = Math.ceil((Ls - 0.35) / ROW_H);
   const segs = 64;
@@ -227,7 +227,7 @@ function coneRoof(b, C, eaveR, eaveY, H, photo) {
   return eaveY + H;
 }
 
-function pyramidRoof(b, C, yaw, E, eaveY, H, photo) {
+export function pyramidRoof(b, C, yaw, E, eaveY, H, photo) {
   const Ls = Math.hypot(E, H);
   const rows = Math.ceil((Ls - 0.35) / ROW_H);
   const lift = 0.045, overlap = 0.07;
@@ -286,7 +286,7 @@ function roofUnderside(wood, C, tw, eaveR, eaveY, H) {
 // ---------------------------------------------------------------------------
 // Флюгер: шпиль, позолоченный шар и вращающийся флажок-вымпел
 // ---------------------------------------------------------------------------
-function weathervane(scene, apex, iron, gold, seed) {
+export function weathervane(scene, apex, iron, gold, seed) {
   const g = new THREE.Group();
   g.position.copy(apex);
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.06, 2.6, 8), iron);
@@ -327,228 +327,249 @@ function weathervane(scene, apex, iron, gold, seed) {
 }
 
 // ---------------------------------------------------------------------------
-export function createTowers(scene, terrain, walls) {
+// Общие материалы и построители для башен (и надвратной башни, и барбакана)
+export function makeTowerContext(scene, terrain, walls) {
   const stoneMat = walls.stoneMaterial;
   const woodMat = walls.woodMaterial;
-  const roofMat = pbrMaterial('roof');
-  const photoRoof = assetSource('roof') === 'polyhaven';
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x0a0908, roughness: 1 });
-  const ironMat = new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 });
-  const goldMat = new THREE.MeshStandardMaterial({ color: 0xc9a14a, metalness: 1, roughness: 0.28 });
-  const stone = new GeoBuilder(stoneMat.userData.tileMeters);
-  const wood = new GeoBuilder(woodMat.userData.tileMeters);
-  const dark = new GeoBuilder(1);
-  const metal = new GeoBuilder(1);
-  const roof = new GeoBuilder(1);
-  const vanes = [];
+  const ctx = {
+    scene, terrain, walls,
+    stoneMat, woodMat,
+    roofMat: pbrMaterial('roof'),
+    photoRoof: assetSource('roof') === 'polyhaven',
+    darkMat: new THREE.MeshStandardMaterial({ color: 0x0a0908, roughness: 1 }),
+    ironMat: new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 }),
+    goldMat: new THREE.MeshStandardMaterial({ color: 0xc9a14a, metalness: 1, roughness: 0.28 }),
+    vanes: [],
+  };
+  ctx.stone = new GeoBuilder(stoneMat.userData.tileMeters);
+  ctx.wood = new GeoBuilder(woodMat.userData.tileMeters);
+  ctx.dark = new GeoBuilder(1);
+  ctx.metal = new GeoBuilder(1);
+  ctx.roof = new GeoBuilder(1);
+  return ctx;
+}
 
-  for (const tw of TOWERS) {
-    const rnd = mulberry32(500 + tw.id * 31);
-    const C = new V3(tw.x, 0, tw.z);
-    const walkY = walls.walkAt(tw.node.x, tw.node.z);
-    const platY = walkY + tw.extra;
-    const batterH = 3.8, bat = 0.75;
-    const corbel = !!tw.corbel;
-    const pOut = corbel ? 0.38 : 0.0; // вынос парапета на консолях
-    const sill = WALL.parapetSill, mTop = WALL.merlonHeight + 0.1;
-
-    // --- тело башни: цоколь со скосом и кладка до верхней площадки ---
-    const baseOf = (pt) => {
-      const d = pt.n;
-      const q1 = pt.p.clone().addScaledVector(d, bat + 0.6), q2 = pt.p.clone().addScaledVector(d, bat + 2.5);
-      return Math.min(terrain.heightAt(q1.x, q1.z), terrain.heightAt(q2.x, q2.z), terrain.heightAt(pt.p.x, pt.p.z)) - 1.0;
-    };
-    const lines = outline(tw, 0);
-    const outDir = new V3(tw.x, 0, tw.z).normalize();
-    // скос цоколя только снаружи; со стороны двора (там дверь) стена вертикальная
-    const batOf = (pt) => bat * smoothstep01((pt.n.dot(outDir) + 0.35) / 0.7);
-    for (const line of lines) {
-      const bases = line.map(baseOf);
-      const levels = (b) => {
-        const top = platY - 0.3;
-        const ys = [b, b + 0.9, b + batterH];
-        const n = Math.max(2, Math.ceil((top - b - batterH) / 1.8));
-        for (let k = 1; k <= n; k++) ys.push(b + batterH + ((top - b - batterH) * k) / n);
-        return ys;
-      };
-      const K = Math.max(...bases.map((b) => levels(b).length));
-      for (let j = 0; j < line.length - 1; j++) {
-        const A = line[j], B = line[j + 1];
-        const la = levels(bases[j]), lb = levels(bases[j + 1]);
-        const yA = (k) => la[Math.min(k, la.length - 1)], yB = (k) => lb[Math.min(k, lb.length - 1)];
-        for (let k = 0; k < K - 1; k++) {
-          const off = (pt, y, b) => { const h = y - b; return h < batterH ? batOf(pt) * (1 - h / batterH) : 0; };
-          const P = (pt, y, b) => pt.p.clone().addScaledVector(pt.n, off(pt, y, b)).setY(y);
-          const ya0 = yA(k), ya1 = yA(k + 1), yb0 = yB(k), yb1 = yB(k + 1);
-          if (ya1 - ya0 < 1e-3 && yb1 - yb0 < 1e-3) continue;
-          const inBat = ya1 - bases[j] <= batterH + 0.01;
-          const nA = A.n.clone().addScaledVector(UP, inBat ? batOf(A) / batterH : 0).normalize();
-          const nB = B.n.clone().addScaledVector(UP, inBat ? batOf(B) / batterH : 0).normalize();
-          stone.quad4(
-            [P(A, ya0, bases[j]), P(B, yb0, bases[j + 1]), P(B, yb1, bases[j + 1]), P(A, ya1, bases[j])],
-            [nA, nB, nB, nA],
-            [[A.u, ya0], [B.u, yb0], [B.u, yb1], [A.u, ya1]],
-            [ya0 - bases[j] - 1, yb0 - bases[j + 1] - 1, yb1 - bases[j + 1] - 1, ya1 - bases[j] - 1]
-          );
-        }
-      }
-    }
-
-    // --- поясок или консоли под парапетом ---
-    if (!corbel) {
-      const o1 = outline(tw, 0.15), o0 = outline(tw, 0);
-      band(stone, o1, () => platY - 0.3, () => platY);
-      ring(stone, o0, o1, platY - 0.3, UP.clone().negate());
-      ring(stone, o0, o1, platY, UP);
-    } else {
-      // парапет вынесен на ступенчатых каменных консолях
-      const oOut = outline(tw, pOut), o0 = outline(tw, 0);
-      ring(stone, o0, oOut, platY - 0.05, UP.clone().negate());
-      const per = tw.shape === 'round' ? 2 * Math.PI * tw.r : 8 * tw.r;
-      const count = Math.round(per / 1.25);
-      for (let k = 0; k < count; k++) {
-        let p, n;
-        if (tw.shape === 'round') {
-          const a = (k / count) * Math.PI * 2;
-          n = new V3(Math.cos(a), 0, Math.sin(a));
-          p = C.clone().addScaledVector(n, tw.r);
-        } else {
-          const f = Math.floor((k / count) * 4);
-          const s = ((k / count) * 4 - f) * 2 * tw.r - tw.r + 0.4;
-          if (Math.abs(s) > tw.r - 0.3) continue;
-          const a = tw.yaw + (f * Math.PI) / 2;
-          n = new V3(Math.cos(a), 0, Math.sin(a));
-          p = C.clone().addScaledVector(n, tw.r).addScaledVector(new V3(-n.z, 0, n.x), s);
-        }
-        const t = new V3().crossVectors(UP, n).normalize();
-        // консоль из трёх камней, каждый следующий выступает дальше
-        stone.box(p.clone().addScaledVector(n, pOut / 2 - 0.04).setY(platY - 0.25), t, UP, n, 0.2, 0.2, pOut / 2 + 0.04);
-        stone.box(p.clone().addScaledVector(n, pOut / 3 - 0.04).setY(platY - 0.62), t, UP, n, 0.2, 0.17, pOut / 3 + 0.04);
-        stone.box(p.clone().addScaledVector(n, pOut / 6 - 0.04).setY(platY - 0.94), t, UP, n, 0.2, 0.15, pOut / 6 + 0.04);
-      }
-    }
-
-    // кладка между телом башни и парапетом
-    band(stone, outline(tw, 0), () => platY - 0.35, () => platY + 0.01);
-    // --- парапет с зубцами ---
-    const pO = outline(tw, pOut), pI = outline(tw, pOut - 0.6);
-    band(stone, pO, () => platY - 0.05, () => platY + sill);
-    band(stone, pI, () => platY, () => platY + sill, { facing: -1 });
-    ring(stone, pI, pO, platY + sill, UP);
-    // деревянный пол верхней площадки
-    const floorIn = outline(tw, -tw.r + 0.05);
-    ring(wood, floorIn, pI, platY + 0.02, UP);
-    const merlonR = pOut - 0.3;
-    const per = tw.shape === 'round' ? 2 * Math.PI * (tw.r + merlonR) : 8 * (tw.r + merlonR);
-    const count = Math.max(8, Math.round(per / (WALL.merlonWidth + 0.95)));
-    for (let k = 0; k < count; k++) {
-      let p, n;
-      if (tw.shape === 'round') {
-        const a = ((k + 0.5) / count) * Math.PI * 2;
-        n = new V3(Math.cos(a), 0, Math.sin(a));
-        p = C.clone().addScaledVector(n, tw.r + merlonR);
-      } else {
-        const perFace = Math.round(count / 4);
-        const f = Math.floor(k / perFace);
-        if (f > 3) break;
-        const kk = k - f * perFace;
-        const half = tw.r + pOut;
-        const s = -half + ((kk + 0.5) / perFace) * 2 * half;
-        const a = tw.yaw + (f * Math.PI) / 2;
-        n = new V3(Math.cos(a), 0, Math.sin(a));
-        p = C.clone().addScaledVector(n, tw.r + merlonR).addScaledVector(new V3(-n.z, 0, n.x), s);
-      }
-      const t = new V3().crossVectors(UP, n).normalize();
-      const hw = tw.shape === 'round' ? 0.78 : 0.72;
-      const y0 = platY + sill, y1 = platY + mTop;
-      if (k % 2 === 0) {
-        stone.box(p.clone().setY((y0 + y1) / 2), t, UP, n, hw, (y1 - y0) / 2, 0.3, { skipBottom: true });
-      } else {
-        const sw = 0.07;
-        for (const sd of [-1, 1]) {
-          const q = p.clone().addScaledVector(t, sd * (hw + sw) / 2);
-          stone.box(q.setY((y0 + y1) / 2), t, UP, n, (hw - sw) / 2, (y1 - y0) / 2, 0.3, { skipBottom: true });
-        }
-        stone.box(p.clone().setY(y0 + 0.14), t, UP, n, sw, 0.14, 0.3, { skipBottom: true });
-        stone.box(p.clone().setY(y1 - 0.15), t, UP, n, sw, 0.15, 0.3);
-      }
-      stone.box(p.clone().setY(y1 + 0.07), t, UP, n, hw + 0.05, 0.08, 0.35);
-    }
-
-    // --- крыша ---
-    const eaveOff = pOut + 0.5;
-    const eaveY = platY + mTop + 0.16;
-    let apexY;
-    if (tw.shape === 'round') {
-      const eaveR = tw.r + eaveOff;
-      const H = eaveR * (2.1 + rnd() * 0.5);
-      apexY = coneRoof(roof, C, eaveR, eaveY, H, photoRoof);
-      roofUnderside(wood, C, tw, eaveR, eaveY, H);
-    } else {
-      const E = tw.r + eaveOff;
-      const H = E * (2.0 + rnd() * 0.4);
-      apexY = pyramidRoof(roof, C, tw.yaw, E, eaveY, H, photoRoof);
-      roofUnderside(wood, C, tw, E, eaveY, H);
-    }
-    vanes.push(weathervane(scene, C.clone().setY(apexY - 0.3), ironMat, goldMat, tw.id));
-
-    // --- бойницы на нескольких ярусах (обращены наружу) ---
-    const out = new V3(tw.x, 0, tw.z).normalize();
-    const gIn = terrain.heightAt(tw.node.x - out.x * 3, tw.node.z - out.z * 3);
-    const wallDirs = neighborDirs(walls, tw);
-    const tiers = [walkY - 3.8, walkY + 1.6, walkY + 4.4].filter((y) => y < platY - 1.2 && y > gIn + 1.5);
-    tiers.forEach((y, ti) => {
-      const nSl = tw.shape === 'round' ? 5 : 3;
-      for (let k = 0; k < nSl; k++) {
-        const ang = Math.atan2(out.z, out.x) + ((k - (nSl - 1) / 2) / nSl) * Math.PI * 1.25 + (ti % 2) * 0.25;
-        const dir = new V3(Math.cos(ang), 0, Math.sin(ang));
-        if (wallDirs.some((d) => d.dot(dir) > 0.85)) continue; // здесь примыкает стена
-        const sp = surfacePoint(tw, dir);
-        const bse = terrain.heightAt(sp.p.x + sp.n.x * 2, sp.p.z + sp.n.z * 2);
-        if (y < bse + 2.2) continue;
-        const pp = sp.p.clone().addScaledVector(sp.n, tw.shape === 'round' ? 0 : 0);
-        arrowSlit(stone, dark, pp, sp.n, y, (k + ti) % 2 === 0);
-      }
-    });
-
-    // --- двери: со стены (на уровне боевого хода) и со двора ---
-    for (const d of wallDirs) {
-      const hit = rayToSurface(tw, new V3(tw.node.x, 0, tw.node.z), d);
-      if (!hit) continue;
-      const toInside = out.clone().negate();
-      const pos = hit.p.clone().addScaledVector(toInside, 0.45);
-      const sp = surfacePoint(tw, pos.clone().sub(C).setY(0).normalize());
-      door(stone, wood, metal, sp.p, sp.n, walkY + 0.12, 1.0, 2.15);
-    }
-    const inDir = out.clone().negate();
-    const spIn = surfacePoint(tw, inDir);
-    const gDoor = terrain.heightAt(spIn.p.x + spIn.n.x * 0.8, spIn.p.z + spIn.n.z * 0.8);
-    door(stone, wood, metal, spIn.p, spIn.n, gDoor + 0.05, 1.2, 2.5);
-
-    // --- окно со ставнями (жилой ярус, со стороны двора) ---
-    const wAng = Math.atan2(inDir.z, inDir.x) + (rnd() > 0.5 ? 0.55 : -0.55);
-    const spW = surfacePoint(tw, new V3(Math.cos(wAng), 0, Math.sin(wAng)));
-    windowWithShutters(stone, wood, dark, metal, spW.p, spW.n, Math.min(platY - 2.2, walkY + 3.4));
-  }
-
+export function finishTowerContext(ctx, name) {
   const meshes = [
-    new THREE.Mesh(stone.build(), stoneMat),
-    new THREE.Mesh(wood.build(), woodMat),
-    new THREE.Mesh(dark.build(), darkMat),
-    new THREE.Mesh(metal.build(), ironMat),
-    new THREE.Mesh(roof.build(), roofMat),
+    new THREE.Mesh(ctx.stone.build(), ctx.stoneMat),
+    new THREE.Mesh(ctx.wood.build(), ctx.woodMat),
+    new THREE.Mesh(ctx.dark.build(), ctx.darkMat),
+    new THREE.Mesh(ctx.metal.build(), ctx.ironMat),
+    new THREE.Mesh(ctx.roof.build(), ctx.roofMat),
   ];
   for (const m of meshes) {
     m.castShadow = true;
     m.receiveShadow = true;
-    m.name = 'towers';
-    scene.add(m);
+    m.name = name;
+    ctx.scene.add(m);
   }
-  return {
-    update(t) {
-      for (const v of vanes) v(t);
-    },
+  return (t) => { for (const v of ctx.vanes) v(t); };
+}
+
+// Одна башня. opts: walkY, wallDirs, outDir, body/slits/walkDoors/groundDoor/window = false — пропустить
+export function buildTower(ctx, tw, opts = {}) {
+  const { stone, wood, dark, metal, roof, vanes, terrain, walls, scene, ironMat, goldMat, photoRoof } = ctx;
+  const rnd = mulberry32(500 + tw.id * 31);
+  const C = new V3(tw.x, 0, tw.z);
+  const walkY = opts.walkY ?? walls.walkAt(tw.node.x, tw.node.z);
+  const platY = walkY + tw.extra;
+  const batterH = 3.8, bat = 0.75;
+  const corbel = !!tw.corbel;
+  const pOut = tw.corbelOut ?? (corbel ? 0.38 : 0.0); // вынос парапета на консолях
+  const sill = WALL.parapetSill, mTop = WALL.merlonHeight + 0.1;
+
+  const outDir = opts.outDir ? opts.outDir.clone() : new V3(tw.x, 0, tw.z).normalize();
+  // --- тело башни: цоколь со скосом и кладка до верхней площадки ---
+  if (opts.body !== false) {
+  const baseOf = (pt) => {
+    const d = pt.n;
+    const q1 = pt.p.clone().addScaledVector(d, bat + 0.6), q2 = pt.p.clone().addScaledVector(d, bat + 2.5);
+    return Math.min(terrain.heightAt(q1.x, q1.z), terrain.heightAt(q2.x, q2.z), terrain.heightAt(pt.p.x, pt.p.z)) - 1.0;
   };
+  const lines = outline(tw, 0);
+  // скос цоколя только снаружи; со стороны двора (там дверь) стена вертикальная
+  const batOf = (pt) => bat * smoothstep01((pt.n.dot(outDir) + 0.35) / 0.7);
+  for (const line of lines) {
+    const bases = line.map(baseOf);
+    const levels = (b) => {
+      const top = platY - 0.3;
+      const ys = [b, b + 0.9, b + batterH];
+      const n = Math.max(2, Math.ceil((top - b - batterH) / 1.8));
+      for (let k = 1; k <= n; k++) ys.push(b + batterH + ((top - b - batterH) * k) / n);
+      return ys;
+    };
+    const K = Math.max(...bases.map((b) => levels(b).length));
+    for (let j = 0; j < line.length - 1; j++) {
+      const A = line[j], B = line[j + 1];
+      const la = levels(bases[j]), lb = levels(bases[j + 1]);
+      const yA = (k) => la[Math.min(k, la.length - 1)], yB = (k) => lb[Math.min(k, lb.length - 1)];
+      for (let k = 0; k < K - 1; k++) {
+        const off = (pt, y, b) => { const h = y - b; return h < batterH ? batOf(pt) * (1 - h / batterH) : 0; };
+        const P = (pt, y, b) => pt.p.clone().addScaledVector(pt.n, off(pt, y, b)).setY(y);
+        const ya0 = yA(k), ya1 = yA(k + 1), yb0 = yB(k), yb1 = yB(k + 1);
+        if (ya1 - ya0 < 1e-3 && yb1 - yb0 < 1e-3) continue;
+        const inBat = ya1 - bases[j] <= batterH + 0.01;
+        const nA = A.n.clone().addScaledVector(UP, inBat ? batOf(A) / batterH : 0).normalize();
+        const nB = B.n.clone().addScaledVector(UP, inBat ? batOf(B) / batterH : 0).normalize();
+        stone.quad4(
+          [P(A, ya0, bases[j]), P(B, yb0, bases[j + 1]), P(B, yb1, bases[j + 1]), P(A, ya1, bases[j])],
+          [nA, nB, nB, nA],
+          [[A.u, ya0], [B.u, yb0], [B.u, yb1], [A.u, ya1]],
+          [ya0 - bases[j] - 1, yb0 - bases[j + 1] - 1, yb1 - bases[j + 1] - 1, ya1 - bases[j] - 1]
+        );
+      }
+    }
+  }
+
+  }
+
+  // --- поясок или консоли под парапетом ---
+  if (!corbel) {
+    const o1 = outline(tw, 0.15), o0 = outline(tw, 0);
+    band(stone, o1, () => platY - 0.3, () => platY);
+    ring(stone, o0, o1, platY - 0.3, UP.clone().negate());
+    ring(stone, o0, o1, platY, UP);
+  } else {
+    // парапет вынесен на ступенчатых каменных консолях
+    const oOut = outline(tw, pOut), o0 = outline(tw, 0);
+    ring(stone, o0, oOut, platY - 0.05, UP.clone().negate());
+    const per = tw.shape === 'round' ? 2 * Math.PI * tw.r : 8 * tw.r;
+    const count = Math.round(per / 1.25);
+    for (let k = 0; k < count; k++) {
+      let p, n;
+      if (tw.shape === 'round') {
+        const a = (k / count) * Math.PI * 2;
+        n = new V3(Math.cos(a), 0, Math.sin(a));
+        p = C.clone().addScaledVector(n, tw.r);
+      } else {
+        const f = Math.floor((k / count) * 4);
+        const s = ((k / count) * 4 - f) * 2 * tw.r - tw.r + 0.4;
+        if (Math.abs(s) > tw.r - 0.3) continue;
+        const a = tw.yaw + (f * Math.PI) / 2;
+        n = new V3(Math.cos(a), 0, Math.sin(a));
+        p = C.clone().addScaledVector(n, tw.r).addScaledVector(new V3(-n.z, 0, n.x), s);
+      }
+      const t = new V3().crossVectors(UP, n).normalize();
+      // консоль из трёх камней, каждый следующий выступает дальше
+      stone.box(p.clone().addScaledVector(n, pOut / 2 - 0.04).setY(platY - 0.25), t, UP, n, 0.2, 0.2, pOut / 2 + 0.04);
+      stone.box(p.clone().addScaledVector(n, pOut / 3 - 0.04).setY(platY - 0.62), t, UP, n, 0.2, 0.17, pOut / 3 + 0.04);
+      stone.box(p.clone().addScaledVector(n, pOut / 6 - 0.04).setY(platY - 0.94), t, UP, n, 0.2, 0.15, pOut / 6 + 0.04);
+    }
+  }
+
+  // кладка между телом башни и парапетом
+  band(stone, outline(tw, 0), () => platY - 0.35, () => platY + 0.01);
+  // --- парапет с зубцами ---
+  const pO = outline(tw, pOut), pI = outline(tw, pOut - 0.6);
+  band(stone, pO, () => platY - 0.05, () => platY + sill);
+  band(stone, pI, () => platY, () => platY + sill, { facing: -1 });
+  ring(stone, pI, pO, platY + sill, UP);
+  // деревянный пол верхней площадки
+  const floorIn = outline(tw, -tw.r + 0.05);
+  ring(wood, floorIn, pI, platY + 0.02, UP);
+  const merlonR = pOut - 0.3;
+  const per = tw.shape === 'round' ? 2 * Math.PI * (tw.r + merlonR) : 8 * (tw.r + merlonR);
+  const count = Math.max(8, Math.round(per / (WALL.merlonWidth + 0.95)));
+  for (let k = 0; k < count; k++) {
+    let p, n;
+    if (tw.shape === 'round') {
+      const a = ((k + 0.5) / count) * Math.PI * 2;
+      n = new V3(Math.cos(a), 0, Math.sin(a));
+      p = C.clone().addScaledVector(n, tw.r + merlonR);
+    } else {
+      const perFace = Math.round(count / 4);
+      const f = Math.floor(k / perFace);
+      if (f > 3) break;
+      const kk = k - f * perFace;
+      const half = tw.r + pOut;
+      const s = -half + ((kk + 0.5) / perFace) * 2 * half;
+      const a = tw.yaw + (f * Math.PI) / 2;
+      n = new V3(Math.cos(a), 0, Math.sin(a));
+      p = C.clone().addScaledVector(n, tw.r + merlonR).addScaledVector(new V3(-n.z, 0, n.x), s);
+    }
+    const t = new V3().crossVectors(UP, n).normalize();
+    const hw = tw.shape === 'round' ? 0.78 : 0.72;
+    const y0 = platY + sill, y1 = platY + mTop;
+    if (k % 2 === 0) {
+      stone.box(p.clone().setY((y0 + y1) / 2), t, UP, n, hw, (y1 - y0) / 2, 0.3, { skipBottom: true });
+    } else {
+      const sw = 0.07;
+      for (const sd of [-1, 1]) {
+        const q = p.clone().addScaledVector(t, sd * (hw + sw) / 2);
+        stone.box(q.setY((y0 + y1) / 2), t, UP, n, (hw - sw) / 2, (y1 - y0) / 2, 0.3, { skipBottom: true });
+      }
+      stone.box(p.clone().setY(y0 + 0.14), t, UP, n, sw, 0.14, 0.3, { skipBottom: true });
+      stone.box(p.clone().setY(y1 - 0.15), t, UP, n, sw, 0.15, 0.3);
+    }
+    stone.box(p.clone().setY(y1 + 0.07), t, UP, n, hw + 0.05, 0.08, 0.35);
+  }
+
+  // --- крыша ---
+  const eaveOff = pOut + 0.5;
+  const eaveY = platY + mTop + 0.16;
+  let apexY;
+  if (tw.shape === 'round') {
+    const eaveR = tw.r + eaveOff;
+    const H = eaveR * (2.1 + rnd() * 0.5);
+    apexY = coneRoof(roof, C, eaveR, eaveY, H, photoRoof);
+    roofUnderside(wood, C, tw, eaveR, eaveY, H);
+  } else {
+    const E = tw.r + eaveOff;
+    const H = E * (2.0 + rnd() * 0.4);
+    apexY = pyramidRoof(roof, C, tw.yaw, E, eaveY, H, photoRoof);
+    roofUnderside(wood, C, tw, E, eaveY, H);
+  }
+  vanes.push(weathervane(scene, C.clone().setY(apexY - 0.3), ironMat, goldMat, tw.id));
+
+  // --- бойницы на нескольких ярусах (обращены наружу) ---
+  const out = outDir.clone();
+  const gIn = terrain.heightAt(tw.node.x - out.x * 3, tw.node.z - out.z * 3);
+  const wallDirs = opts.wallDirs ?? neighborDirs(walls, tw);
+  const tiers = [walkY - 3.8, walkY + 1.6, walkY + 4.4].filter((y) => y < platY - 1.2 && y > gIn + 1.5);
+  if (opts.slits !== false) tiers.forEach((y, ti) => {
+    const nSl = tw.shape === 'round' ? 5 : 3;
+    for (let k = 0; k < nSl; k++) {
+      const ang = Math.atan2(out.z, out.x) + ((k - (nSl - 1) / 2) / nSl) * Math.PI * 1.25 + (ti % 2) * 0.25;
+      const dir = new V3(Math.cos(ang), 0, Math.sin(ang));
+      if (wallDirs.some((d) => d.dot(dir) > 0.85)) continue; // здесь примыкает стена
+      const sp = surfacePoint(tw, dir);
+      const bse = terrain.heightAt(sp.p.x + sp.n.x * 2, sp.p.z + sp.n.z * 2);
+      if (y < bse + 2.2) continue;
+      const pp = sp.p.clone().addScaledVector(sp.n, tw.shape === 'round' ? 0 : 0);
+      arrowSlit(stone, dark, pp, sp.n, y, (k + ti) % 2 === 0);
+    }
+  });
+
+  // --- двери: со стены (на уровне боевого хода) и со двора ---
+  for (const d of opts.walkDoors === false ? [] : wallDirs) {
+    const hit = rayToSurface(tw, new V3(tw.node.x, 0, tw.node.z), d);
+    if (!hit) continue;
+    const toInside = out.clone().negate();
+    const pos = hit.p.clone().addScaledVector(toInside, 0.45);
+    const sp = surfacePoint(tw, pos.clone().sub(C).setY(0).normalize());
+    door(stone, wood, metal, sp.p, sp.n, walkY + 0.12, 1.0, 2.15);
+  }
+  const inDir = out.clone().negate();
+  if (opts.groundDoor !== false) {
+    const spIn = surfacePoint(tw, inDir);
+    const gDoor = terrain.heightAt(spIn.p.x + spIn.n.x * 0.8, spIn.p.z + spIn.n.z * 0.8);
+    door(stone, wood, metal, spIn.p, spIn.n, gDoor + 0.05, 1.2, 2.5);
+  }
+
+  // --- окно со ставнями (жилой ярус, со стороны двора) ---
+  if (opts.window !== false) {
+    const wAng = Math.atan2(inDir.z, inDir.x) + (rnd() > 0.5 ? 0.55 : -0.55);
+    const spW = surfacePoint(tw, new V3(Math.cos(wAng), 0, Math.sin(wAng)));
+    windowWithShutters(stone, wood, dark, metal, spW.p, spW.n, Math.min(platY - 2.2, walkY + 3.4));
+  }
+  return { platY, walkY, pOut, eaveY, apexY };
+}
+
+export function createTowers(scene, terrain, walls) {
+  const ctx = makeTowerContext(scene, terrain, walls);
+  for (const tw of TOWERS) buildTower(ctx, tw);
+  const update = finishTowerContext(ctx, 'towers');
+  return { update };
 }
 
 // Направления от узла башни вдоль примыкающих стен

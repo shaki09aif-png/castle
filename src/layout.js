@@ -36,13 +36,19 @@ export const DITCH = {
   halfLength: 34, // протяжённость рва поперёк отрога (в обе стороны)
 };
 
+// Вода во рву перед воротами (по просьбе): торцы рва перекрыты земляными дамбами.
+export const MOAT = {
+  level: HILL_TOP - 5.0,
+  damStart: 21.5, // от оси ворот (поперёк рва), где начинается дамба
+};
+
 // Уступ (нижняя терраса вершины) к югу от ворот: здесь барбакан,
 // а поперёк уступа вырублен сухой ров.
 export const SPUR = {
   length: 40, // вынос от кромки площадки, м
   halfWidth: 21,
   corner: 14, // радиус скругления углов
-  drop: 3.2, // насколько терраса ниже площадки
+  drop: 1.6, // насколько терраса ниже площадки
 };
 
 // Река у подножия: извилистое русло к югу от холма (однозначная функция z(x)),
@@ -124,9 +130,45 @@ export const TOWERS = WALL_NODES.filter((n) => n.type === 'tower').map((n, i) =>
   };
 });
 
+// Надвратная башня (этап 4): квадратная, стоит на линии стены над проёмом,
+// лицевой стороной к рву. yaw = π/2 — «лицо» смотрит на юг (+Z).
+const GATE_NODE = wallNodePoint(90);
+export const GATEHOUSE = {
+  id: 100,
+  shape: 'square',
+  r: 5.3, // половина стороны
+  x: GATE_NODE.x,
+  z: GATE_NODE.z + 1.4,
+  yaw: Math.PI / 2,
+  extra: 7.8,
+  corbel: true,
+  corbelOut: 0.62, // машикули: парапет вынесен далеко, между консолями — отверстия
+  node: GATE_NODE,
+};
+// Проезд через ворота: ширина, высота пят арки, уровень порога (у рва) и конец во дворе
+export const GATE_PASSAGE = {
+  width: 3.6,
+  spring: 3.1,
+  thresholdY: HILL_TOP - 1.7,
+  frontZ: GATEHOUSE.z + GATEHOUSE.r,
+  backZ: GATEHOUSE.z - GATEHOUSE.r,
+  rampEndZ: GATEHOUSE.z - GATEHOUSE.r - 7, // съезд во двор
+};
+
+// Барбакан: огороженная площадка перед рвом на террасе (прямоугольник с воротами на юге)
+const DITCH_OUT = GATE_RADIUS + DITCH.alongEnd + 1.1;
+export const BARBICAN = {
+  x0: -8.5, x1: 8.5,
+  zN: DITCH_OUT,
+  zS: DITCH_OUT + 11,
+  thick: 1.7,
+  walkH: 5.0,
+  gateHalf: 2.0,
+};
+
 // Лежит ли точка внутри башни (с запасом m)
 export function insideTower(x, z, m = 0) {
-  for (const tw of TOWERS) {
+  for (const tw of [...TOWERS, GATEHOUSE]) {
     const dx = x - tw.x, dz = z - tw.z;
     if (tw.shape === 'round') {
       if (Math.hypot(dx, dz) < tw.r + m) return tw;

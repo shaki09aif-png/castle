@@ -6,6 +6,22 @@ import { waterNormalTexture } from './textures.js';
 import { SUN_DIR, SUN_COLOR } from './lighting.js';
 import { Q } from './quality.js';
 
+// Защита от вложенных отражений: пока одна вода рисует своё отражение,
+// другая (река/ров) своё отражение не пересчитывает.
+let inReflection = false;
+export function guardReflection(mesh) {
+  const orig = mesh.onBeforeRender;
+  mesh.onBeforeRender = function (...args) {
+    if (inReflection) return;
+    inReflection = true;
+    try {
+      orig.apply(this, args);
+    } finally {
+      inReflection = false;
+    }
+  };
+}
+
 // Лента поверх русла. Строится в плоскости XY и поворачивается на −90° вокруг X:
 // Water.js ожидает плоскость с нормалью (0,0,1) в локальных координатах.
 function riverGeometry(x0, x1, step) {
@@ -54,6 +70,7 @@ export function createRiver(scene) {
     });
     mesh.material.transparent = true;
     mesh.material.uniforms.size.value = 1.6;
+    guardReflection(mesh);
     // на среднем качестве отражение обновляется через кадр (заметно только при резком повороте)
     if (Q.reflectionEvery > 1) {
       const orig = mesh.onBeforeRender;

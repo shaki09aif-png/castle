@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { createNoise2D, fbm, ridged, mulberry32, clamp, lerp, smoothstep } from './noise.js';
 import {
   HILL_TOP, GATE_ANGLE, GATE_DIR, GATE_RADIUS, plateauRadius, KEEP_POS, KEEP_RISE,
-  DITCH, SPUR, riverZ, riverHalfWidth, RIVER, WORLD, insideTower,
+  DITCH, SPUR, riverZ, riverHalfWidth, RIVER, WORLD, insideTower, GATEHOUSE, GATE_PASSAGE, MOAT,
 } from './layout.js';
 import { textureArrays, macroNoiseTexture, pbrMaterial } from './textures.js';
 import { triplanarMaterial, TRIPLANAR_GLSL } from './materials.js';
@@ -188,7 +188,25 @@ function sampleNatural(x, z) {
     }
     h += fbm(nHill, x / 7, z / 7, 2) * 0.18 * smoothstep(0, 10, e); // мелкие кочки
   }
+  // проезд надвратной башни и пологий съезд во двор
+  const gp = GATE_PASSAGE;
+  if (Math.abs(x - GATEHOUSE.x) < 8 && z > gp.rampEndZ - 3 && z < gp.frontZ + 0.3) {
+    const zc = gp.rampEndZ;
+    const cy = topHeight(GATEHOUSE.x, zc, Math.hypot(GATEHOUSE.x, zc) - plateauRadius(Math.atan2(zc, GATEHOUSE.x)));
+    const t = clamp((gp.backZ - z) / (gp.backZ - gp.rampEndZ), 0, 1);
+    const w = (1 - smoothstep(5.2, 7.8, Math.abs(x - GATEHOUSE.x))) * smoothstep(zc - 3, zc, z);
+    h = lerp(h, lerp(gp.thresholdY - 0.05, cy, t), w);
+  }
   if (Math.abs(across) < DITCH.halfLength + 2) h = Math.min(h, ditchCut(along, across));
+  // земляные дамбы в торцах рва держат воду
+  if (along > DITCH.alongStart - 3 && along < DITCH.alongEnd + 3) {
+    const d = Math.abs(across);
+    if (d > MOAT.damStart - 2 && d < 45) {
+      const damH = MOAT.level + 1.2 - 7 * (1 - smoothstep(MOAT.damStart, MOAT.damStart + 3.5, d)) - Math.max(0, d - 31) * 0.9
+        + fbm(nTop, along / 6, d / 6, 2) * 0.25;
+      h = Math.max(h, damH);
+    }
+  }
   h = Math.min(h, riverCut(x, z));
   return { h, e, eP, theta, rk, along, across };
 }
@@ -202,7 +220,7 @@ export function baseHeight(x, z) {
 // ---------------------------------------------------------------------------
 const ROAD_HW = 2.3;
 const ROAD_STEP = 1.5;
-const ROAD_RIDGE_END = 30;
+const ROAD_RIDGE_END = 33;
 
 function gradient(x, z, eps = 3) {
   return [
@@ -478,7 +496,7 @@ export function createTerrain(scene) {
     if (eP > -7 && eP < 3) rock = Math.max(rock, smoothstep(0.06, 0.16, slope) * 0.9); // выходы по кромке
     const along = x * GATE_DIR.x + z * GATE_DIR.z - GATE_RADIUS;
     const across = x * GATE_DIR.z - z * GATE_DIR.x;
-    if (along > DITCH.alongStart - 1.5 && along < DITCH.alongEnd + 1.5 && Math.abs(across) < DITCH.halfLength && h < HILL_TOP - 1) rock = 1;
+    if (along > DITCH.alongStart - 1.5 && along < DITCH.alongEnd + 1.5 && Math.abs(across) < MOAT.damStart && h < HILL_TOP - 1) rock = 1;
     // осыпи: мелкий камень под скальными поясами
     const theta = Math.atan2(z, x);
     const eHere = Math.hypot(x, z) - plateauRadius(theta);

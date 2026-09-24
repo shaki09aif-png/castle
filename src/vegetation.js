@@ -2,7 +2,7 @@
 // пород и кусты. Густота убывает к вершине холма; у реки трава сочнее.
 import * as THREE from 'three';
 import { mulberry32, createNoise2D, fbm, smoothstep, clamp, lerp } from './noise.js';
-import { plateauRadius, GATE_DIR, GATE_RADIUS, DITCH, insideTower } from './layout.js';
+import { plateauRadius, GATE_DIR, GATE_RADIUS, DITCH, insideTower, GATEHOUSE, GATE_PASSAGE, BARBICAN } from './layout.js';
 import { shelfDistance, riverInfo } from './terrain.js';
 import { pbrMaterial, foliageTexture, macroNoiseTexture } from './textures.js';
 import { SUN_DIR } from './lighting.js';
@@ -28,6 +28,8 @@ function buildGroundTexture(terrain) {
       let dens = g.grass * (1 - smoothstep(0.2, 0.45, g.slope)) * (1 - g.road);
       if (g.eP < -2) dens *= 0.12; // внутри стен — вытоптано, трава только местами
       if (g.river < 0.4) dens = 0;
+      if (insideTower(x, z, 1.0)) dens = 0; // в башнях и в проезде ворот травы нет
+      if (Math.abs(x - GATEHOUSE.x) < 3 && z > GATE_PASSAGE.rampEndZ && z < BARBICAN.zS + 2) dens = 0; // мостовая, мост
       const lush = 1 - smoothstep(0, 18, g.river);
       const dry = smoothstep(35, 80, g.h) * (1 - lush);
       const k = (j * S + i) * 4;
