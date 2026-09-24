@@ -18,9 +18,10 @@ import { insideBuilding } from './layout.js';
 import { createPostFX } from './postfx.js';
 import { REFLECT } from './water.js';
 import { createCameraControls } from './camera.js';
+import { createTour } from './tour.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
-const STAGE = 'Этап 8: факелы, флаги, свет, оптимизация — модель готова';
+const STAGE = 'Экскурсия — кнопки справа или клавиши 1–0';
 
 const loading = document.getElementById('loading');
 const loadingText = loading.querySelector('small');
@@ -100,6 +101,7 @@ async function init() {
 
   const cam = createCameraControls(camera, renderer.domElement, terrain);
   const controls = cam.orbit; // для отладки и скриншотов
+  const tour = createTour(camera, cam, terrain, village);
   // точка, вокруг которой строятся тени: цель орбиты или место впереди в полёте
   const focus = new THREE.Vector3();
   function shadowFocus() {
@@ -118,11 +120,9 @@ async function init() {
   }
   window.addEventListener('resize', resize);
 
-  // Счётчик кадров и динамическое разрешение (как в играх): если FPS падает
-  // ниже 32, внутреннее разрешение немного снижается, при запасе — возвращается.
+  // Счётчик кадров
   const fpsEl = document.getElementById('fps');
   let frames = 0, fpsTime = performance.now();
-  let ratio = maxRatio;
   // Автоупрощение без «мыла»: если FPS ниже 28, по шагам выключается то, что
   // дороже всего и меньше всего заметно. Разрешение снижается только в конце.
   const steps = [
@@ -131,7 +131,7 @@ async function init() {
     ['дальняя трава', () => vegetation.setGrassLevel(1)],
     ['тени', () => { renderer.shadowMap.enabled = false; scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); }); }],
     ['трава', () => vegetation.setGrassLevel(0)],
-    ['разрешение', () => { ratio = Math.max(0.85, ratio * 0.9); renderer.setPixelRatio(ratio); resize(); }],
+    // разрешение не снижается никогда — чёткость важнее
   ];
   let stepI = 0, slow = 0, cooldown = 3;
   const simplified = [];
@@ -153,7 +153,7 @@ async function init() {
     timer.update();
     const t = timer.getElapsed();
     const dt = timer.getDelta();
-    cam.update(dt);
+    if (!tour.update(Math.min(dt, 0.1))) cam.update(dt);
     lighting.update(t, camera, shadowFocus());
     river.update(t);
     vegetation.update(t, camera);
@@ -185,7 +185,7 @@ async function init() {
 
   // доступ из консоли браузера для отладки
   window.castle = {
-    scene, camera, controls, cam, renderer, terrain, assets,
+    scene, camera, controls, cam, tour, renderer, terrain, assets,
     snapshot() {
       frame();
       return renderer.domElement.toDataURL('image/jpeg', 0.9);

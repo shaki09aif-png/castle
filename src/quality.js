@@ -50,11 +50,38 @@ const PRESETS = {
     rockDetail: true,
     pointLights: true,
   },
+  // Высокое, но облегчённое: чёткость (разрешение экрана + MSAA) полная,
+  // а дорогие и малозаметные эффекты убраны или урезаны.
   high: {
     label: 'Высокое',
     post: true,
-    pixelRatio: 2, // полное разрешение экрана (на экранах с масштабом 125–200% — чётче)
-    minPixelRatio: 0.85,
+    pixelRatio: 2, // полное разрешение экрана — не снижать, иначе «мыло»
+    minPixelRatio: 1,
+    shadowMapSize: 2048,
+    shadowRadius: 2,
+    msaa: 4, // сглаживание — не снижать
+    ao: false, // SSAO — самый дорогой эффект
+    aoHalfRes: true,
+    godRays: false,
+    bloom: true,
+    grassDensity: 0.7,
+    grassRadius: 60,
+    treeDetailDistance: 180,
+    treeCount: 0.85,
+    waterReflection: true,
+    reflectionSize: 512,
+    reflectionEvery: 2,
+    textureSize: 1024,
+    terrainDetail: 1.0,
+    rockDetail: true,
+    pointLights: true,
+  },
+  // Прежнее максимальное качество — только по адресу ?quality=ultra
+  ultra: {
+    label: 'Максимальное',
+    post: true,
+    pixelRatio: 2,
+    minPixelRatio: 1,
     shadowMapSize: 4096,
     shadowRadius: 3,
     msaa: 4,
@@ -86,13 +113,13 @@ function detectLevel() {
     const ext = gl.getExtension('WEBGL_debug_renderer_info');
     const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
     if (/intel|uhd|iris|hd graphics|swiftshader|llvmpipe|mesa|microsoft basic|radeon\(tm\) graphics|vega|adreno|mali|apple gpu/i.test(name)) return 'low';
-    return 'high'; // отдельная видеокарта — максимум; при нехватке FPS сработает автоупрощение
+    return 'high'; // отдельная видеокарта — облегчённое высокое; при нехватке FPS сработает автоупрощение
   } catch (e) {
     return 'low';
   }
 }
 
-// Уровень выбирается параметром адреса: ?quality=low | medium | high
+// Уровень выбирается параметром адреса: ?quality=low | medium | high | ultra
 // (по умолчанию — автовыбор по видеокарте). Кнопок в интерфейсе нет намеренно.
 function readLevel() {
   const url = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('quality') : null;

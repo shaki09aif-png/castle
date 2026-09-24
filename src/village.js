@@ -560,6 +560,7 @@ export function createVillage(scene, terrain, walls) {
     exclude,
     houses: places.map((p) => p.h),
     bridge: br,
+    mill: mill.center,
     update(t) {
       for (const u of updaters) u(t);
       for (const s of smokes) s.update(t);
