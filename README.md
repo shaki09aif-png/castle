@@ -11,11 +11,15 @@ XIII века на вершине холма. Работает в браузер
 
 Замок можно открыть прямо в браузере: **https://shaki09aif-png.github.io/castle/**
 
+Запасная ссылка, которая работает без настройки GitHub Pages (сайт отдаётся через
+сервис raw.githack.com прямо из ветки `gh-pages`):
+https://raw.githack.com/shaki09aif-png/castle/gh-pages/index.html
+
 Сайт обновляется сам: при каждом обновлении ветки `main` GitHub Actions
-собирает проект (`vite build`) и публикует его на GitHub Pages
-(файл `.github/workflows/deploy.yml`). Чтобы это заработало, один раз нужно
-включить Pages в настройках репозитория: **Settings → Pages → Build and deployment →
-Source: GitHub Actions**.
+собирает проект (`vite build`) и кладёт готовый сайт в ветку `gh-pages`
+(файл `.github/workflows/deploy.yml`). Один раз нужно включить показ этой ветки:
+**Settings → Pages → Build and deployment → Source: Deploy from a branch →
+Branch: `gh-pages`, папка `/ (root)` → Save**.
 
 ## Как запустить у себя
 

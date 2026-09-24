@@ -1,6 +1,7 @@
-# Публикация сайта на GitHub Pages: при каждом обновлении ветки main
-# проект собирается (vite build) и выкладывается на
-# https://shaki09aif-png.github.io/castle/
+# Публикация сайта: при каждом обновлении ветки main проект собирается
+# (vite build) и готовый сайт кладётся в ветку gh-pages. GitHub Pages
+# показывает эту ветку по адресу https://shaki09aif-png.github.io/castle/
+# (Settings → Pages → Source: Deploy from a branch → gh-pages / root).
 name: Публикация на GitHub Pages
 
 on:
@@ -9,16 +10,14 @@ on:
   workflow_dispatch: # можно запустить вручную на вкладке Actions
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write # чтобы записать сборку в ветку gh-pages
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,17 +27,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - run: touch dist/.nojekyll # отдавать файлы как есть, без обработки Jekyll
+      - name: Запись сборки в ветку gh-pages
+        run: |
+          cd dist
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Сайт из ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
