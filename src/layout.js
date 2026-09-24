@@ -166,9 +166,24 @@ export const BARBICAN = {
   gateHalf: 2.0,
 };
 
+// Донжон (этап 5): квадратный, в самой высокой точке двора; лицевая сторона
+// с поднятым входом обращена к воротам.
+export const KEEP = {
+  id: 300,
+  shape: 'square',
+  r: 7.0,
+  x: KEEP_POS.x,
+  z: KEEP_POS.z,
+  yaw: Math.atan2(25, 17),
+  extra: 30, // высота до боевой площадки над землёй
+  corbel: true,
+  corbelOut: 0.45,
+  node: KEEP_POS,
+};
+
 // Лежит ли точка внутри башни (с запасом m)
 export function insideTower(x, z, m = 0) {
-  for (const tw of [...TOWERS, GATEHOUSE]) {
+  for (const tw of [...TOWERS, GATEHOUSE, KEEP]) {
     const dx = x - tw.x, dz = z - tw.z;
     if (tw.shape === 'round') {
       if (Math.hypot(dx, dz) < tw.r + m) return tw;

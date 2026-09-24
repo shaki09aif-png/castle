@@ -388,7 +388,7 @@ export function buildTower(ctx, tw, opts = {}) {
   };
   const lines = outline(tw, 0);
   // скос цоколя только снаружи; со стороны двора (там дверь) стена вертикальная
-  const batOf = (pt) => bat * smoothstep01((pt.n.dot(outDir) + 0.35) / 0.7);
+  const batOf = (pt) => (opts.batterAll ? bat : bat * smoothstep01((pt.n.dot(outDir) + 0.35) / 0.7));
   for (const line of lines) {
     const bases = line.map(baseOf);
     const levels = (b) => {
@@ -507,8 +507,10 @@ export function buildTower(ctx, tw, opts = {}) {
   // --- крыша ---
   const eaveOff = pOut + 0.5;
   const eaveY = platY + mTop + 0.16;
-  let apexY;
-  if (tw.shape === 'round') {
+  let apexY = eaveY;
+  if (opts.roof === false) {
+    // без крыши: открытая боевая площадка (донжон)
+  } else if (tw.shape === 'round') {
     const eaveR = tw.r + eaveOff;
     const H = eaveR * (2.1 + rnd() * 0.5);
     apexY = coneRoof(roof, C, eaveR, eaveY, H, photoRoof);
@@ -519,7 +521,7 @@ export function buildTower(ctx, tw, opts = {}) {
     apexY = pyramidRoof(roof, C, tw.yaw, E, eaveY, H, photoRoof);
     roofUnderside(wood, C, tw, E, eaveY, H);
   }
-  vanes.push(weathervane(scene, C.clone().setY(apexY - 0.3), ironMat, goldMat, tw.id));
+  if (opts.roof !== false) vanes.push(weathervane(scene, C.clone().setY(apexY - 0.3), ironMat, goldMat, tw.id));
 
   // --- бойницы на нескольких ярусах (обращены наружу) ---
   const out = outDir.clone();
