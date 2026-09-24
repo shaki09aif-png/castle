@@ -9,10 +9,11 @@ import { Q } from './quality.js';
 // Защита от вложенных отражений: пока одна вода рисует своё отражение,
 // другая (река/ров) своё отражение не пересчитывает.
 let inReflection = false;
+export const REFLECT = { on: true }; // выключается автоупрощением
 export function guardReflection(mesh) {
   const orig = mesh.onBeforeRender;
   mesh.onBeforeRender = function (...args) {
-    if (inReflection) return;
+    if (inReflection || !REFLECT.on) return;
     inReflection = true;
     try {
       orig.apply(this, args);

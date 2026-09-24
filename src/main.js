@@ -16,6 +16,7 @@ import { createTorches } from './torches.js';
 import { FLAG_TIME } from './flags.js';
 import { insideBuilding } from './layout.js';
 import { createPostFX } from './postfx.js';
+import { REFLECT } from './water.js';
 import { createCameraControls } from './camera.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
@@ -94,9 +95,8 @@ async function init() {
     extraTrees: details.extraTrees,
   });
   await step('постобработка');
-  const post = Q.post
-    ? createPostFX(renderer, scene, camera)
-    : { setSize() {}, render() { renderer.render(scene, camera); } };
+  const direct = { setSize() {}, render() { renderer.render(scene, camera); } };
+  let post = Q.post ? createPostFX(renderer, scene, camera) : direct;
 
   const cam = createCameraControls(camera, renderer.domElement, terrain);
   const controls = cam.orbit; // для отладки и скриншотов
@@ -123,14 +123,27 @@ async function init() {
   const fpsEl = document.getElementById('fps');
   let frames = 0, fpsTime = performance.now();
   let ratio = maxRatio;
-  function adaptResolution(fps) {
-    let next = ratio;
-    if (fps < 32) next = Math.max(Q.minPixelRatio, ratio - 0.1);
-    else if (fps > 55) next = Math.min(maxRatio, ratio + 0.05);
-    if (Math.abs(next - ratio) > 0.001) {
-      ratio = next;
-      renderer.setPixelRatio(ratio);
-      resize();
+  // Автоупрощение без «мыла»: если FPS ниже 28, по шагам выключается то, что
+  // дороже всего и меньше всего заметно. Разрешение снижается только в конце.
+  const steps = [
+    ['эффекты', () => { if (post !== direct) { post = direct; renderer.toneMapping = THREE.ACESFilmicToneMapping; scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); }); } }],
+    ['отражения', () => { REFLECT.on = false; }],
+    ['дальняя трава', () => vegetation.setGrassLevel(1)],
+    ['тени', () => { renderer.shadowMap.enabled = false; scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); }); }],
+    ['трава', () => vegetation.setGrassLevel(0)],
+    ['разрешение', () => { ratio = Math.max(0.85, ratio * 0.9); renderer.setPixelRatio(ratio); resize(); }],
+  ];
+  let stepI = 0, slow = 0, cooldown = 3;
+  const simplified = [];
+  function adaptQuality(fps) {
+    if (cooldown > 0) { cooldown--; return; } // после загрузки и после шага — дать FPS устояться
+    slow = fps < 28 ? slow + 1 : 0;
+    if (slow >= 2 && stepI < steps.length) {
+      const [name, fn] = steps[stepI++];
+      fn();
+      simplified.push(name);
+      slow = 0;
+      cooldown = 2;
     }
   }
 
@@ -159,8 +172,8 @@ async function init() {
     const now = performance.now();
     if (now - fpsTime > 1000) {
       const fps = (frames * 1000) / (now - fpsTime);
-      fpsEl.textContent = `${Math.round(fps)} FPS · ${QUALITY_LEVEL}`;
-      if (!still) adaptResolution(fps);
+      if (!still) adaptQuality(fps);
+      fpsEl.textContent = `${Math.round(fps)} FPS · ${QUALITY_LEVEL}` + (simplified.length ? ` · упрощено: ${simplified.join(', ')}` : '');
       frames = 0;
       fpsTime = now;
     }

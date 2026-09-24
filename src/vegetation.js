@@ -563,6 +563,8 @@ export function createVegetation(scene, terrain, { exclude, excludeTrees, extraT
   const trees = createTrees(scene, terrain, excludeTrees, extraTrees);
   return {
     trees,
+    // 2 — вся трава, 1 — только ближняя, 0 — без травы (автоупрощение)
+    setGrassLevel(l) { outer.mesh.visible = l >= 2; inner.mesh.visible = l >= 1; },
     update(t, camera) {
       WIND.uTime.value = t;
       // трава рисуется вокруг камеры; если камера высоко — вокруг точки под ней

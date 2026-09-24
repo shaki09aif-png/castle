@@ -64,6 +64,9 @@ async function loadManifest() {
 const DEFAULT_TILE = { wallStone: 3, rubbleStone: 2.5, rock: 3, grass: 2, dirt: 2.5, gravel: 2, wood: 2, roof: 2, cobble: 2.5 };
 
 export async function loadAssets() {
+  // открыт как файл с диска (версия для флешки): браузер не даёт читать другие
+  // файлы — работаем на процедурных текстурах и процедурном небе
+  if (typeof location !== 'undefined' && location.protocol === 'file:') return { sets: {}, env: null, sky: null, credits: [] };
   const manifest = await loadManifest();
   const sets = {};
   const credits = [];
