@@ -1,16 +1,83 @@
-// Общие материалы и шейдерные «вставки» для стандартного PBR-материала Three.js.
+// Общие материалы и шейдерные вставки для MeshStandardMaterial.
 import * as THREE from 'three';
+import { materialTextures, macroNoiseTexture } from './textures.js';
 
-// Трипланарное текстурирование: текстура проецируется по мировым осям X/Y/Z
-// и смешивается по нормали — нет растяжения на отвесных гранях скал.
+// GLSL: трипланарная выборка цвета, ORM и нормали (смешивание нормалей «whiteout»).
+// Текстура проецируется по трём мировым осям — нет растяжения на отвесных гранях.
+export const TRIPLANAR_GLSL = /* glsl */ `
+  vec3 triBlend(vec3 n) {
+    vec3 b = pow(abs(n), vec3(4.0));
+    return b / (b.x + b.y + b.z);
+  }
+  // для обычных 2D-текстур; производные считаются заранее (выборка внутри ветвлений)
+  void triSample(sampler2D tC, sampler2D tN, sampler2D tO, vec3 p, vec3 n, vec3 bw, float nStr,
+                 out vec3 col, out vec3 orm, out vec3 nrm) {
+    vec3 dx = dFdx(p), dy = dFdy(p);
+    col = vec3(0.0); orm = vec3(0.0);
+    vec3 nx = vec3(0.0), ny = vec3(0.0), nz = vec3(0.0);
+    if (bw.x > 0.01) {
+      vec2 uv = p.zy;
+      col += textureGrad(tC, uv, dx.zy, dy.zy).rgb * bw.x; orm += textureGrad(tO, uv, dx.zy, dy.zy).rgb * bw.x;
+      vec3 t = textureGrad(tN, uv, dx.zy, dy.zy).xyz * 2.0 - 1.0; t.xy *= nStr;
+      nx = vec3(t.xy + n.zy, abs(t.z) * n.x);
+    }
+    if (bw.y > 0.01) {
+      vec2 uv = p.xz;
+      col += textureGrad(tC, uv, dx.xz, dy.xz).rgb * bw.y; orm += textureGrad(tO, uv, dx.xz, dy.xz).rgb * bw.y;
+      vec3 t = textureGrad(tN, uv, dx.xz, dy.xz).xyz * 2.0 - 1.0; t.xy *= nStr;
+      ny = vec3(t.xy + n.xz, abs(t.z) * n.y);
+    }
+    if (bw.z > 0.01) {
+      vec2 uv = p.xy;
+      col += textureGrad(tC, uv, dx.xy, dy.xy).rgb * bw.z; orm += textureGrad(tO, uv, dx.xy, dy.xy).rgb * bw.z;
+      vec3 t = textureGrad(tN, uv, dx.xy, dy.xy).xyz * 2.0 - 1.0; t.xy *= nStr;
+      nz = vec3(t.xy + n.xy, abs(t.z) * n.z);
+    }
+    nrm = normalize(nx.zyx * bw.x + ny.xzy * bw.y + nz.xyz * bw.z + n * 1e-4);
+  }
+  // то же для текстурного массива (слой L)
+  void triSampleArr(sampler2DArray tC, sampler2DArray tN, sampler2DArray tO, float L, vec3 p, vec3 dx, vec3 dy,
+                    vec3 n, vec3 bw, float nStr, out vec3 col, out vec3 orm, out vec3 nrm) {
+    col = vec3(0.0); orm = vec3(0.0);
+    vec3 nx = vec3(0.0), ny = vec3(0.0), nz = vec3(0.0);
+    if (bw.x > 0.01) {
+      vec3 uv = vec3(p.zy, L);
+      col += textureGrad(tC, uv, dx.zy, dy.zy).rgb * bw.x; orm += textureGrad(tO, uv, dx.zy, dy.zy).rgb * bw.x;
+      vec3 t = textureGrad(tN, uv, dx.zy, dy.zy).xyz * 2.0 - 1.0; t.xy *= nStr;
+      nx = vec3(t.xy + n.zy, abs(t.z) * n.x);
+    }
+    if (bw.y > 0.01) {
+      vec3 uv = vec3(p.xz, L);
+      col += textureGrad(tC, uv, dx.xz, dy.xz).rgb * bw.y; orm += textureGrad(tO, uv, dx.xz, dy.xz).rgb * bw.y;
+      vec3 t = textureGrad(tN, uv, dx.xz, dy.xz).xyz * 2.0 - 1.0; t.xy *= nStr;
+      ny = vec3(t.xy + n.xz, abs(t.z) * n.y);
+    }
+    if (bw.z > 0.01) {
+      vec3 uv = vec3(p.xy, L);
+      col += textureGrad(tC, uv, dx.xy, dy.xy).rgb * bw.z; orm += textureGrad(tO, uv, dx.xy, dy.xy).rgb * bw.z;
+      vec3 t = textureGrad(tN, uv, dx.xy, dy.xy).xyz * 2.0 - 1.0; t.xy *= nStr;
+      nz = vec3(t.xy + n.xy, abs(t.z) * n.z);
+    }
+    nrm = normalize(nx.zyx * bw.x + ny.xzy * bw.y + nz.xyz * bw.z + n * 1e-4);
+  }
+`;
+
+// Трипланарный PBR-материал на основе слота текстур (скала, камень).
 // Работает и для InstancedMesh.
-export function triplanarMaterial({ map, scale = 0.2, color = 0xffffff, roughness = 0.92, tintNoise = null, tintAmount = 0.25 }) {
-  const mat = new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+export function triplanarMaterial(slot, { scale = 1, tint = 0.25, normalStrength = 1, color = 0xffffff } = {}) {
+  const t = materialTextures(slot);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 });
+  const uniforms = {
+    tC: { value: t.map },
+    tN: { value: t.normalMap },
+    tO: { value: t.aoMap },
+    tMacro: { value: macroNoiseTexture() },
+    triScale: { value: scale / t.tileMeters },
+    tintAmount: { value: tint },
+    nStr: { value: normalStrength },
+  };
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.tTri = { value: map };
-    shader.uniforms.triScale = { value: scale };
-    shader.uniforms.tTint = { value: tintNoise };
-    shader.uniforms.tintAmount = { value: tintNoise ? tintAmount : 0 };
+    Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vTriPos;\nvarying vec3 vTriNrm;')
       .replace(
@@ -18,7 +85,7 @@ export function triplanarMaterial({ map, scale = 0.2, color = 0xffffff, roughnes
         `#include <begin_vertex>
         {
           vec4 tp = vec4(transformed, 1.0);
-          vec3 tn = normal;
+          vec3 tn = objectNormal;
           #ifdef USE_INSTANCING
             tp = instanceMatrix * tp;
             tn = mat3(instanceMatrix) * tn;
@@ -33,25 +100,33 @@ export function triplanarMaterial({ map, scale = 0.2, color = 0xffffff, roughnes
         `#include <common>
         varying vec3 vTriPos;
         varying vec3 vTriNrm;
-        uniform sampler2D tTri;
-        uniform sampler2D tTint;
-        uniform float triScale;
-        uniform float tintAmount;`
+        uniform sampler2D tC, tN, tO, tMacro;
+        uniform float triScale, tintAmount, nStr;
+        vec3 gTriCol, gTriOrm, gTriNrm;
+        ${TRIPLANAR_GLSL}`
       )
       .replace(
         '#include <map_fragment>',
         `{
-          vec3 bw = pow(abs(normalize(vTriNrm)), vec3(4.0));
-          bw /= (bw.x + bw.y + bw.z);
-          vec3 p = vTriPos * triScale;
-          vec3 c = texture2D(tTri, p.zy).rgb * bw.x + texture2D(tTri, p.xz).rgb * bw.y + texture2D(tTri, p.xy).rgb * bw.z;
-          if (tintAmount > 0.0) {
-            float n = texture2D(tTint, vTriPos.xz * 0.013).r;
-            c *= 1.0 + (n - 0.5) * tintAmount * 2.0;
-          }
-          diffuseColor.rgb *= c;
+          vec3 n = normalize(vTriNrm);
+          triSample(tC, tN, tO, vTriPos * triScale, n, triBlend(n), nStr, gTriCol, gTriOrm, gTriNrm);
+          float m = texture2D(tMacro, vTriPos.xz * 0.013).r;
+          gTriCol *= 1.0 + (m - 0.5) * tintAmount * 2.0;
+          diffuseColor.rgb *= gTriCol;
         }`
+      )
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = roughness * gTriOrm.g;')
+      .replace(
+        '#include <normal_fragment_maps>',
+        'normal = normalize((viewMatrix * vec4(gTriNrm, 0.0)).xyz);'
+      )
+      .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+        reflectedLight.indirectDiffuse *= gTriOrm.r;
+        reflectedLight.indirectSpecular *= gTriOrm.r;`
       );
   };
+  mat.customProgramCacheKey = () => 'tri-' + slot;
   return mat;
 }

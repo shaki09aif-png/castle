@@ -1,5 +1,7 @@
-// Процедурные текстуры: всё рисуется в <canvas> пикселями, никаких файлов.
-// Каждая текстура бесшовная (тайлится), к большинству строится карта нормалей.
+// PBR-наборы текстур: цвет (color), нормали (normal), ORM (R — ambient occlusion,
+// G — шероховатость). Если в public/assets лежат фотоскан-текстуры Poly Haven
+// (см. README и scripts/download-assets.mjs), берутся они. Иначе — процедурные
+// текстуры, которые рисуются здесь же, на <canvas>.
 import * as THREE from 'three';
 import { createTileNoise, mulberry32, clamp, smoothstep } from './noise.js';
 
@@ -8,20 +10,28 @@ export function setAnisotropy(n) {
   ANISO = n;
 }
 
+let LOADED = {}; // slot -> { color, normal, orm, tileMeters, credit }
+export function setLoadedAssets(sets) {
+  LOADED = sets || {};
+}
+export function assetSource(slot) {
+  return LOADED[slot] ? 'polyhaven' : 'procedural';
+}
+
 const cache = new Map();
 function cached(key, make) {
   if (!cache.has(key)) cache.set(key, make());
   return cache.get(key);
 }
 
-function makeCanvas(w, h) {
+export function makeCanvas(w, h) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
   return c;
 }
 
-function toTexture(canvas, { srgb = true, repeat = true } = {}) {
+export function toTexture(canvas, { srgb = true, repeat = true } = {}) {
   const t = new THREE.CanvasTexture(canvas);
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -33,8 +43,7 @@ function toTexture(canvas, { srgb = true, repeat = true } = {}) {
   return t;
 }
 
-// Записать массив цветов (Float32 RGB 0..1) в canvas.
-function rgbToCanvas(rgb, w, h) {
+export function rgbToCanvas(rgb, w, h, alpha = null) {
   const c = makeCanvas(w, h);
   const ctx = c.getContext('2d');
   const img = ctx.createImageData(w, h);
@@ -42,32 +51,31 @@ function rgbToCanvas(rgb, w, h) {
     img.data[i * 4] = clamp(rgb[j] * 255, 0, 255);
     img.data[i * 4 + 1] = clamp(rgb[j + 1] * 255, 0, 255);
     img.data[i * 4 + 2] = clamp(rgb[j + 2] * 255, 0, 255);
-    img.data[i * 4 + 3] = 255;
+    img.data[i * 4 + 3] = alpha ? clamp(alpha[i] * 255, 0, 255) : 255;
   }
   ctx.putImageData(img, 0, 0);
   return c;
 }
 
-// Карта нормалей из карты высот (бесшовно, с заворачиванием краёв).
-export function heightToNormalCanvas(height, w, h, strength = 2) {
+// Карта нормалей из карты высот (бесшовно). strength — «крутизна» рельефа.
+export function heightToNormalCanvas(height, w, h, strength = 2, wrap = true) {
   const c = makeCanvas(w, h);
   const ctx = c.getContext('2d');
   const img = ctx.createImageData(w, h);
   for (let y = 0; y < h; y++) {
-    const ym = ((y - 1 + h) % h) * w;
-    const yp = ((y + 1) % h) * w;
+    const ym = (wrap ? (y - 1 + h) % h : Math.max(0, y - 1)) * w;
+    const yp = (wrap ? (y + 1) % h : Math.min(h - 1, y + 1)) * w;
     for (let x = 0; x < w; x++) {
-      const xm = (x - 1 + w) % w;
-      const xp = (x + 1) % w;
+      const xm = wrap ? (x - 1 + w) % w : Math.max(0, x - 1);
+      const xp = wrap ? (x + 1) % w : Math.min(w - 1, x + 1);
       const dx = (height[y * w + xp] - height[y * w + xm]) * strength;
       const dy = (height[yp + x] - height[ym + x]) * strength;
-      let nx = -dx, ny = dy, nz = 1;
+      const nx = -dx, ny = dy, nz = 1;
       const len = Math.hypot(nx, ny, nz);
-      nx /= len; ny /= len; nz /= len;
       const i = (y * w + x) * 4;
-      img.data[i] = (nx * 0.5 + 0.5) * 255;
-      img.data[i + 1] = (ny * 0.5 + 0.5) * 255;
-      img.data[i + 2] = (nz * 0.5 + 0.5) * 255;
+      img.data[i] = (nx / len * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (ny / len * 0.5 + 0.5) * 255;
+      img.data[i + 2] = (nz / len * 0.5 + 0.5) * 255;
       img.data[i + 3] = 255;
     }
   }
@@ -75,222 +83,454 @@ export function heightToNormalCanvas(height, w, h, strength = 2) {
   return c;
 }
 
+// Размытие (бесшовное) — для вычисления затенения впадин.
+function boxBlur(src, w, h, r) {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  const k = 1 / (2 * r + 1);
+  for (let y = 0; y < h; y++) {
+    let s = 0;
+    for (let i = -r; i <= r; i++) s += src[y * w + ((i + w) % w)];
+    for (let x = 0; x < w; x++) {
+      tmp[y * w + x] = s * k;
+      s += src[y * w + ((x + r + 1) % w)] - src[y * w + ((x - r + w) % w)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let i = -r; i <= r; i++) s += tmp[((i + h) % h) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = s * k;
+      s += tmp[((y + r + 1) % h) * w + x] - tmp[((y - r + h) % h) * w + x];
+    }
+  }
+  return out;
+}
+
+// ORM: R — затенение впадин (из карты высот), G — шероховатость.
+function ormCanvas(height, rough, w, h, aoStrength = 2.5, radius = 6) {
+  const blur = boxBlur(boxBlur(height, w, h, radius), w, h, radius);
+  const rgb = new Float32Array(w * h * 3);
+  for (let i = 0; i < w * h; i++) {
+    rgb[i * 3] = clamp(1 - Math.max(0, blur[i] - height[i]) * aoStrength, 0.25, 1);
+    rgb[i * 3 + 1] = typeof rough === 'number' ? rough : rough[i];
+    rgb[i * 3 + 2] = 0;
+  }
+  return rgbToCanvas(rgb, w, h);
+}
+
+function finishSet(rgb, hgt, rough, S, { normal = 2, ao = 2.5, aoRadius = 6, tileMeters = 2 } = {}) {
+  return {
+    color: rgbToCanvas(rgb, S, S),
+    normal: heightToNormalCanvas(hgt, S, S, normal),
+    orm: ormCanvas(hgt, rough, S, S, ao, aoRadius),
+    tileMeters,
+    size: S,
+    credit: null,
+  };
+}
+
+// Разбросать по тайлу «камешки» — округлые купола со своим цветом.
+function scatterStones(rgb, hgt, rough, S, n, rnd, { rMin, rMax, colorFn, heightK = 1, roughV = 0.7, flat = 1 }) {
+  for (let k = 0; k < n; k++) {
+    const cx = rnd() * S, cy = rnd() * S;
+    const r = rMin + (rMax - rMin) * Math.pow(rnd(), 2);
+    const ry = r * (0.6 + rnd() * 0.4);
+    const ang = rnd() * Math.PI;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const col = colorFn(rnd);
+    const hh = r * heightK * 0.06;
+    for (let yy = Math.floor(cy - r - 1); yy <= cy + r + 1; yy++) {
+      for (let xx = Math.floor(cx - r - 1); xx <= cx + r + 1; xx++) {
+        const dx = xx - cx, dy = yy - cy;
+        const u = (dx * ca + dy * sa) / r, v = (-dx * sa + dy * ca) / ry;
+        const d = u * u + v * v;
+        if (d >= 1) continue;
+        const x = ((xx % S) + S) % S, y = ((yy % S) + S) % S;
+        const i = y * S + x;
+        const dome = Math.pow(1 - d, 0.5 / flat) * hh;
+        if (dome + 0.02 < hgt[i]) continue;
+        hgt[i] = dome + 0.02;
+        const sh = 0.8 + 0.25 * (1 - d) - 0.12 * u;
+        rgb[i * 3] = col[0] * sh; rgb[i * 3 + 1] = col[1] * sh; rgb[i * 3 + 2] = col[2] * sh;
+        if (rough) rough[i] = roughV;
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Трава
+// Процедурные наборы
 // ---------------------------------------------------------------------------
-export function grassTexture() {
-  return cached('grass', () => {
+const GENERATORS = {
+  // Луговая трава с землёй между кустиками
+  grass() {
     const S = 512;
     const n = createTileNoise(11);
     const rnd = mulberry32(12);
     const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const u = x / S, v = y / S;
         const big = n.fbm(u, v, 4, 4);
         const mid = n.fbm(u + 0.37, v + 0.11, 16, 3);
         const dry = smoothstep(0.55, 0.75, n.fbm(u + 0.7, v + 0.2, 8, 3));
-        const grain = rnd();
-        let r = 0.25 + 0.08 * big + 0.05 * mid;
-        let g = 0.31 + 0.09 * big + 0.07 * mid;
-        let b = 0.13 + 0.03 * mid;
-        // сухие желтоватые пятна
-        r += dry * 0.13; g += dry * 0.06; b += dry * 0.02;
-        const k = 0.78 + grain * 0.35;
-        const i = (y * S + x) * 3;
-        rgb[i] = r * k; rgb[i + 1] = g * k; rgb[i + 2] = b * k;
+        const soil = smoothstep(0.62, 0.78, n.fbm(u + 0.1, v + 0.5, 16, 3));
+        let r = 0.2 + 0.07 * big + 0.05 * mid;
+        let g = 0.27 + 0.08 * big + 0.06 * mid;
+        let b = 0.1 + 0.03 * mid;
+        r += dry * 0.12; g += dry * 0.05; b += dry * 0.02;
+        r = r * (1 - soil * 0.6) + soil * 0.6 * 0.28;
+        g = g * (1 - soil * 0.6) + soil * 0.6 * 0.23;
+        b = b * (1 - soil * 0.6) + soil * 0.6 * 0.15;
+        const k = 0.8 + rnd() * 0.3;
+        const i = y * S + x;
+        rgb[i * 3] = r * k; rgb[i * 3 + 1] = g * k; rgb[i * 3 + 2] = b * k;
+        hgt[i] = mid * 0.3 - soil * 0.4 + rnd() * 0.1;
       }
     }
-    const c = rgbToCanvas(rgb, S, S);
-    const ctx = c.getContext('2d');
-    // травинки
-    const blade = (x, y, len, ang, col) => {
-      for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
-        const px = x + ox, py = y + oy;
-        if (px < -20 || px > S + 20 || py < -20 || py > S + 20) continue;
-        ctx.strokeStyle = col;
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(px + Math.cos(ang) * len, py + Math.sin(ang) * len);
-        ctx.stroke();
-      }
-    };
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 9000; i++) {
-      const x = rnd() * S, y = rnd() * S;
+    // травинки: короткие штрихи со своей высотой
+    for (let k = 0; k < 16000; k++) {
+      let x = rnd() * S, y = rnd() * S;
+      const len = 4 + rnd() * 9;
+      const ang = -Math.PI / 2 + (rnd() - 0.5) * 1.6;
       const light = rnd();
-      const col = light > 0.5
-        ? `rgba(${120 + light * 60 | 0},${150 + light * 50 | 0},${50 + light * 20 | 0},0.35)`
-        : `rgba(${20 + light * 20 | 0},${45 + light * 40 | 0},${10},0.4)`;
-      blade(x, y, 3 + rnd() * 6, -Math.PI / 2 + (rnd() - 0.5) * 1.4, col);
+      const cr = 0.16 + light * 0.2, cg = 0.25 + light * 0.25, cb = 0.06 + light * 0.08;
+      for (let s = 0; s < len; s++) {
+        const px = ((Math.round(x) % S) + S) % S, py = ((Math.round(y) % S) + S) % S;
+        const i = py * S + px;
+        const t = s / len;
+        hgt[i] = Math.max(hgt[i], 0.4 + t * 0.6);
+        rgb[i * 3] = cr * (0.7 + t * 0.5); rgb[i * 3 + 1] = cg * (0.7 + t * 0.5); rgb[i * 3 + 2] = cb;
+        x += Math.cos(ang); y += Math.sin(ang);
+      }
     }
-    // редкие полевые цветы
-    for (let i = 0; i < 160; i++) {
-      const x = rnd() * S, y = rnd() * S;
-      const t = rnd();
-      ctx.fillStyle = t < 0.4 ? 'rgba(235,235,220,0.8)' : t < 0.7 ? 'rgba(230,200,60,0.8)' : 'rgba(170,120,200,0.7)';
-      ctx.fillRect(x, y, 1.6, 1.6);
-    }
-    return toTexture(c);
-  });
-}
+    return finishSet(rgb, hgt, 0.92, S, { normal: 3, ao: 1.4, aoRadius: 3, tileMeters: 2.2 });
+  },
 
-// ---------------------------------------------------------------------------
-// Скала (известняк/песчаник): слои, трещины, лишайник
-// ---------------------------------------------------------------------------
-function rockData() {
-  return cached('rockData', () => {
+  // Известняковая скала: пласты, трещины, лишайник
+  rock() {
     const S = 512;
     const n = createTileNoise(21);
     const rnd = mulberry32(22);
     const rgb = new Float32Array(S * S * 3);
     const hgt = new Float32Array(S * S);
+    const rough = new Float32Array(S * S);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const u = x / S, v = y / S;
         const base = n.fbm(u, v, 4, 6, 0.55);
         const warp = n.fbm(u + 0.5, v + 0.3, 4, 3);
-        // горизонтальные пласты известняка
-        const layer = (v * 7 + warp * 0.9) % 1;
-        const strata = smoothstep(0.0, 0.08, layer) * (1 - smoothstep(0.9, 1.0, layer));
-        // трещины: гребни «хребтового» шума, редкие и тонкие
+        const layer = (v * 5 + warp * 0.9) % 1;
+        const strata = smoothstep(0.0, 0.1, layer) * (1 - smoothstep(0.88, 1.0, layer));
         const rn = 1 - Math.abs(n.fbm(u + 0.13, v + 0.71, 4, 4) * 2 - 1);
-        const crack = smoothstep(0.955, 0.99, rn) * smoothstep(0.45, 0.65, n.fbm(u + 0.4, v, 8, 2));
+        const crack = smoothstep(0.95, 0.99, rn) * smoothstep(0.45, 0.65, n.fbm(u + 0.4, v, 8, 2));
         const pits = smoothstep(0.62, 0.72, n.fbm(u + 0.21, v + 0.37, 32, 3));
         const lichen = smoothstep(0.66, 0.74, n.fbm(u + 0.9, v + 0.4, 16, 3)) * 0.8;
-        const moss = smoothstep(0.6, 0.8, n.fbm(u + 0.2, v + 0.8, 4, 4) * 0.75 + (1 - strata) * 0.25);
-        let t = 0.47 + 0.3 * (base - 0.5) + (rnd() - 0.5) * 0.07;
+        const moss = smoothstep(0.62, 0.8, n.fbm(u + 0.2, v + 0.8, 4, 4) * 0.75 + (1 - strata) * 0.25);
+        let t = 0.45 + 0.28 * (base - 0.5) + (rnd() - 0.5) * 0.07;
         t *= 0.84 + 0.16 * strata;
         t *= 1 - pits * 0.18;
         let r = t * 1.04, g = t * 1.0, b = t * 0.9;
-        // тёплый охристый оттенок местами (окислы железа)
         const warm = smoothstep(0.45, 0.7, n.fbm(u + 0.33, v + 0.66, 4, 3));
         r += warm * 0.07; g += warm * 0.025; b -= warm * 0.02;
-        r *= 1 - crack * 0.42; g *= 1 - crack * 0.42; b *= 1 - crack * 0.38;
-        // лишайник (светлый, желтоватый) и мох (в щелях между пластами)
-        r = lerp3(r, 0.66, lichen * 0.45); g = lerp3(g, 0.64, lichen * 0.45); b = lerp3(b, 0.46, lichen * 0.45);
-        r = lerp3(r, 0.3, moss * 0.4); g = lerp3(g, 0.35, moss * 0.4); b = lerp3(b, 0.16, moss * 0.4);
+        r *= 1 - crack * 0.4; g *= 1 - crack * 0.4; b *= 1 - crack * 0.36;
+        r += (0.66 - r) * lichen * 0.4; g += (0.64 - g) * lichen * 0.4; b += (0.46 - b) * lichen * 0.4;
+        r += (0.26 - r) * moss * 0.45; g += (0.32 - g) * moss * 0.45; b += (0.13 - b) * moss * 0.45;
         const i = y * S + x;
         rgb[i * 3] = r; rgb[i * 3 + 1] = g; rgb[i * 3 + 2] = b;
-        hgt[i] = base * 1.1 + strata * 0.3 - crack * 0.7 - pits * 0.1;
+        hgt[i] = base * 1.4 + strata * 0.35 + n.fbm(u, v, 32, 3) * 0.3 - crack * 0.8 - pits * 0.15;
+        rough[i] = 0.82 + 0.1 * pits - moss * 0.05 + (1 - strata) * 0.05;
       }
     }
-    return { rgb, hgt, S };
-  });
-}
-const lerp3 = (a, b, t) => a + (b - a) * t;
+    return finishSet(rgb, hgt, rough, S, { normal: 4, ao: 2.2, aoRadius: 8, tileMeters: 4 });
+  },
 
-export function rockTexture() {
-  return cached('rock', () => {
-    const { rgb, S } = rockData();
-    return toTexture(rgbToCanvas(rgb, S, S));
-  });
-}
-
-export function rockNormal() {
-  return cached('rockN', () => {
-    const { hgt, S } = rockData();
-    return toTexture(heightToNormalCanvas(hgt, S, S, 3.5), { srgb: false });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Земля / утоптанная грунтовка с камешками
-// ---------------------------------------------------------------------------
-export function dirtTexture() {
-  return cached('dirt', () => {
+  // Утоптанная земля дороги/тропы с камешками
+  dirt() {
     const S = 512;
     const n = createTileNoise(31);
     const rnd = mulberry32(32);
     const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    const rough = new Float32Array(S * S).fill(0.95);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const u = x / S, v = y / S;
         const a = n.fbm(u, v, 8, 5);
         const b2 = n.fbm(u + 0.4, v + 0.2, 32, 3);
-        const t = 0.3 + 0.18 * (a - 0.5) + 0.08 * (b2 - 0.5) + (rnd() - 0.5) * 0.05;
-        const i = (y * S + x) * 3;
-        rgb[i] = t * 1.25; rgb[i + 1] = t * 1.02; rgb[i + 2] = t * 0.72;
+        const t = 0.3 + 0.16 * (a - 0.5) + 0.07 * (b2 - 0.5) + (rnd() - 0.5) * 0.05;
+        const i = y * S + x;
+        rgb[i * 3] = t * 1.22; rgb[i * 3 + 1] = t * 1.0; rgb[i * 3 + 2] = t * 0.74;
+        hgt[i] = a * 0.25 + b2 * 0.12;
       }
     }
-    const c = rgbToCanvas(rgb, S, S);
-    const ctx = c.getContext('2d');
-    // мелкие камешки
-    for (let i = 0; i < 1400; i++) {
-      const x = rnd() * S, y = rnd() * S, r = 0.8 + rnd() * rnd() * 4;
-      const g = 90 + rnd() * 90 | 0;
-      for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
-        if (Math.abs(x + ox - S / 2) > S / 2 + 6 || Math.abs(y + oy - S / 2) > S / 2 + 6) continue;
-        ctx.fillStyle = `rgba(20,15,10,0.35)`;
-        ctx.beginPath(); ctx.ellipse(x + ox + 0.8, y + oy + 0.8, r, r * 0.75, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = `rgb(${g},${g * 0.93 | 0},${g * 0.82 | 0})`;
-        ctx.beginPath(); ctx.ellipse(x + ox, y + oy, r, r * 0.75, rnd() * 3, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-    return toTexture(c);
-  });
-}
+    scatterStones(rgb, hgt, rough, S, 900, rnd, {
+      rMin: 1.2, rMax: 7, heightK: 1.2, roughV: 0.75,
+      colorFn: (r) => { const g = 0.35 + r() * 0.3; return [g * 1.02, g * 0.97, g * 0.86]; },
+    });
+    return finishSet(rgb, hgt, rough, S, { normal: 5, ao: 3, aoRadius: 4, tileMeters: 3 });
+  },
 
-// Дорога: U — поперёк (вся ширина), V — вдоль (повторяется). Колеи, камни, травка по краям.
-export function roadTexture() {
-  return cached('road', () => {
-    const W = 256, H = 512;
-    const n = createTileNoise(41);
-    const rnd = mulberry32(42);
-    const rgb = new Float32Array(W * H * 3);
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const u = x / W, v = y / H;
-        const a = n.fbm(u * 0.5, v, 8, 5);
-        const rut = Math.exp(-Math.pow((u - 0.3) / 0.05, 2)) + Math.exp(-Math.pow((u - 0.7) / 0.05, 2));
-        const edge = smoothstep(0.36, 0.5, Math.abs(u - 0.5));
-        const grassy = edge * smoothstep(0.35, 0.6, n.fbm(u * 0.5 + 0.3, v, 16, 3) + edge * 0.3);
-        let t = 0.36 + 0.16 * (a - 0.5) + (rnd() - 0.5) * 0.06 - rut * 0.07;
-        let r = t * 1.2, g = t * 1.02, b = t * 0.76;
-        r = r * (1 - grassy) + grassy * 0.2;
-        g = g * (1 - grassy) + grassy * 0.3;
-        b = b * (1 - grassy) + grassy * 0.1;
-        const i = (y * W + x) * 3;
-        rgb[i] = r; rgb[i + 1] = g; rgb[i + 2] = b;
-      }
-    }
-    const c = rgbToCanvas(rgb, W, H);
-    const ctx = c.getContext('2d');
-    for (let i = 0; i < 700; i++) {
-      const x = W * (0.12 + rnd() * 0.76), y = rnd() * H, r = 0.8 + rnd() * rnd() * 5;
-      const g = 95 + rnd() * 80 | 0;
-      for (const oy of [-H, 0, H]) {
-        ctx.fillStyle = 'rgba(25,18,10,0.35)';
-        ctx.beginPath(); ctx.ellipse(x + 1, y + oy + 1, r, r * 0.8, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = `rgb(${g},${g * 0.94 | 0},${g * 0.84 | 0})`;
-        ctx.beginPath(); ctx.ellipse(x, y + oy, r, r * 0.8, rnd() * 3, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-    return toTexture(c);
-  });
-}
-
-// Прибрежный ил/песок
-export function sandTexture() {
-  return cached('sand', () => {
-    const S = 256;
+  // Галька и ил у воды, осыпи
+  gravel() {
+    const S = 512;
     const n = createTileNoise(51);
     const rnd = mulberry32(52);
     const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    const rough = new Float32Array(S * S).fill(0.6);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const u = x / S, v = y / S;
         const a = n.fbm(u, v, 8, 5);
-        const t = 0.4 + 0.14 * (a - 0.5) + (rnd() - 0.5) * 0.08;
-        const i = (y * S + x) * 3;
-        rgb[i] = t * 1.12; rgb[i + 1] = t * 1.02; rgb[i + 2] = t * 0.8;
+        const t = 0.24 + 0.1 * (a - 0.5) + (rnd() - 0.5) * 0.05;
+        const i = y * S + x;
+        rgb[i * 3] = t * 1.1; rgb[i * 3 + 1] = t * 1.0; rgb[i * 3 + 2] = t * 0.82;
+        hgt[i] = a * 0.1;
       }
     }
-    return toTexture(rgbToCanvas(rgb, S, S));
+    scatterStones(rgb, hgt, rough, S, 2600, rnd, {
+      rMin: 3, rMax: 14, heightK: 1, roughV: 0.55, flat: 0.8,
+      colorFn: (r) => {
+        const g = 0.3 + r() * 0.35, w = (r() - 0.5) * 0.08;
+        return [g + w, g * 0.97, g * 0.9 - w];
+      },
+    });
+    return finishSet(rgb, hgt, rough, S, { normal: 5, ao: 3.5, aoRadius: 5, tileMeters: 1.6 });
+  },
+
+  // Тёсаная и полутёсаная кладка стен из известняка
+  wallStone() {
+    return makeMasonry({
+      seed: 7, courseMin: 34, courseMax: 72, lenMin: 0.8, lenMax: 2.3, mortar: 2.4, jitter: 3.2,
+      base: [0.6, 0.56, 0.48], tint: 0.2, mortarColor: [0.6, 0.57, 0.5], tileMeters: 3.8,
+    });
+  },
+
+  // Бутовая кладка подпорных стенок
+  rubbleStone() {
+    return makeMasonry({
+      seed: 17, courseMin: 34, courseMax: 64, lenMin: 0.8, lenMax: 2.0, rubble: 1, mortar: 3,
+      base: [0.55, 0.52, 0.46], tint: 0.16, tileMeters: 2.6,
+    });
+  },
+
+  // Дубовые доски: волокна, сучки, щели между досками
+  wood() {
+    const S = 512;
+    const n = createTileNoise(81);
+    const rnd = mulberry32(82);
+    const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    const rough = new Float32Array(S * S);
+    const PL = 4; // досок на тайл
+    const planks = [];
+    for (let p = 0; p < PL; p++) planks.push({ tone: 0.85 + rnd() * 0.3, off: rnd(), knots: [[rnd(), rnd()], [rnd(), rnd()]] });
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const u = x / S, v = y / S;
+        const pi = Math.floor(u * PL);
+        const pl = planks[pi];
+        const lu = u * PL - pi;
+        const gap = smoothstep(0.0, 0.025, lu) * smoothstep(1.0, 0.975, lu);
+        const warp = n.fbm(u, v + pl.off, 4, 3) * 0.15;
+        let knot = 0;
+        for (const [kx, ky] of pl.knots) {
+          const dx = lu - kx, dy = v - ky;
+          const d = Math.sqrt(dx * dx + dy * dy * 1.5) * 12;
+          knot = Math.max(knot, Math.exp(-d * d));
+        }
+        const grain = Math.sin((lu * 18 + warp * 40 + knot * 3) * Math.PI) * 0.5 + 0.5;
+        const fine = n.fbm(u * 0.25, v + pl.off, 64, 3);
+        let t = (0.34 + 0.08 * grain + 0.06 * fine) * pl.tone;
+        t *= 1 - knot * 0.35;
+        const weather = smoothstep(0.5, 0.8, n.fbm(u + 0.3, v, 8, 3));
+        let r = t * 1.12, g = t * 0.9, b = t * 0.66;
+        r += (t - r) * weather * 0.5; b += (t * 0.95 - b) * weather * 0.5; // серые выветренные места
+        const i = y * S + x;
+        const k = gap < 0.5 ? 0.25 : 1;
+        rgb[i * 3] = r * k; rgb[i * 3 + 1] = g * k; rgb[i * 3 + 2] = b * k;
+        hgt[i] = gap * (0.6 + grain * 0.12 + fine * 0.1) - knot * 0.1;
+        rough[i] = 0.78 + weather * 0.12;
+      }
+    }
+    return finishSet(rgb, hgt, rough, S, { normal: 3, ao: 2, aoRadius: 3, tileMeters: 1.2 });
+  },
+
+  // Кора дуба/бука: продольные борозды
+  bark() {
+    const S = 256;
+    const n = createTileNoise(91);
+    const rnd = mulberry32(92);
+    const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const u = x / S, v = y / S;
+        const warp = n.fbm(u, v, 4, 3) * 0.25;
+        const ridge = Math.abs(Math.sin((u * 7 + warp) * Math.PI));
+        const cracks = smoothstep(0.0, 0.25, ridge);
+        const f = n.fbm(u + 0.3, v * 0.3, 32, 3);
+        const moss = smoothstep(0.6, 0.75, n.fbm(u + 0.5, v, 4, 3));
+        let t = (0.2 + 0.12 * cracks + 0.06 * f) * (0.9 + rnd() * 0.15);
+        let r = t * 1.05, g = t * 0.92, b = t * 0.78;
+        r += (0.2 - r) * moss * 0.5; g += (0.26 - g) * moss * 0.5; b += (0.1 - b) * moss * 0.5;
+        const i = y * S + x;
+        rgb[i * 3] = r; rgb[i * 3 + 1] = g; rgb[i * 3 + 2] = b;
+        hgt[i] = cracks * 0.8 + f * 0.3;
+      }
+    }
+    return finishSet(rgb, hgt, 0.95, S, { normal: 6, ao: 2.5, aoRadius: 3, tileMeters: 1 });
+  },
+
+  // Берёзовая кора: белая с чёрными чечевичками
+  birchBark() {
+    const S = 256;
+    const n = createTileNoise(95);
+    const rnd = mulberry32(96);
+    const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const u = x / S, v = y / S;
+        const lent = smoothstep(0.72, 0.8, n.fbm(u * 0.3 + 0.2, v * 3, 16, 3)); // горизонтальные штрихи
+        const dark = smoothstep(0.6, 0.75, n.fbm(u, v, 4, 3));
+        let t = 0.78 - 0.1 * n.fbm(u, v, 32, 2) + (rnd() - 0.5) * 0.04;
+        t *= 1 - lent * 0.75;
+        t *= 1 - dark * 0.55;
+        const i = y * S + x;
+        rgb[i * 3] = t * 1.0; rgb[i * 3 + 1] = t * 0.98; rgb[i * 3 + 2] = t * 0.93;
+        hgt[i] = 1 - lent * 0.6 - dark * 0.3;
+      }
+    }
+    return finishSet(rgb, hgt, 0.8, S, { normal: 3, ao: 1.5, aoRadius: 2, tileMeters: 1 });
+  },
+};
+
+// Атлас листвы с прозрачностью: kind = 'broad' (дуб, бук, берёза) или 'needle' (сосна)
+export function foliageTexture(kind, hue = [0.2, 0.32, 0.1]) {
+  return cached('leaf:' + kind + hue.join(), () => {
+    const S = 512;
+    const c = makeCanvas(S, S);
+    const ctx = c.getContext('2d');
+    const rnd = mulberry32(kind === 'needle' ? 131 : 121);
+    const col = (k) => {
+      const l = 0.7 + rnd() * 0.6;
+      return `rgb(${Math.min(255, hue[0] * l * 255 * k) | 0},${Math.min(255, hue[1] * l * 255 * k) | 0},${Math.min(255, hue[2] * l * 255 * k) | 0})`;
+    };
+    if (kind === 'needle') {
+      // пучки хвои вдоль веточек
+      for (let b = 0; b < 26; b++) {
+        const x0 = S * (0.15 + rnd() * 0.7), y0 = S * (0.15 + rnd() * 0.7);
+        const a = rnd() * Math.PI * 2, len = S * (0.12 + rnd() * 0.15);
+        ctx.strokeStyle = 'rgb(70,50,30)';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + Math.cos(a) * len, y0 + Math.sin(a) * len); ctx.stroke();
+        for (let k = 0; k < 60; k++) {
+          const t = rnd();
+          const px = x0 + Math.cos(a) * len * t, py = y0 + Math.sin(a) * len * t;
+          const na = a + (rnd() > 0.5 ? 1 : -1) * (0.5 + rnd() * 0.6);
+          const nl = 10 + rnd() * 16;
+          ctx.strokeStyle = col(1);
+          ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(na) * nl, py + Math.sin(na) * nl); ctx.stroke();
+        }
+      }
+    } else {
+      // широкие листья: эллипсы с заострёнными концами и прожилкой
+      for (let k = 0; k < 420; k++) {
+        const x = S * (0.08 + rnd() * 0.84), y = S * (0.08 + rnd() * 0.84);
+        const dx = x / S - 0.5, dy = y / S - 0.5;
+        if (dx * dx + dy * dy > 0.2) continue; // скругляем пучок
+        const a = rnd() * Math.PI * 2, L = 16 + rnd() * 14, W = L * (0.38 + rnd() * 0.15);
+        ctx.save();
+        ctx.translate(x, y); ctx.rotate(a);
+        ctx.fillStyle = col(1);
+        ctx.beginPath();
+        ctx.moveTo(-L, 0);
+        ctx.quadraticCurveTo(0, -W, L, 0);
+        ctx.quadraticCurveTo(0, W, -L, 0);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(-L, 0); ctx.lineTo(L, 0); ctx.stroke();
+        ctx.restore();
+      }
+    }
+    const t = toTexture(c, { repeat: false });
+    t.premultiplyAlpha = false;
+    return t;
   });
 }
 
-// Крупномасштабный шум (одноканальный) для разнообразия цвета на больших площадях.
+// Получить набор: сначала Poly Haven, иначе процедурный.
+export function getSet(slot) {
+  if (LOADED[slot]) return LOADED[slot];
+  return cached('set:' + slot, () => GENERATORS[slot]());
+}
+
+// Текстуры Three.js для обычного PBR-материала.
+export function materialTextures(slot) {
+  return cached('mat:' + slot, () => {
+    const s = getSet(slot);
+    const map = toTexture(s.color);
+    const normalMap = toTexture(s.normal, { srgb: false });
+    const orm = toTexture(s.orm, { srgb: false });
+    return { map, normalMap, roughnessMap: orm, aoMap: orm, tileMeters: s.tileMeters };
+  });
+}
+
+// PBR-материал с текстурами слота. UV геометрии должны быть в метрах / tileMeters.
+export function pbrMaterial(slot, opts = {}) {
+  const t = materialTextures(slot);
+  const mat = new THREE.MeshStandardMaterial({
+    map: t.map,
+    normalMap: t.normalMap,
+    roughnessMap: t.roughnessMap,
+    aoMap: t.aoMap,
+    aoMapIntensity: 1,
+    roughness: 1,
+    metalness: 0,
+    ...opts,
+  });
+  mat.userData.tileMeters = t.tileMeters;
+  return mat;
+}
+
+// Текстурный массив из нескольких наборов (для рельефа): все слои приводятся к size×size.
+export function textureArrays(slots, size) {
+  const out = {};
+  const c = makeCanvas(size, size);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  for (const kind of ['color', 'normal', 'orm']) {
+    const data = new Uint8Array(size * size * 4 * slots.length);
+    slots.forEach((slot, layer) => {
+      const src = getSet(slot)[kind];
+      ctx.clearRect(0, 0, size, size);
+      ctx.drawImage(src, 0, 0, size, size);
+      data.set(ctx.getImageData(0, 0, size, size).data, layer * size * size * 4);
+    });
+    const tex = new THREE.DataArrayTexture(data, size, size, slots.length);
+    tex.format = THREE.RGBAFormat;
+    tex.type = THREE.UnsignedByteType;
+    tex.colorSpace = kind === 'color' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.anisotropy = ANISO;
+    tex.needsUpdate = true;
+    out[kind] = tex;
+  }
+  out.tileMeters = slots.map((s) => getSet(s).tileMeters);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Вспомогательные текстуры
+// ---------------------------------------------------------------------------
 export function macroNoiseTexture() {
   return cached('macro', () => {
     const S = 256;
@@ -309,68 +549,47 @@ export function macroNoiseTexture() {
   });
 }
 
-// Рябь на воде — карта нормалей.
-export function waterNormal() {
+// Рябь на воде — карта нормалей для Water.js.
+export function waterNormalTexture() {
   return cached('waterN', () => {
-    const S = 256;
+    const S = 512;
     const n = createTileNoise(71);
     const h = new Float32Array(S * S);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const u = x / S, v = y / S;
-        h[y * S + x] = n.fbm(u, v, 8, 5, 0.55);
+        h[y * S + x] = n.fbm(u, v, 8, 5, 0.5) + 0.3 * n.fbm(u + 0.5, v, 32, 3);
       }
     }
-    return toTexture(heightToNormalCanvas(h, S, S, 6), { srgb: false });
+    return toTexture(heightToNormalCanvas(h, S, S, 10), { srgb: false });
   });
 }
 
 // ---------------------------------------------------------------------------
 // Каменная кладка: отдельные камни разного размера и оттенка, раствор в швах.
-// Возвращает { map, normalMap, roughnessMap }. Размер тайла в метрах — tileW×tileH.
 // ---------------------------------------------------------------------------
-export function masonry(key, opts = {}) {
-  return cached('masonry:' + key, () => makeMasonry(opts));
-}
-
 function makeMasonry({
-  W = 512,
-  H = 512,
-  seed = 7,
-  courseMin = 30, // высота ряда, пикс
-  courseMax = 58,
-  lenMin = 0.9, // длина камня относительно высоты ряда
-  lenMax = 2.6,
-  mortar = 2.6, // полуширина шва, пикс
-  jitter = 3.5, // неровность кромок
-  base = [0.56, 0.52, 0.45], // средний цвет камня
-  tint = 0.12, // разброс оттенка
-  mortarColor = [0.62, 0.59, 0.52],
-  rubble = 0, // 0 — тёсаная кладка, 1 — бутовая (неровные камни)
-} = {}) {
+  S = 512, seed = 7, courseMin = 30, courseMax = 58, lenMin = 0.9, lenMax = 2.6, mortar = 2.6,
+  jitter = 3.5, base = [0.56, 0.52, 0.45], tint = 0.12, mortarColor = [0.62, 0.59, 0.52], rubble = 0,
+  tileMeters = 3,
+}) {
+  const W = S, H = S;
   const rnd = mulberry32(seed);
   const n = createTileNoise(seed + 100);
   const rgb = new Float32Array(W * H * 3);
   const hgt = new Float32Array(W * H);
   const rough = new Float32Array(W * H);
-  const owner = new Int32Array(W * H).fill(-1);
-
-  // заливка раствором
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const u = x / W, v = y / H;
       const m = n.fbm(u, v, 32, 3);
       const i = y * W + x;
-      const k = 0.85 + 0.25 * m;
-      rgb[i * 3] = mortarColor[0] * k;
-      rgb[i * 3 + 1] = mortarColor[1] * k;
-      rgb[i * 3 + 2] = mortarColor[2] * k;
+      const k = 0.8 + 0.3 * m;
+      rgb[i * 3] = mortarColor[0] * k; rgb[i * 3 + 1] = mortarColor[1] * k; rgb[i * 3 + 2] = mortarColor[2] * k;
       hgt[i] = 0.05 * m;
-      rough[i] = 0.95;
+      rough[i] = 0.97;
     }
   }
-
-  // разбиение на ряды, сумма высот = H (бесшовность по вертикали)
   const courses = [];
   let yAcc = 0;
   while (yAcc < H) {
@@ -379,10 +598,7 @@ function makeMasonry({
     courses.push([yAcc, ch]);
     yAcc += ch;
   }
-
-  let id = 0;
   for (const [cy, ch] of courses) {
-    // камни в ряду, по горизонтали заворачиваются (бесшовность)
     const x0 = rnd() * W;
     let xAcc = 0;
     const stones = [];
@@ -393,27 +609,25 @@ function makeMasonry({
       xAcc += len;
     }
     for (const [sx, len] of stones) {
-      // иногда камень делится по высоте на два (разнобой рядов)
       const parts = rubble > 0 || rnd() > 0.85 ? splitStone(sx, cy, len, ch, rnd, rubble) : [[sx, cy, len, ch]];
       for (const [px, py, pw, ph] of parts) {
         const col = stoneColor(base, tint, rnd);
         const bulge = 0.6 + rnd() * 0.5;
         const tilt = (rnd() - 0.5) * 0.4;
-        const rough0 = 0.75 + rnd() * 0.2;
+        const rough0 = 0.72 + rnd() * 0.2;
         const cornerR = Math.min(pw, ph) * (0.15 + rubble * 0.3);
         const seedOff = rnd() * 10;
+        const chip = rnd();
         for (let yy = Math.floor(py); yy < py + ph; yy++) {
           const y = ((yy % H) + H) % H;
           for (let xx = Math.floor(px); xx < px + pw; xx++) {
             const x = ((xx % W) + W) % W;
             const lx = xx - px, ly = yy - py;
-            // расстояние до края прямоугольника со скруглёнными углами
             const dxE = Math.min(lx, pw - lx);
             const dyE = Math.min(ly, ph - ly);
             let d;
-            if (dxE < cornerR && dyE < cornerR) {
-              d = cornerR - Math.hypot(cornerR - dxE, cornerR - dyE);
-            } else d = Math.min(dxE, dyE);
+            if (dxE < cornerR && dyE < cornerR) d = cornerR - Math.hypot(cornerR - dxE, cornerR - dyE);
+            else d = Math.min(dxE, dyE);
             const u = x / W, v = y / H;
             d += (n.noise(u + seedOff, v, 64) - 0.5) * jitter * 2 + (n.noise(u, v + seedOff, 16) - 0.5) * jitter * (1 + rubble * 2);
             if (d < mortar) continue;
@@ -421,38 +635,33 @@ function makeMasonry({
             const edge = smoothstep(mortar, mortar + 7, d);
             const surf = n.fbm(u + seedOff * 0.1, v, 32, 4);
             const fine = n.noise(u * 4 + seedOff, v * 4, 64);
-            const h = edge * bulge + surf * 0.35 + fine * 0.08 + tilt * (lx / pw - 0.5);
-            hgt[i] = 0.2 + h;
-            const shade = (0.8 + 0.35 * surf + 0.08 * fine) * (0.72 + 0.28 * edge);
-            rgb[i * 3] = col[0] * shade;
-            rgb[i * 3 + 1] = col[1] * shade;
-            rgb[i * 3 + 2] = col[2] * shade;
+            // сколы на гранях
+            const chipped = chip > 0.6 ? smoothstep(0.55, 0.7, n.noise(u + seedOff, v + seedOff, 32)) * (1 - edge * 0.5) : 0;
+            const h = edge * bulge + surf * 0.35 + fine * 0.1 + tilt * (lx / pw - 0.5) - chipped * 0.4;
+            hgt[i] = 0.25 + h;
+            const shade = (0.8 + 0.35 * surf + 0.08 * fine) * (0.75 + 0.25 * edge) * (1 - chipped * 0.15);
+            rgb[i * 3] = col[0] * shade; rgb[i * 3 + 1] = col[1] * shade; rgb[i * 3 + 2] = col[2] * shade;
             rough[i] = rough0;
-            owner[i] = id;
           }
         }
-        id++;
       }
     }
   }
-
-  // пятна грязи/сырости по всей поверхности
+  // потёки, грязь, лишайник
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const u = x / W, v = y / H;
-      const grime = smoothstep(0.5, 0.8, n.fbm(u + 0.3, v + 0.6, 4, 4));
+      const grime = smoothstep(0.5, 0.8, n.fbm(u + 0.3, v * 0.35 + 0.6, 4, 4));
+      const lichen = smoothstep(0.7, 0.78, n.fbm(u + 0.8, v + 0.1, 16, 3));
       const i = y * W + x;
-      const k = 1 - grime * 0.25;
+      const k = 1 - grime * 0.28;
       rgb[i * 3] *= k; rgb[i * 3 + 1] *= k; rgb[i * 3 + 2] *= k * 0.97;
+      rgb[i * 3] += (0.6 - rgb[i * 3]) * lichen * 0.3;
+      rgb[i * 3 + 1] += (0.6 - rgb[i * 3 + 1]) * lichen * 0.3;
+      rgb[i * 3 + 2] += (0.42 - rgb[i * 3 + 2]) * lichen * 0.3;
     }
   }
-
-  const map = toTexture(rgbToCanvas(rgb, W, H));
-  const normalMap = toTexture(heightToNormalCanvas(hgt, W, H, 2.2), { srgb: false });
-  const rc = new Float32Array(W * H * 3);
-  for (let i = 0; i < W * H; i++) rc[i * 3] = rc[i * 3 + 1] = rc[i * 3 + 2] = rough[i];
-  const roughnessMap = toTexture(rgbToCanvas(rc, W, H), { srgb: false });
-  return { map, normalMap, roughnessMap };
+  return finishSet(rgb, hgt, rough, S, { normal: 2.6, ao: 2.2, aoRadius: 6, tileMeters });
 }
 
 function stoneColor(base, tint, rnd) {
@@ -463,12 +672,11 @@ function stoneColor(base, tint, rnd) {
 
 function splitStone(x, y, w, h, rnd, rubble) {
   if (rubble > 0) {
-    // бутовая кладка: камни делятся на неровные куски
     const out = [];
     const nx = w > h * 1.6 ? 2 : 1;
     let cx = x;
     for (let i = 0; i < nx; i++) {
-      const pw = i === nx - 1 ? x + w - cx : w / nx * (0.7 + rnd() * 0.6);
+      const pw = i === nx - 1 ? x + w - cx : (w / nx) * (0.7 + rnd() * 0.6);
       if (rnd() < 0.45 && h > 20) {
         const s = h * (0.35 + rnd() * 0.3);
         out.push([cx, y, pw, s], [cx, y + s, pw, h - s]);

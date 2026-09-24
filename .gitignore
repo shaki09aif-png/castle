@@ -1,2 +1,6 @@
 node_modules/
 dist/
+# ассеты Poly Haven, скачанные скриптом npm run assets (большие файлы)
+public/assets/textures/
+public/assets/hdri/sky.hdr
+public/assets/manifest.json

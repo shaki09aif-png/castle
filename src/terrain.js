@@ -1,22 +1,23 @@
-// Этап 1: холм с неровным рельефом и скальными выходами, отрог с сухим рвом,
-// дорога-серпантин с подпорными стенками, река у подножия, дальние холмы.
+// Рельеф: холм с естественной вершиной и скальными выходами, уступы и осыпи
+// на склонах, терраса с вырубленным в скале рвом, дорога-серпантин с подпорными
+// стенками, извилистая река с неровными берегами, дальние холмы.
 import * as THREE from 'three';
 import { createNoise2D, fbm, ridged, mulberry32, clamp, lerp, smoothstep } from './noise.js';
 import {
   HILL_TOP, GATE_ANGLE, GATE_DIR, GATE_RADIUS, plateauRadius, KEEP_POS, KEEP_RISE,
-  DITCH, SPUR, riverZ, RIVER, WORLD,
+  DITCH, SPUR, riverZ, riverHalfWidth, RIVER, WORLD,
 } from './layout.js';
-import {
-  grassTexture, rockTexture, dirtTexture, sandTexture, macroNoiseTexture, roadTexture,
-  waterNormal, masonry,
-} from './textures.js';
-import { triplanarMaterial } from './materials.js';
+import { textureArrays, macroNoiseTexture, pbrMaterial } from './textures.js';
+import { triplanarMaterial, TRIPLANAR_GLSL } from './materials.js';
+import { Q } from './quality.js';
 
 const nPlain = createNoise2D(101);
 const nHill = createNoise2D(202);
 const nRock = createNoise2D(303);
 const nFar = createNoise2D(404);
 const nTop = createNoise2D(505);
+const nWarp = createNoise2D(606);
+const nBank = createNoise2D(707);
 
 function angDiff(a, b) {
   let d = a - b;
@@ -24,20 +25,17 @@ function angDiff(a, b) {
   while (d < -Math.PI) d += Math.PI * 2;
   return d;
 }
-
-// гладкий максимум двух высот
-function smax(a, b, k) {
-  const h = clamp(0.5 + 0.5 * (a - b) / k, 0, 1);
-  return lerp(b, a, h) + k * h * (1 - h);
+function smin(a, b, k) {
+  const h = clamp(0.5 + 0.5 * (b - a) / k, 0, 1);
+  return lerp(b, a, h) - k * h * (1 - h);
 }
 
 // ---------------------------------------------------------------------------
-// Высота «естественного» рельефа (без дороги)
+// Составляющие рельефа
 // ---------------------------------------------------------------------------
 function plainHeight(x, z) {
-  let h = 2.6 + fbm(nPlain, x / 260, z / 260, 4) * 2.4 + fbm(nPlain, x / 45 + 7, z / 45, 3) * 0.3;
-  h = 0.9 + Math.log1p(Math.exp((h - 0.9) * 2)) / 2; // мягкое ограничение снизу: без луж на равнине
-  // дальние холмы
+  let h = 2.6 + fbm(nPlain, x / 260, z / 260, 4) * 2.4 + fbm(nPlain, x / 45 + 7, z / 45, 3) * 0.35;
+  h = 0.9 + Math.log1p(Math.exp((h - 0.9) * 2)) / 2; // мягкое ограничение снизу
   const r = Math.hypot(x, z);
   const far = smoothstep(420, 1500, r);
   if (far > 0) {
@@ -48,39 +46,48 @@ function plainHeight(x, z) {
   return h;
 }
 
-// Форма склона холма: 1 на кромке площадки → 0 у подножия.
-// Верх крутой (скалы), книзу склон вогнуто выполаживается.
 function gateFactor(theta) {
   return Math.exp(-Math.pow(angDiff(theta, GATE_ANGLE) / 0.75, 2)); // 1 — южная, более пологая сторона
 }
+// 1 на кромке площадки → 0 у подножия
 function hillProfile(e, theta) {
   const gf = gateFactor(theta);
-  const L = 175 + 20 * gf;
-  const pw = 2.3 - 0.95 * gf;
+  const L = 180 + 20 * gf;
+  const pw = 2.2 - 0.85 * gf;
   const x = e / L;
   if (x >= 1) return 0;
   return Math.pow(1 - x, pw);
 }
 
-// Рельеф поверхности площадки на вершине
-function topHeight(x, z) {
+// Поверхность вершины: пологие перепады, самая высокая точка — у донжона,
+// по краю — выходы коренной породы.
+function topHeight(x, z, eP) {
   const dk = (x - KEEP_POS.x) ** 2 + (z - KEEP_POS.z) ** 2;
-  return HILL_TOP + KEEP_RISE * Math.exp(-dk / (2 * 17 * 17)) + fbm(nTop, x / 25, z / 25, 3) * 0.35;
+  let h = HILL_TOP + KEEP_RISE * Math.exp(-dk / (2 * 18 * 18));
+  h += fbm(nTop, x / 45, z / 45, 3) * 1.3 + fbm(nTop, x / 14 + 5, z / 14, 2) * 0.25;
+  h -= smoothstep(-25, 0, eP) * 0.8; // лёгкий уклон от центра к краям
+  const band = smoothstep(-7, -2, eP) * (1 - smoothstep(0, 4, eP));
+  if (band > 0) {
+    const rb = ridged(nRock, x / 9, z / 9, 3);
+    const patch = smoothstep(0.0, 0.35, fbm(nRock, x / 35 + 3, z / 35, 2));
+    h += band * patch * Math.max(0, rb - 0.35) * 3.2;
+  }
+  return h;
 }
 
-// Сколько «скальности» в точке (выходы породы на крутых верхних склонах)
+// «Скальность»: обрывы под кромкой и пятна выходов породы на склонах
 function rockiness(e, theta, x, z) {
   if (e < -1) return 0;
   const gf = gateFactor(theta);
-  const cliff = smoothstep(-1, 2, e) * (1 - smoothstep(10 - gf * 5, 26 - gf * 10, e));
+  const cliff = smoothstep(-1, 2, e) * (1 - smoothstep(12 - gf * 5, 28 - gf * 10, e));
   const patch = smoothstep(0.05, 0.4, fbm(nRock, x / 60, z / 60, 3));
-  const band = smoothstep(4, 12, e) * (1 - smoothstep(60, 110, e));
-  return Math.max(cliff * (0.55 + 0.45 * patch), band * patch * 0.85 * (1 - gf * 0.6));
+  const band = smoothstep(6, 14, e) * (1 - smoothstep(70, 130, e));
+  const bands2 = smoothstep(0.25, 0.5, fbm(nRock, x / 34 + 9, z / 34, 3)) * band;
+  return Math.max(cliff * (0.55 + 0.45 * patch), band * patch * 0.75 * (1 - gf * 0.5), bands2 * 0.9);
 }
 
-// Уступ к югу от ворот: знаковое расстояние до скруглённого прямоугольника
-// (отрицательное — внутри), в координатах along/across.
-function shelfDistance(along, across) {
+// Терраса перед воротами: знаковое расстояние до скруглённого прямоугольника
+export function shelfDistance(along, across) {
   const cx = SPUR.length / 2 - 4;
   const hx = SPUR.length / 2 + 4 - SPUR.corner;
   const hz = SPUR.halfWidth - SPUR.corner;
@@ -90,14 +97,8 @@ function shelfDistance(along, across) {
   return out + Math.min(Math.max(qx, qz), 0) - SPUR.corner;
 }
 
-function smin(a, b, k) {
-  const h = clamp(0.5 + 0.5 * (b - a) / k, 0, 1);
-  return lerp(b, a, h) - k * h * (1 - h);
-}
-
-// Сухой ров поперёк отрога
+// Сухой ров поперёк террасы
 function ditchCut(along, across) {
-  // стенки рва неровные: следы вырубки и сколы пластов
   const j0 = fbm(nRock, across / 9, 1.3, 3) * 0.9;
   const j1 = fbm(nRock, across / 9, 7.7, 3) * 0.9;
   const din = Math.min(along - (DITCH.alongStart + j0), DITCH.alongEnd + j1 - along);
@@ -105,26 +106,42 @@ function ditchCut(along, across) {
   const floor = HILL_TOP - DITCH.depth + fbm(nRock, along / 5, across / 5, 3) * 0.6;
   const wall = 1 - smoothstep(-0.6, 1.2, din);
   let h = floor + DITCH.depth * 1.5 * wall;
-  h += wall * (1 - wall) * 4 * ridged(nRock, along / 3, across / 3, 2) * 1.2; // уступы на стенках
+  h += wall * (1 - wall) * 4 * ridged(nRock, along / 3, across / 3, 2) * 1.2;
   h += smoothstep(DITCH.halfLength - 8, DITCH.halfLength, Math.abs(across)) * 40;
   return h;
 }
 
-export function riverDistance(x, z) {
+// Река: знаковое расстояние от оси, ширина с учётом неровного берега,
+// признак внутренней стороны излучины (там галечные пляжи).
+export function riverInfo(x, z) {
   const zr = riverZ(x);
-  const dzdx = (riverZ(x + 1) - riverZ(x - 1)) / 2;
-  return Math.abs(z - zr) / Math.sqrt(1 + dzdx * dzdx);
+  const d1 = (riverZ(x + 1) - riverZ(x - 1)) / 2;
+  const d2 = riverZ(x + 1) - 2 * zr + riverZ(x - 1);
+  const sd = (z - zr) / Math.sqrt(1 + d1 * d1);
+  const side = sd >= 0 ? 1 : -1;
+  const hw = riverHalfWidth(x) + fbm(nBank, x / 22, side * 7.3, 3) * 2.2;
+  const inner = clamp(side * d2 * 60, 0, 1); // вогнутая сторона излучины
+  return { sd, d: Math.abs(sd), e: Math.abs(sd) - hw, hw, inner, side };
+}
+export function riverDistance(x, z) {
+  return riverInfo(x, z).d;
 }
 
 function riverCut(x, z) {
-  const d = riverDistance(x, z);
-  const hw = RIVER.halfWidth;
-  if (d < hw) return RIVER.waterLevel - RIVER.depth * (1 - Math.pow(d / hw, 2)) + 0.3;
-  const e = d - hw;
-  return RIVER.waterLevel + 0.3 + e * 0.1 + Math.pow(e / 55, 2) * 12;
+  const ri = riverInfo(x, z);
+  if (ri.e > 400) return Infinity;
+  const wl = RIVER.waterLevel;
+  if (ri.e < 0) {
+    const t = clamp(-ri.e / ri.hw, 0, 1);
+    return wl + 0.05 - RIVER.depth * smoothstep(0, 0.7, t) + fbm(nBank, x / 6, z / 6, 2) * 0.25;
+  }
+  // берег: на внешней стороне излучины — крутой обрывчик, на внутренней — пологий пляж
+  const steep = lerp(0.55, 0.07, ri.inner) * (0.7 + 0.6 * (fbm(nBank, x / 40, z / 40, 2) * 0.5 + 0.5));
+  const e = ri.e;
+  // вдали — широкая пологая долина, а не каньон в дальних холмах
+  return wl + 0.05 + Math.min(e * steep, 1.4 + e * 0.05) + Math.pow(e / 90, 2) * 9 + Math.pow(e / 160, 3) * 30;
 }
 
-// Слегка «ступенчатый» рельеф на скальных участках — пласты породы.
 function terrace(h, step) {
   const f = h / step;
   const fi = Math.floor(f);
@@ -132,7 +149,8 @@ function terrace(h, step) {
   return (fi + smoothstep(0.15, 0.85, fr) * 0.35 + fr * 0.65) * step;
 }
 
-export function baseHeight(x, z) {
+// Полное описание точки естественного рельефа (без дороги)
+function sampleNatural(x, z) {
   const r = Math.hypot(x, z);
   const theta = Math.atan2(z, x);
   const R = plateauRadius(theta);
@@ -140,46 +158,51 @@ export function baseHeight(x, z) {
   const across = x * GATE_DIR.z - z * GATE_DIR.x;
   const eP = r - R;
   const eS = shelfDistance(along, across);
-  // терраса-уступ сливается с площадкой в единую вершину
   const e = smin(eP, eS, 6);
   const ws = smoothstep(-5, 5, eP - eS);
-  const shelfTop = HILL_TOP - SPUR.drop - Math.max(0, along) * 0.03 + fbm(nTop, x / 20, z / 20, 2) * 0.3;
-  const top = lerp(topHeight(x, z), shelfTop, ws);
-  const plain = plainHeight(x, z);
+  const shelfTop = HILL_TOP - SPUR.drop - Math.max(0, along) * 0.03 + fbm(nTop, x / 20, z / 20, 2) * 0.35;
+  const top = lerp(topHeight(x, z, eP), shelfTop, ws);
   let h;
+  let rk = 0;
   if (e <= 0) h = top;
   else {
-    // лопасти и отроги: искажаем расстояние до кромки шумом
-    const eD = e + fbm(nHill, x / 95, z / 95, 3) * 22 * smoothstep(0, 35, e);
+    // плавное «плечо» у кромки вершины
+    const es = e < 8 ? (e * e) / 16 : e - 4;
+    // искажённые координаты: неровные лопасти, отроги и ложбины разного масштаба
+    const wx = x + fbm(nWarp, x / 150, z / 150, 3) * 45;
+    const wz = z + fbm(nWarp, x / 150 + 7, z / 150, 3) * 45;
+    const eD = es + fbm(nHill, wx / 120, wz / 120, 3) * 22 * smoothstep(0, 40, e);
     const P = hillProfile(Math.max(0, eD), theta);
+    const plain = plainHeight(x, z);
     h = plain + (top - plain) * P;
-    // лощины и гребни на склонах
-    // лощины вытянуты вниз по склону: шум в полярных координатах
-    // (координаты шума: касательная частота высокая, радиальная — низкая; без разрыва на ±π)
-    const mid = smoothstep(6, 30, e) * P;
-    const kk = 5.5 + e / 150;
-    const gully = Math.pow(1 - Math.abs(fbm(nHill, Math.cos(theta) * kk + 40, Math.sin(theta) * kk, 2)), 3);
-    h -= mid * gully * 7;
-    const rk = rockiness(e, theta, x, z);
+    const amp = smoothstep(3, 25, e) * Math.sqrt(P);
+    h += amp * (fbm(nHill, wx / 65, wz / 65, 4) * 4.5 + fbm(nHill, wx / 21 + 3, wz / 21, 3) * 1.3);
+    // редкие неглубокие промоины — только в отдельных местах, не по всему склону
+    const gm = smoothstep(0.15, 0.45, fbm(nWarp, x / 200 + 3, z / 200, 2));
+    h -= amp * gm * Math.pow(ridged(nHill, wx / 45 + 11, wz / 45, 2), 3) * 3.5;
+    rk = rockiness(e, theta, x, z);
     if (rk > 0) {
-      h += rk * (ridged(nRock, x / 26, z / 26, 4) * 6 - 2.5) * smoothstep(0, 6, e);
-      h = lerp(h, terrace(h, 4.5), rk * 0.85);
+      h += rk * (ridged(nRock, wx / 26, wz / 26, 4) * 6 - 2.4) * smoothstep(0, 6, e);
+      const stepH = 3.5 + 2.5 * (fbm(nRock, x / 90, z / 90, 2) * 0.5 + 0.5);
+      h = lerp(h, terrace(h, stepH), rk * 0.8);
     }
-    h += fbm(nHill, x / 45, z / 45, 3) * 0.9 * smoothstep(0, 20, e);
+    h += fbm(nHill, x / 7, z / 7, 2) * 0.18 * smoothstep(0, 10, e); // мелкие кочки
   }
-  // сухой ров поперёк уступа
   if (Math.abs(across) < DITCH.halfLength + 2) h = Math.min(h, ditchCut(along, across));
-  // русло реки
   h = Math.min(h, riverCut(x, z));
-  return h;
+  return { h, e, eP, theta, rk, along, across };
+}
+
+export function baseHeight(x, z) {
+  return sampleNatural(x, z).h;
 }
 
 // ---------------------------------------------------------------------------
-// Дорога-серпантин
+// Дорога-серпантин (идёт с постоянным уклоном, в конце петли — шпилька)
 // ---------------------------------------------------------------------------
-const ROAD_HW = 2.3; // половина ширины проезжей части
+const ROAD_HW = 2.3;
 const ROAD_STEP = 1.5;
-const ROAD_RIDGE_END = 30; // до этой точки дорога идёт прямо по гребню отрога
+const ROAD_RIDGE_END = 30;
 
 function gradient(x, z, eps = 3) {
   return [
@@ -189,14 +212,12 @@ function gradient(x, z, eps = 3) {
 }
 
 export function buildRoadPath() {
-  const pts = []; // {x, z, hairpin, bridge}
-  // 1) по гребню отрога от барбакана наружу
+  const pts = [];
   for (let a = DITCH.alongEnd + 1.5; a <= ROAD_RIDGE_END; a += ROAD_STEP) {
     pts.push({ x: GATE_DIR.x * (GATE_RADIUS + a), z: GATE_DIR.z * (GATE_RADIUS + a) });
   }
-  // 2) серпантин по южному склону: «идём» с постоянным уклоном
   let p = { ...pts[pts.length - 1] };
-  let dir = { x: GATE_DIR.z, z: -GATE_DIR.x }; // сворачиваем вдоль уступа на восток
+  let dir = { x: GATE_DIR.z, z: -GATE_DIR.x };
   let sigma = 1;
   let leg = 0;
   const grade = 0.065;
@@ -204,18 +225,14 @@ export function buildRoadPath() {
   for (let step = 0; step < 4000; step++) {
     const h = baseHeight(p.x, p.z);
     if (h < 4.2 && step > 50) break;
-    const [gx, gz] = gradient(p.x, p.z, 11); // крупный масштаб: не «сваливаться» в лощины
+    const [gx, gz] = gradient(p.x, p.z, 11);
     const gl = Math.hypot(gx, gz) + 1e-6;
     const u = { x: -gx / gl, z: -gz / gl };
     const t = { x: sigma * u.z, z: -sigma * u.x };
     const s = Math.min(0.9, grade / gl);
     const c = Math.sqrt(1 - s * s);
-    // на ровном месте (терраса) просто продолжаем движение
     const flat = smoothstep(grade * 2.5, grade * 1.2, gl);
-    const want = {
-      x: lerp(t.x * c + u.x * s, dir.x, flat),
-      z: lerp(t.z * c + u.z * s, dir.z, flat),
-    };
+    const want = { x: lerp(t.x * c + u.x * s, dir.x, flat), z: lerp(t.z * c + u.z * s, dir.z, flat) };
     dir.x = lerp(dir.x, want.x, 0.25);
     dir.z = lerp(dir.z, want.z, 0.25);
     const dl = Math.hypot(dir.x, dir.z);
@@ -223,12 +240,10 @@ export function buildRoadPath() {
     p = { x: p.x + dir.x * ROAD_STEP, z: p.z + dir.z * ROAD_STEP };
     pts.push({ ...p });
     leg += ROAD_STEP;
-    // поперечное смещение от оси ворот: плечи серпантина не уходят за пределы южного склона
     const pa = p.x * GATE_DIR.x + p.z * GATE_DIR.z - GATE_RADIUS;
-    const pc = p.x * GATE_DIR.z - p.z * GATE_DIR.x; // >0 — к востоку при воротах на юг
+    const pc = p.x * GATE_DIR.z - p.z * GATE_DIR.x;
     const W = 30 + Math.max(0, pa) * 0.16 + (turns % 2) * 8;
     if (leg > 40 && ((sigma > 0 && pc > W) || (sigma < 0 && pc < -W))) {
-      // шпилька: полуокружность в сторону спуска
       const Rh = 8.5;
       let n = { x: dir.z, z: -dir.x };
       if (n.x * u.x + n.z * u.z < 0) n = { x: -n.x, z: -n.z };
@@ -249,7 +264,7 @@ export function buildRoadPath() {
       turns++;
     }
   }
-  // 3) к броду/мосту через реку и дальше к деревне
+  // к мосту через реку и дальше к деревне
   const last = pts[pts.length - 1];
   const bx = last.x + 25;
   const bridge = { x: bx, z: riverZ(bx) };
@@ -261,21 +276,20 @@ export function buildRoadPath() {
       pts.push({ x: lerp(from.x, to.x, t), z: lerp(from.z, to.z, t), ...flag });
     }
   };
-  // выравниваем подход к мосту перпендикулярно реке
   const dzdx = (riverZ(bx + 1) - riverZ(bx - 1)) / 2;
   const nl = Math.hypot(dzdx, 1);
-  const rn = { x: -dzdx / nl, z: 1 / nl }; // нормаль к руслу (на юг)
+  const rn = { x: -dzdx / nl, z: 1 / nl };
+  const span = riverHalfWidth(bx) + 5;
   const approach = { x: bridge.x - rn.x * 35, z: bridge.z - rn.z * 35 };
   segTo(last, approach);
-  const bankA = { x: bridge.x - rn.x * (RIVER.halfWidth + 3), z: bridge.z - rn.z * (RIVER.halfWidth + 3) };
-  const bankB = { x: bridge.x + rn.x * (RIVER.halfWidth + 3), z: bridge.z + rn.z * (RIVER.halfWidth + 3) };
+  const bankA = { x: bridge.x - rn.x * span, z: bridge.z - rn.z * span };
+  const bankB = { x: bridge.x + rn.x * span, z: bridge.z + rn.z * span };
   segTo(approach, bankA);
   segTo(bankA, bankB, { bridge: true });
   const beyond = { x: bankB.x + rn.x * 45 + 20, z: bankB.z + rn.z * 45 };
   segTo(bankB, beyond);
   segTo(beyond, { x: beyond.x + 60, z: beyond.z + 30 });
 
-  // сглаживание траектории (кроме участка по гребню)
   const fixed = Math.ceil((ROAD_RIDGE_END - DITCH.alongEnd - 1) / ROAD_STEP);
   for (let it = 0; it < 3; it++) {
     for (let i = fixed; i < pts.length - 1; i++) {
@@ -284,13 +298,10 @@ export function buildRoadPath() {
       pts[i].z = (pts[i - 1].z + pts[i].z * 2 + pts[i + 1].z) / 4;
     }
   }
-
-  // высоты: естественный рельеф, сглаженный вдоль дороги
   const raw = pts.map((q) => baseHeight(q.x, q.z));
-  // над рекой — уровень берегов (там будет мост)
-  let bi0 = pts.findIndex((q) => q.bridge);
-  let bi1 = pts.length - 1 - [...pts].reverse().findIndex((q) => q.bridge);
-  const deck = Math.max(raw[bi0 - 1], raw[bi1 + 1]);
+  const bi0 = pts.findIndex((q) => q.bridge);
+  const bi1 = pts.length - 1 - [...pts].reverse().findIndex((q) => q.bridge);
+  const deck = Math.max(raw[bi0 - 1], raw[bi1 + 1], RIVER.waterLevel + 2);
   for (let i = bi0; i <= bi1; i++) raw[i] = deck;
   let hs = raw.slice();
   const W = 14;
@@ -308,21 +319,18 @@ export function buildRoadPath() {
     }
     hs = out;
   }
-  // у ворот дорога точно на гребне
   for (let i = 0; i < pts.length; i++) {
     pts[i].h = hs[i];
     pts[i].raw = raw[i];
     if (i < fixed) pts[i].h = raw[i];
     else if (i < fixed + 20) pts[i].h = lerp(raw[i], hs[i], (i - fixed) / 20);
   }
-  // длина вдоль пути
   let s = 0;
   pts[0].s = 0;
   for (let i = 1; i < pts.length; i++) {
     s += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
     pts[i].s = s;
   }
-  // направление и определение сторон насыпи (нужна подпорная стенка?)
   for (let i = 0; i < pts.length; i++) {
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
     let dx = b.x - a.x, dz = b.z - a.z;
@@ -330,15 +338,12 @@ export function buildRoadPath() {
     dx /= l; dz /= l;
     pts[i].dx = dx; pts[i].dz = dz;
     const off = ROAD_HW + 1.6;
-    const lh = baseHeight(pts[i].x - dz * off, pts[i].z + dx * off);
-    const rh = baseHeight(pts[i].x + dz * off, pts[i].z - dx * off);
-    pts[i].fillL = pts[i].h - lh;
-    pts[i].fillR = pts[i].h - rh;
+    pts[i].fillL = pts[i].h - baseHeight(pts[i].x - dz * off, pts[i].z + dx * off);
+    pts[i].fillR = pts[i].h - baseHeight(pts[i].x + dz * off, pts[i].z - dx * off);
   }
   return pts;
 }
 
-// Пространственный индекс отрезков дороги
 class SegmentGrid {
   constructor(pts, cell, reach) {
     this.pts = pts;
@@ -351,7 +356,7 @@ class SegmentGrid {
       const z0 = Math.floor((Math.min(a.z, b.z) - reach) / cell);
       const z1 = Math.floor((Math.max(a.z, b.z) + reach) / cell);
       for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) {
-        const k = gx * 73856093 ^ gz * 19349663;
+        const k = (gx * 73856093) ^ (gz * 19349663);
         let list = this.map.get(k);
         if (!list) this.map.set(k, (list = []));
         list.push(i);
@@ -359,7 +364,7 @@ class SegmentGrid {
     }
   }
   nearest(x, z) {
-    const k = Math.floor(x / this.cell) * 73856093 ^ Math.floor(z / this.cell) * 19349663;
+    const k = (Math.floor(x / this.cell) * 73856093) ^ (Math.floor(z / this.cell) * 19349663);
     const list = this.map.get(k);
     if (!list) return null;
     let best = null, bd = Infinity;
@@ -368,12 +373,10 @@ class SegmentGrid {
       const ex = b.x - a.x, ez = b.z - a.z;
       const l2 = ex * ex + ez * ez || 1;
       const t = clamp(((x - a.x) * ex + (z - a.z) * ez) / l2, 0, 1);
-      const px = a.x + ex * t, pz = a.z + ez * t;
-      const d = Math.hypot(x - px, z - pz);
+      const d = Math.hypot(x - (a.x + ex * t), z - (a.z + ez * t));
       if (d < bd) {
         bd = d;
-        const side = ex * (z - a.z) - ez * (x - a.x); // >0 — слева
-        best = { i, t, d, side };
+        best = { i, t, d, side: ex * (z - a.z) - ez * (x - a.x) };
       }
     }
     return best;
@@ -381,73 +384,71 @@ class SegmentGrid {
 }
 
 // ---------------------------------------------------------------------------
-// Сетка рельефа: мелкий шаг вокруг холма, крупный — к горизонту
+// Сетка: мелкий шаг вокруг холма и реки, крупный — к горизонту
 // ---------------------------------------------------------------------------
-const GRID_N = 620;
-const U0 = 500 / GRID_N;
+const GRID_N = Math.round(620 * Q.terrainDetail);
+const U0 = (GRID_N - 120) / GRID_N;
 const WA = WORLD.detailHalf / U0;
 const WC = (WORLD.half - WA) / Math.pow(1 - U0, 3);
-
 function warp(u) {
   const a = Math.abs(u);
-  const v = a <= U0 ? WA * a : WA * a + WC * Math.pow(a - U0, 3);
-  return Math.sign(u) * v;
+  return Math.sign(u) * (a <= U0 ? WA * a : WA * a + WC * Math.pow(a - U0, 3));
 }
 function unwarp(x) {
   const a = Math.abs(x);
   if (a <= WA * U0) return Math.sign(x) * (a / WA);
-  let u = a / WA > 1 ? 1 : a / WA;
+  let u = Math.min(1, a / WA);
   for (let i = 0; i < 30; i++) {
     const f = WA * u + WC * Math.pow(u - U0, 3) - a;
-    const df = WA + 3 * WC * Math.pow(u - U0, 2);
-    u -= f / df;
+    u -= f / (WA + 3 * WC * Math.pow(u - U0, 2));
   }
   return Math.sign(x) * u;
 }
+
+// слои материала рельефа
+const LAYERS = ['grass', 'rock', 'dirt', 'gravel'];
 
 export function createTerrain(scene) {
   const road = buildRoadPath();
   const grid = new SegmentGrid(road, 10, 22);
   const walls = computeWallRuns(road);
 
-  // финальная высота с учётом полотна дороги
-  function carvedHeight(x, z, h0) {
+  function carve(x, z, h0) {
     const q = grid.nearest(x, z);
     if (!q || q.d > 22) return { h: h0, road: 0 };
     const a = road[q.i], b = road[q.i + 1];
     if (a.bridge && b.bridge) return { h: h0, road: 0 };
     const rh = lerp(a.h, b.h, q.t);
     const inner = ROAD_HW + 0.9;
-    const left = q.side > 0;
-    const walled = left ? a.wallL || b.wallL : a.wallR || b.wallR;
+    const walled = q.side > 0 ? a.wallL || b.wallL : a.wallR || b.wallR;
     const diff = rh - h0;
-    let F;
-    if (diff > 0) F = walled ? 0.7 : Math.max(3, diff * 1.7); // насыпь
-    else F = Math.max(2.5, -diff * 0.8); // выемка
+    const F = diff > 0 ? (walled ? 0.7 : Math.max(3, diff * 1.7)) : Math.max(2.5, -diff * 0.8);
     const w = 1 - smoothstep(inner, inner + F, q.d);
-    const nearRiver = riverDistance(x, z) < RIVER.halfWidth + 1.5;
-    return { h: nearRiver ? h0 : lerp(h0, rh, w), road: 1 - smoothstep(ROAD_HW - 0.5, ROAD_HW + 2.5, q.d) };
+    const nearRiver = riverInfo(x, z).e < 1.5;
+    return { h: nearRiver ? h0 : lerp(h0, rh, w), road: 1 - smoothstep(ROAD_HW - 0.3, ROAD_HW + 2.2, q.d) };
   }
 
-  // --- геометрия рельефа ---
+  // --- геометрия ---
   const N = GRID_N;
   const V = N + 1;
   const xs = new Float32Array(V);
   for (let i = 0; i <= N; i++) xs[i] = warp((i / N) * 2 - 1);
   const pos = new Float32Array(V * V * 3);
   const heights = new Float32Array(V * V);
-  const roadW = new Float32Array(V * V);
+  const info = new Float32Array(V * V * 4); // дорога, скальность, расстояние до кромки, до реки
   for (let j = 0; j < V; j++) {
     const z = xs[j];
     for (let i = 0; i < V; i++) {
       const x = xs[i];
-      let h = baseHeight(x, z);
-      const c = carvedHeight(x, z, h);
-      h = c.h;
+      const sN = sampleNatural(x, z);
+      const c = carve(x, z, sN.h);
       const k = j * V + i;
-      heights[k] = h;
-      roadW[k] = c.road;
-      pos[k * 3] = x; pos[k * 3 + 1] = h; pos[k * 3 + 2] = z;
+      heights[k] = c.h;
+      info[k * 4] = c.road;
+      info[k * 4 + 1] = sN.rk;
+      info[k * 4 + 2] = sN.eP;
+      info[k * 4 + 3] = Math.abs(x) < 900 && Math.abs(z) < 900 ? riverInfo(x, z).e : 999;
+      pos[k * 3] = x; pos[k * 3 + 1] = c.h; pos[k * 3 + 2] = z;
     }
   }
   const index = new Uint32Array(N * N * 6);
@@ -464,38 +465,41 @@ export function createTerrain(scene) {
   geo.setIndex(new THREE.BufferAttribute(index, 1));
   geo.computeVertexNormals();
 
-  // веса материалов: трава, скала, земля, прибрежный песок
+  // --- веса слоёв: трава / скала / земля / галька ---
   const nrm = geo.getAttribute('normal');
   const splat = new Float32Array(V * V * 4);
-  const rnd = mulberry32(9);
   for (let k = 0; k < V * V; k++) {
     const x = pos[k * 3], z = pos[k * 3 + 2], h = pos[k * 3 + 1];
-    const slope = 1 - nrm.getY(k);
-    const r = Math.hypot(x, z);
-    const theta = Math.atan2(z, x);
-    const e = r - plateauRadius(theta);
-    let rock = smoothstep(0.3, 0.55, slope);
-    rock = Math.max(rock, rockiness(e, theta, x, z) * smoothstep(0.12, 0.3, slope));
-    // стенки и дно рва — голая скала
+    const slope = 1 - nrm.getY(k); // 0 — горизонталь
+    const roadW = info[k * 4], rk = info[k * 4 + 1], eP = info[k * 4 + 2], re = info[k * 4 + 3];
+    // по крутизне: трава держится до ~40°, круче — скала
+    let rock = smoothstep(0.24, 0.42, slope);
+    rock = Math.max(rock, rk * smoothstep(0.1, 0.26, slope));
+    if (eP > -7 && eP < 3) rock = Math.max(rock, smoothstep(0.06, 0.16, slope) * 0.9); // выходы по кромке
     const along = x * GATE_DIR.x + z * GATE_DIR.z - GATE_RADIUS;
     const across = x * GATE_DIR.z - z * GATE_DIR.x;
-    if (along > DITCH.alongStart - 1 && along < DITCH.alongEnd + 1 && Math.abs(across) < DITCH.halfLength) {
-      rock = Math.max(rock, h < HILL_TOP - 1 ? 0.95 : 0);
+    if (along > DITCH.alongStart - 1.5 && along < DITCH.alongEnd + 1.5 && Math.abs(across) < DITCH.halfLength && h < HILL_TOP - 1) rock = 1;
+    // осыпи: мелкий камень под скальными поясами
+    const theta = Math.atan2(z, x);
+    const eHere = Math.hypot(x, z) - plateauRadius(theta);
+    const above = eHere > 0 ? rockiness(eHere - 14, theta, x, z) : 0;
+    let gravel = smoothstep(0.3, 0.7, above) * smoothstep(0.08, 0.2, slope) * (1 - rock) * 0.9;
+    // берега: у самой воды ил и галька, на внутренних излучинах — пляж
+    if (re < 6) {
+      const ri = riverInfo(x, z);
+      gravel = Math.max(gravel, (1 - smoothstep(0.3, 1.2 + ri.inner * 6, re)) * (0.55 + ri.inner * 0.45));
     }
-    // вытоптанная земля по кромке площадки и у дороги
-    let dirt = roadW[k] * 0.9;
-    if (e < 2 && e > -6) dirt = Math.max(dirt, 0.35 * smoothstep(-6, 0, e) * (0.5 + rnd() * 0.5));
-    if (e <= -6) dirt = Math.max(dirt, 0.25); // площадка — будущий двор
-    const rd = riverDistance(x, z);
-    const sand = 1 - smoothstep(RIVER.halfWidth + 1, RIVER.halfWidth + 6, rd);
-    rock *= 1 - sand;
-    dirt *= 1 - rock * 0.7;
-    let grass = Math.max(0, 1 - rock - dirt - sand);
-    const sum = grass + rock + dirt + sand || 1;
+    // дорога и вытоптанная земля; двор замка — утоптанная земля с травой
+    let dirt = roadW * 0.95;
+    if (eP < -4) dirt = Math.max(dirt, 0.35);
+    rock *= 1 - gravel * 0.5;
+    dirt *= 1 - rock * 0.8;
+    const grass = Math.max(0, 1 - rock - dirt - gravel);
+    const sum = grass + rock + dirt + gravel || 1;
     splat[k * 4] = grass / sum;
     splat[k * 4 + 1] = rock / sum;
     splat[k * 4 + 2] = dirt / sum;
-    splat[k * 4 + 3] = sand / sum;
+    splat[k * 4 + 3] = gravel / sum;
   }
   geo.setAttribute('splat', new THREE.BufferAttribute(splat, 4));
   geo.computeBoundingSphere();
@@ -503,56 +507,65 @@ export function createTerrain(scene) {
   const mat = makeTerrainMaterial();
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
-  mesh.castShadow = true;
+  // рельеф не рисуется в карту теней: это самый «тяжёлый» объект, а склоны,
+  // отвёрнутые от солнца, и так затеняются по освещению
+  mesh.castShadow = false;
   mesh.name = 'terrain';
   scene.add(mesh);
 
   // --- выборка высоты сетки (совпадает с треугольниками) ---
-  function heightAt(x, z) {
-    const u = (unwarp(x) + 1) / 2 * N;
-    const v = (unwarp(z) + 1) / 2 * N;
+  function cellOf(x, z) {
+    const u = ((unwarp(x) + 1) / 2) * N;
+    const v = ((unwarp(z) + 1) / 2) * N;
     const i = clamp(Math.floor(u), 0, N - 1);
     const j = clamp(Math.floor(v), 0, N - 1);
-    const fx = clamp((x - xs[i]) / (xs[i + 1] - xs[i]), 0, 1);
-    const fz = clamp((z - xs[j]) / (xs[j + 1] - xs[j]), 0, 1);
+    return {
+      i, j,
+      fx: clamp((x - xs[i]) / (xs[i + 1] - xs[i]), 0, 1),
+      fz: clamp((z - xs[j]) / (xs[j + 1] - xs[j]), 0, 1),
+    };
+  }
+  function heightAt(x, z) {
+    const { i, j, fx, fz } = cellOf(x, z);
     const h00 = heights[j * V + i], h10 = heights[j * V + i + 1];
     const h01 = heights[(j + 1) * V + i], h11 = heights[(j + 1) * V + i + 1];
     if (fx + fz <= 1) return h00 + (h10 - h00) * fx + (h01 - h00) * fz;
     return h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
   }
+  // сведения о поверхности для расстановки растительности
+  function groundAt(x, z) {
+    const { i, j, fx, fz } = cellOf(x, z);
+    const k = (fz < 0.5 ? j : j + 1) * V + (fx < 0.5 ? i : i + 1);
+    return {
+      h: heightAt(x, z),
+      grass: splat[k * 4], rock: splat[k * 4 + 1], dirt: splat[k * 4 + 2], gravel: splat[k * 4 + 3],
+      slope: 1 - nrm.getY(k),
+      eP: info[k * 4 + 2],
+      river: info[k * 4 + 3],
+      road: info[k * 4],
+    };
+  }
 
-  const roadMesh = buildRoadMesh(road);
-  scene.add(roadMesh);
-  const wallMesh = buildRetainingWalls(road, walls, heightAt);
-  scene.add(wallMesh);
-  const rocks = buildRocks(heightAt, grid);
-  rocks.forEach((r) => scene.add(r));
-  const water = buildRiver();
-  scene.add(water);
+  scene.add(buildRoadMesh(road));
+  scene.add(buildRetainingWalls(road, walls, heightAt));
+  buildRocks(heightAt, grid, groundAt).forEach((r) => scene.add(r));
 
-  return {
-    mesh,
-    heightAt,
-    road,
-    roadNearest: (x, z) => grid.nearest(x, z),
-    update(t) {
-      const nm = water.material.normalMap;
-      nm.offset.set(t * 0.012, t * 0.02);
-    },
-  };
+  return { mesh, heightAt, groundAt, road, roadNearest: (x, z) => grid.nearest(x, z) };
 }
 
 // ---------------------------------------------------------------------------
-// Материал рельефа: смешивание процедурных текстур по весам + трипланар для скал
+// Материал рельефа: 4 PBR-слоя в текстурных массивах, трипланарная проекция,
+// смешивание по весам с учётом «высоты» текстуры (трава прорастает между камнями).
 // ---------------------------------------------------------------------------
 function makeTerrainMaterial() {
-  const mat = new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0 });
+  const arr = textureArrays(LAYERS, Q.textureSize);
+  const mat = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 });
   const uniforms = {
-    tGrass: { value: grassTexture() },
-    tRock: { value: rockTexture() },
-    tDirt: { value: dirtTexture() },
-    tSand: { value: sandTexture() },
+    tArrC: { value: arr.color },
+    tArrN: { value: arr.normal },
+    tArrO: { value: arr.orm },
     tMacro: { value: macroNoiseTexture() },
+    tileInv: { value: new THREE.Vector4(...arr.tileMeters.map((m) => 1 / m)) },
   };
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -570,107 +583,145 @@ function makeTerrainMaterial() {
         `#include <begin_vertex>
         vSplat = splat;
         vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-        vWNrm = normalize(mat3(modelMatrix) * normal);`
+        vWNrm = normalize(mat3(modelMatrix) * objectNormal);`
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
-        uniform sampler2D tGrass, tRock, tDirt, tSand, tMacro;
+        uniform sampler2DArray tArrC, tArrN, tArrO;
+        uniform sampler2D tMacro;
+        uniform vec4 tileInv;
         varying vec4 vSplat;
         varying vec3 vWPos;
         varying vec3 vWNrm;
-        vec3 tri(sampler2D t, vec3 p, vec3 bw) {
-          return texture2D(t, p.zy).rgb * bw.x + texture2D(t, p.xz).rgb * bw.y + texture2D(t, p.xy).rgb * bw.z;
-        }`
+        vec3 gCol, gOrm, gNrm;
+        ${TRIPLANAR_GLSL}`
       )
       .replace(
         '#include <map_fragment>',
         `{
+          vec3 n = normalize(vWNrm);
+          vec3 bw = triBlend(n);
+          vec3 dx = dFdx(vWPos), dy = dFdy(vWPos);
+          vec4 w = vSplat;
           vec3 macro = texture2D(tMacro, vWPos.xz * 0.0021).rgb;
           vec3 macro2 = texture2D(tMacro, vWPos.xz * 0.011).rgb;
-          vec2 uv = vWPos.xz;
-          // трава: два масштаба, чтобы не было заметно повторов
-          vec3 g1 = texture2D(tGrass, uv * 0.22).rgb;
-          vec3 g2 = texture2D(tGrass, uv * 0.047 + 0.3).rgb;
-          vec3 grass = mix(g1, g2, 0.4);
-          grass *= mix(vec3(0.8, 0.86, 0.78), vec3(1.12, 1.06, 0.92), macro.r);
-          // выгоревшие луговые пятна и более тёмная сочная трава в низинах
-          grass = mix(grass, grass * vec3(1.3, 1.1, 0.72), smoothstep(0.5, 0.72, macro.g) * 0.65);
-          grass = mix(grass, grass * vec3(0.7, 0.82, 0.68), smoothstep(0.55, 0.3, macro.g) * 0.5);
-          // дальние холмы покрыты лесами
+          vec3 c0 = vec3(0.0), c1 = vec3(0.0), c2 = vec3(0.0), c3 = vec3(0.0);
+          vec3 o0 = vec3(1.0, 1.0, 0.0), o1 = o0, o2 = o0, o3 = o0;
+          vec3 n0 = n, n1 = n, n2 = n, n3 = n;
+          float sc;
+          // зоны перехода между слоями делаем «рваными» — без ступенек по треугольникам сетки
+          float edgeN = texture2D(tMacro, vWPos.xz * 0.045).g - 0.5 + (macro2.r - 0.5) * 0.6;
+          w.y = clamp(w.y + edgeN * 0.9 * w.y * (1.0 - w.y) * 4.0, 0.0, 1.0);
+          w.w = clamp(w.w - edgeN * 0.6 * w.w * (1.0 - w.w) * 4.0, 0.0, 1.0);
+          w /= max(1e-4, w.x + w.y + w.z + w.w);
+          if (w.x > 0.004) { sc = tileInv.x; triSampleArr(tArrC, tArrN, tArrO, 0.0, vWPos * sc, dx * sc, dy * sc, n, bw, 0.55, c0, o0, n0); }
+          if (w.y > 0.004) {
+            sc = tileInv.y; triSampleArr(tArrC, tArrN, tArrO, 1.0, vWPos * sc, dx * sc, dy * sc, n, bw, 1.3, c1, o1, n1);
+            // второй, крупный масштаб скалы — без заметных повторов
+            vec3 cb, ob, nb; float s2 = sc * 0.23;
+            triSampleArr(tArrC, tArrN, tArrO, 1.0, vWPos * s2 + 0.37, dx * s2, dy * s2, n, bw, 1.0, cb, ob, nb);
+            c1 = mix(c1, cb, 0.45) * mix(0.85, 1.1, macro2.b);
+            n1 = normalize(n1 + nb - n);
+          }
+          if (w.z > 0.004) { sc = tileInv.z; triSampleArr(tArrC, tArrN, tArrO, 2.0, vWPos * sc, dx * sc, dy * sc, n, bw, 1.0, c2, o2, n2); }
+          if (w.w > 0.004) { sc = tileInv.w; triSampleArr(tArrC, tArrN, tArrO, 3.0, vWPos * sc, dx * sc, dy * sc, n, bw, 1.0, c3, o3, n3); }
+
+          // трава: крупные пятна оттенков, сухость на высоте, леса на дальних холмах
+          c0 *= mix(vec3(0.82, 0.88, 0.8), vec3(1.1, 1.05, 0.92), macro.r);
+          c0 = mix(c0, c0 * vec3(1.28, 1.08, 0.72), smoothstep(0.5, 0.72, macro.g) * 0.6);
+          c0 = mix(c0, c0 * vec3(0.72, 0.84, 0.7), smoothstep(0.55, 0.3, macro.g) * 0.45);
+          float alt = smoothstep(40.0, 84.0, vWPos.y) * (1.0 - smoothstep(160.0, 220.0, length(vWPos.xz)));
+          c0 = mix(c0, c0 * vec3(1.12, 1.0, 0.78), alt * 0.5);
           float farK = smoothstep(420.0, 900.0, length(vWPos.xz));
           float forest = smoothstep(0.46, 0.56, texture2D(tMacro, vWPos.xz * 0.0009 + 0.2).b) * farK;
-          vec3 forestCol = vec3(0.09, 0.13, 0.06) * (0.8 + 0.5 * texture2D(tMacro, vWPos.xz * 0.02).r);
-          grass = mix(grass, forestCol, forest);
-          // на вершине трава суше и реже
-          float alt = smoothstep(30.0, 62.0, vWPos.y) * (1.0 - smoothstep(140.0, 180.0, length(vWPos.xz)));
-          grass = mix(grass, grass * vec3(1.15, 1.0, 0.75), alt * 0.5);
-          // дальние склоны — более приглушённые
-          vec3 bw = pow(abs(normalize(vWNrm)), vec3(4.0));
-          bw /= (bw.x + bw.y + bw.z);
-          vec3 rock = tri(tRock, vWPos * 0.09, bw) * 0.6 + tri(tRock, vWPos * 0.023 + 0.5, bw) * 0.4;
-          rock *= mix(0.85, 1.1, macro2.b);
-          vec3 dirt = texture2D(tDirt, uv * 0.18).rgb * mix(0.9, 1.1, macro2.r);
-          vec3 sand = texture2D(tSand, uv * 0.2).rgb;
-          vec4 w = vSplat;
-          // резкая, «рваная» граница скала/трава
-          float rn = macro2.g * 0.5 + texture2D(tGrass, uv * 0.05).g;
-          w.y = smoothstep(0.25, 0.75, w.y + (rn - 0.55) * 0.35);
-          w /= max(0.0001, w.x + w.y + w.z + w.w);
-          vec3 col = grass * w.x + rock * w.y + dirt * w.z + sand * w.w;
-          diffuseColor.rgb *= col;
+          c0 = mix(c0, vec3(0.07, 0.1, 0.045) * (0.8 + 0.5 * macro2.r), forest);
+
+          // смешивание по «высоте»: камни и кочки проступают сквозь соседний слой
+          vec4 hgt = vec4(o0.r, o1.r * 0.8 + 0.2, o2.r, o3.r);
+          vec4 hw = w + hgt * 0.35 * step(vec4(0.004), w);
+          float ma = max(max(hw.x, hw.y), max(hw.z, hw.w)) - 0.3;
+          vec4 b = max(hw - ma, 0.0);
+          b /= max(1e-4, b.x + b.y + b.z + b.w);
+
+          gCol = c0 * b.x + c1 * b.y + c2 * b.z + c3 * b.w;
+          gOrm = o0 * b.x + o1 * b.y + o2 * b.z + o3 * b.w;
+          gNrm = normalize(n0 * b.x + n1 * b.y + n2 * b.z + n3 * b.w);
+          diffuseColor.rgb *= gCol;
         }`
+      )
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = roughness * gOrm.g;')
+      .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(gNrm, 0.0)).xyz);')
+      .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+        reflectedLight.indirectDiffuse *= gOrm.r;
+        reflectedLight.indirectSpecular *= gOrm.r;
+        reflectedLight.directDiffuse *= mix(1.0, gOrm.r, 0.5);`
       );
   };
+  mat.customProgramCacheKey = () => 'terrain-v2';
   return mat;
 }
 
 // ---------------------------------------------------------------------------
-// Полотно дороги
+// Полотно дороги: утоптанная земля с колеями, края плавно растворяются в рельефе
 // ---------------------------------------------------------------------------
 function buildRoadMesh(road) {
-  const positions = [], uvs = [], idx = [];
+  const positions = [], uvs = [], colors = [], idx = [];
+  // [смещение поперёк, непрозрачность, яркость — колеи темнее]
+  const across = [
+    [-1.0, 0.0, 1.0], [-0.72, 0.9, 1.0], [-0.42, 1.0, 0.82], [0, 1.0, 1.0], [0.42, 1.0, 0.82], [0.72, 0.9, 1.0], [1.0, 0.0, 1.0],
+  ];
+  const tile = 3;
   let vi = 0;
   let open = false;
+  const K = across.length;
   for (let i = 0; i < road.length; i++) {
     const q = road[i];
     if (q.bridge) { open = false; continue; }
-    const nx = -q.dz, nz = q.dx; // влево
-    const y = q.h + 0.07;
-    positions.push(q.x + nx * ROAD_HW, y, q.z + nz * ROAD_HW, q.x - nx * ROAD_HW, y, q.z - nz * ROAD_HW);
-    uvs.push(0, q.s / 7, 1, q.s / 7);
-    if (open) {
-      const a = vi - 2, b = vi - 1, c = vi, d = vi + 1;
-      idx.push(a, c, b, b, c, d);
+    const nx = -q.dz, nz = q.dx;
+    for (const [o, a, br] of across) {
+      const w = o * (ROAD_HW + 0.8);
+      const y = q.h + 0.06 - Math.abs(o) * 0.05 - (br < 0.9 ? 0.03 : 0);
+      positions.push(q.x + nx * w, y, q.z + nz * w);
+      uvs.push(w / tile, q.s / tile);
+      colors.push(br, br, br, a);
     }
-    vi += 2;
+    if (open) {
+      for (let k = 0; k < K - 1; k++) {
+        const a = vi - K + k, b = a + 1, c = vi + k, d = c + 1;
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    vi += K;
     open = true;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  // нормали могли смотреть вниз — проверим и развернём порядок обхода
   if (geo.getAttribute('normal').getY(0) < 0) {
     const ia = geo.index.array;
     for (let k = 0; k < ia.length; k += 3) { const t = ia[k + 1]; ia[k + 1] = ia[k + 2]; ia[k + 2] = t; }
     geo.computeVertexNormals();
   }
-  const tex = roadTexture();
-  const mat = new THREE.MeshStandardMaterial({
-    map: tex, roughness: 0.96, metalness: 0,
+  const mat = pbrMaterial('dirt', {
+    vertexColors: true, transparent: true, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
+  mesh.renderOrder = 1;
   mesh.name = 'road';
   return mesh;
 }
 
 // ---------------------------------------------------------------------------
-// Подпорные стенки: там, где полотно дороги на насыпи (особенно на поворотах)
+// Подпорные стенки там, где полотно дороги на насыпи (особенно на поворотах)
 // ---------------------------------------------------------------------------
 function computeWallRuns(road) {
   const runs = [];
@@ -690,7 +741,6 @@ function computeWallRuns(road) {
     }
     if (cur && cur.to - cur.from >= 3) runs.push(cur);
   }
-  // расширим прогоны на пару точек и отметим точки дороги
   for (const r of runs) {
     r.from = Math.max(0, r.from - 2);
     r.to = Math.min(road.length - 1, r.to + 2);
@@ -700,13 +750,10 @@ function computeWallRuns(road) {
 }
 
 function buildRetainingWalls(road, runs, heightAt) {
-  const tex = masonry('retaining', {
-    seed: 17, courseMin: 34, courseMax: 64, lenMin: 0.8, lenMax: 2.0, rubble: 1,
-    base: [0.55, 0.52, 0.46], tint: 0.14, mortar: 3,
-  });
   const positions = [], uvs = [], idx = [];
   let vi = 0;
-  const TILE = 2.4; // метров на тайл текстуры
+  const mat = pbrMaterial('rubbleStone', { side: THREE.DoubleSide });
+  const TILE = mat.userData.tileMeters;
   const off = ROAD_HW + 1.0;
   const thick = 0.7;
   for (const r of runs) {
@@ -722,17 +769,13 @@ function buildRetainingWalls(road, runs, heightAt) {
       const batter = Math.max(0, top - ground) * 0.08;
       rows.push({ ix, iz, ox, oz, top, ground, nx, nz, batter, s: q.s });
     }
-    // внешняя грань, верх (парапет-бордюр) и внутренняя кромка
     for (let k = 0; k < rows.length; k++) {
       const w = rows[k];
       const u = w.s / TILE;
-      // внешняя грань: верх и низ (низ слегка вынесен — «откос»)
       positions.push(w.ox, w.top, w.oz, w.ox + w.nx * w.batter, w.ground, w.oz + w.nz * w.batter);
       uvs.push(u, w.top / TILE, u, w.ground / TILE);
-      // верх
       positions.push(w.ix, w.top, w.iz, w.ox, w.top, w.oz);
       uvs.push(u, 0, u, thick / TILE);
-      // внутренняя грань (над дорогой)
       positions.push(w.ix, w.top - 0.6, w.iz, w.ix, w.top, w.iz);
       uvs.push(u, 0, u, 0.6 / TILE);
       if (k > 0) {
@@ -743,17 +786,12 @@ function buildRetainingWalls(road, runs, heightAt) {
       }
       vi += 6;
     }
-    // торцы
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({
-    map: tex.map, normalMap: tex.normalMap, roughnessMap: tex.roughnessMap,
-    roughness: 1, metalness: 0, side: THREE.DoubleSide,
-  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -762,39 +800,8 @@ function buildRetainingWalls(road, runs, heightAt) {
 }
 
 // ---------------------------------------------------------------------------
-// Валуны и скальные выступы (InstancedMesh)
+// Скалы, валуны, осыпи и камни у реки (InstancedMesh)
 // ---------------------------------------------------------------------------
-function rockGeometry(seed, detail) {
-  let g = new THREE.IcosahedronGeometry(1, detail);
-  g.deleteAttribute('normal');
-  g.deleteAttribute('uv');
-  g = mergeVerticesSimple(g);
-  const n = createNoise2D(seed);
-  const n2 = createNoise2D(seed + 1);
-  const rnd = mulberry32(seed * 13);
-  // несколько плоскостей «скола», которые срезают округлую форму
-  const planes = [];
-  for (let k = 0; k < 7; k++) {
-    const a = rnd() * Math.PI * 2, b = (rnd() - 0.3) * 1.4;
-    planes.push({ nx: Math.cos(a) * Math.cos(b), ny: Math.sin(b), nz: Math.sin(a) * Math.cos(b), d: 0.62 + rnd() * 0.3 });
-  }
-  const p = g.getAttribute('position');
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    const dd = 1 + 0.22 * n(v.x * 1.2 + v.y * 0.7, v.z * 1.2 - v.y * 0.5) + 0.07 * n2(v.x * 4, v.z * 4 + v.y * 3);
-    v.multiplyScalar(dd);
-    for (const pl of planes) {
-      const dist = v.x * pl.nx + v.y * pl.ny + v.z * pl.nz;
-      if (dist > pl.d) v.addScaledVector(new THREE.Vector3(pl.nx, pl.ny, pl.nz), -(dist - pl.d) * 0.85);
-    }
-    p.setXYZ(i, v.x, v.y, v.z);
-  }
-  g.computeVertexNormals();
-  return g;
-}
-
-// объединение совпадающих вершин (чтобы нормали были гладкими, а шов не рвался)
 function mergeVerticesSimple(g) {
   const p = g.getAttribute('position');
   const map = new Map();
@@ -816,115 +823,137 @@ function mergeVerticesSimple(g) {
   return out;
 }
 
-function buildRocks(heightAt, roadGrid) {
+export function rockGeometry(seed, detail) {
+  const g = mergeVerticesSimple(new THREE.IcosahedronGeometry(1, detail));
+  const n = createNoise2D(seed);
+  const n2 = createNoise2D(seed + 1);
+  const rnd = mulberry32(seed * 13);
+  const planes = [];
+  for (let k = 0; k < 7; k++) {
+    const a = rnd() * Math.PI * 2, b = (rnd() - 0.3) * 1.4;
+    planes.push({ nx: Math.cos(a) * Math.cos(b), ny: Math.sin(b), nz: Math.sin(a) * Math.cos(b), d: 0.62 + rnd() * 0.3 });
+  }
+  const p = g.getAttribute('position');
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const dd = 1 + 0.22 * n(v.x * 1.2 + v.y * 0.7, v.z * 1.2 - v.y * 0.5) + 0.07 * n2(v.x * 4, v.z * 4 + v.y * 3);
+    v.multiplyScalar(dd);
+    for (const pl of planes) {
+      const dist = v.x * pl.nx + v.y * pl.ny + v.z * pl.nz;
+      if (dist > pl.d) {
+        v.x -= pl.nx * (dist - pl.d) * 0.85;
+        v.y -= pl.ny * (dist - pl.d) * 0.85;
+        v.z -= pl.nz * (dist - pl.d) * 0.85;
+      }
+    }
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+function buildRocks(heightAt, roadGrid, groundAt) {
   const rnd = mulberry32(77);
-  // крупные глыбы детальнее, мелкие валуны — проще (экономия треугольников)
-  const geos = [rockGeometry(1, 3), rockGeometry(2, 3), rockGeometry(3, 2), rockGeometry(4, 2), rockGeometry(5, 2)];
-  const mat = triplanarMaterial({ map: rockTexture(), scale: 0.16, roughness: 0.93, tintNoise: macroNoiseTexture(), tintAmount: 0.3 });
-  const buckets = geos.map(() => []);
+  // крупные глыбы, валуны, мелкие камни осыпей
+  const kinds = [
+    { geo: rockGeometry(1, 3), list: [] },
+    { geo: rockGeometry(2, 3), list: [] },
+    { geo: rockGeometry(3, 2), list: [] },
+    { geo: rockGeometry(4, 2), list: [] },
+    { geo: rockGeometry(5, 1), list: [] },
+    { geo: rockGeometry(6, 1), list: [] },
+  ];
+  const mat = triplanarMaterial('rock', { scale: 1.6, tint: 0.3, normalStrength: 1.2 });
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
-  const place = (x, z, scale, flat, big) => {
-    const road = roadGrid.nearest(x, z);
-    if (road && road.d < ROAD_HW + 2 + scale) return false;
-    if (riverDistance(x, z) < RIVER.halfWidth + scale) return false;
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  const place = (x, z, scale, flat, kind, opts = {}) => {
+    const rd = roadGrid.nearest(x, z);
+    if (rd && rd.d < ROAD_HW + 1.5 + scale) return false;
     const along = x * GATE_DIR.x + z * GATE_DIR.z - GATE_RADIUS;
     const across = x * GATE_DIR.z - z * GATE_DIR.x;
-    if (along > -3 && along < DITCH.alongEnd + 3 && Math.abs(across) < 16) return false; // проход через ров
-    const r = Math.hypot(x, z);
+    if (along > -3 && along < DITCH.alongEnd + 3 && Math.abs(across) < 16) return false;
     const th = Math.atan2(z, x);
-    if (r < plateauRadius(th) + 1.5) return false; // на площадке — будущий двор
-    if (shelfDistance(along, across) < 2) return false; // терраса перед воротами — барбакан
+    if (!opts.allowTop && Math.hypot(x, z) < plateauRadius(th) + 1.5) return false;
+    if (shelfDistance(along, across) < 2) return false;
+    if (!opts.allowWater && riverInfo(x, z).e < scale) return false;
     const sx = scale * (0.8 + rnd() * 0.6);
     const sy = scale * flat * (0.6 + rnd() * 0.5);
     const sz = scale * (0.8 + rnd() * 0.6);
-    // на склоне камень садится по нижней точке опоры, чтобы не «висеть»
     const rr = Math.max(sx, sz) * 0.8;
-    let y = Infinity;
+    let y = heightAt(x, z);
     for (let k = 0; k < 6; k++) {
       const a = (k / 6) * Math.PI * 2;
       y = Math.min(y, heightAt(x + Math.cos(a) * rr, z + Math.sin(a) * rr));
     }
-    y = Math.min(y, heightAt(x, z));
-    // пласты у кромки лежат вдоль склона
-    const yaw = big ? th + Math.PI / 2 + (rnd() - 0.5) * 0.5 : rnd() * Math.PI * 2;
-    e.set((rnd() - 0.5) * 0.25, yaw, (rnd() - 0.5) * 0.25, 'YXZ');
+    const yaw = opts.alongSlope ? th + Math.PI / 2 + (rnd() - 0.5) * 0.5 : rnd() * Math.PI * 2;
+    e.set((rnd() - 0.5) * 0.3, yaw, (rnd() - 0.5) * 0.3, 'YXZ');
     q.setFromEuler(e);
-    m.compose(new THREE.Vector3(x, y - sy * 0.15, z), q, new THREE.Vector3(big ? sx * 1.5 : sx, sy, sz));
-    const k = big ? Math.floor(rnd() * 2) : 2 + Math.floor(rnd() * 3);
-    buckets[k].push(m.clone());
+    pos.set(x, y - sy * (opts.sink || 0.15), z);
+    scl.set(opts.alongSlope ? sx * 1.5 : sx, sy, sz);
+    m.compose(pos, q, scl);
+    kinds[kind].list.push(m.clone());
     return true;
   };
   // скальные пласты-выступы под кромкой площадки
-  for (let i = 0; i < 700; i++) {
+  for (let i = 0; i < 800; i++) {
     const th = rnd() * Math.PI * 2;
     const R = plateauRadius(th);
     const r = R + 2 + rnd() * 18;
     const x = Math.cos(th) * r, z = Math.sin(th) * r;
-    const rk = rockiness(r - R, th, x, z);
-    if (rnd() > rk * 0.55) continue;
-    place(x, z, 1.6 + rnd() * rnd() * 3.5, 0.5, true);
+    if (rnd() > rockiness(r - R, th, x, z) * 0.55) continue;
+    place(x, z, 1.6 + rnd() * rnd() * 3.5, 0.5, Math.floor(rnd() * 2), { alongSlope: true });
+  }
+  // глыбы, торчащие из земли у самого края площадки
+  for (let i = 0; i < 160; i++) {
+    const th = rnd() * Math.PI * 2;
+    const R = plateauRadius(th);
+    const r = R - 1 + rnd() * 3;
+    place(Math.cos(th) * r, Math.sin(th) * r, 0.8 + rnd() * 1.4, 0.55, 2 + Math.floor(rnd() * 2), { allowTop: true, sink: 0.35 });
   }
   // валуны на склонах, реже — у подножия
-  for (let i = 0; i < 1600; i++) {
+  for (let i = 0; i < 1800; i++) {
     const th = rnd() * Math.PI * 2;
     const R = plateauRadius(th);
     const r = R + 5 + Math.pow(rnd(), 1.6) * 190;
     const x = Math.cos(th) * r, z = Math.sin(th) * r;
-    const rk = rockiness(r - R, th, x, z);
-    if (rnd() > 0.1 + rk * 0.5) continue;
-    place(x, z, 0.3 + rnd() * rnd() * 1.8, 0.75, false);
+    if (rnd() > 0.08 + rockiness(r - R, th, x, z) * 0.5) continue;
+    place(x, z, 0.3 + rnd() * rnd() * 1.8, 0.75, 2 + Math.floor(rnd() * 2));
   }
-  return geos.map((g, k) => {
-    const list = buckets[k];
-    const im = new THREE.InstancedMesh(g, mat, Math.max(1, list.length));
-    list.forEach((mm, i) => im.setMatrixAt(i, mm));
-    im.count = list.length;
-    im.castShadow = true;
+  // осыпи: много мелких камней там, где слой «галька» на склонах
+  for (let i = 0; i < 40000; i++) {
+    const th = rnd() * Math.PI * 2;
+    const R = plateauRadius(th);
+    const r = R + 8 + rnd() * 150;
+    const x = Math.cos(th) * r, z = Math.sin(th) * r;
+    const g = groundAt(x, z);
+    if (g.river < 30 || rnd() > g.gravel * 0.9) continue;
+    place(x, z, 0.12 + rnd() * rnd() * 0.5, 0.7, 4 + Math.floor(rnd() * 2), { sink: 0.3 });
+  }
+  // камни на берегах и в воде
+  for (let i = 0; i < 9000; i++) {
+    const x = (rnd() - 0.5) * 800;
+    const zr = riverZ(x);
+    const off = (rnd() - 0.5) * 2 * (riverHalfWidth(x) + 5);
+    const z = zr + off;
+    const r2 = riverInfo(x, z);
+    if (r2.e < -2.5 || r2.e > 3.5) continue;
+    if (rnd() > 0.25) continue;
+    place(x, z, 0.2 + rnd() * rnd() * 0.9, 0.6, 2 + Math.floor(rnd() * 4), { allowWater: true, sink: 0.3 });
+  }
+  return kinds.map((k, ki) => {
+    const im = new THREE.InstancedMesh(k.geo, mat, Math.max(1, k.list.length));
+    k.list.forEach((mm, i) => im.setMatrixAt(i, mm));
+    im.count = k.list.length;
+    // мелкие камни осыпей не отбрасывают тень и не отражаются в воде (экономия)
+    im.castShadow = ki < 4;
+    if (ki >= 4) im.layers.set(2);
     im.receiveShadow = true;
     im.computeBoundingSphere();
     im.name = 'rocks';
     return im;
   });
-}
-
-// ---------------------------------------------------------------------------
-// Река: лента воды по руслу
-// ---------------------------------------------------------------------------
-function buildRiver() {
-  const positions = [], uvs = [], idx = [];
-  const hw = RIVER.halfWidth + 5;
-  let vi = 0;
-  for (let x = -WORLD.half; x <= WORLD.half; x += 6) {
-    const z = riverZ(x);
-    const dzdx = (riverZ(x + 1) - riverZ(x - 1)) / 2;
-    const l = Math.hypot(1, dzdx);
-    const nx = -dzdx / l, nz = 1 / l;
-    positions.push(x - nx * hw, RIVER.waterLevel, z - nz * hw, x + nx * hw, RIVER.waterLevel, z + nz * hw);
-    uvs.push(x / 30, -hw / 30, x / 30, hw / 30);
-    if (vi > 0) idx.push(vi - 2, vi, vi - 1, vi - 1, vi, vi + 1);
-    vi += 2;
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  if (geo.getAttribute('normal').getY(0) < 0) {
-    const ia = geo.index.array;
-    for (let k = 0; k < ia.length; k += 3) { const t = ia[k + 1]; ia[k + 1] = ia[k + 2]; ia[k + 2] = t; }
-    geo.computeVertexNormals();
-  }
-  const nm = waterNormal();
-  nm.repeat.set(1, 1);
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x2e4a4c, roughness: 0.06, metalness: 0.0, normalMap: nm,
-    normalScale: new THREE.Vector2(0.35, 0.35), transparent: true, opacity: 0.88,
-    envMapIntensity: 1.2,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.receiveShadow = true;
-  mesh.name = 'river';
-  return mesh;
 }

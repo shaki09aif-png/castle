@@ -13,8 +13,8 @@ export const GATE_DIR = { x: Math.cos(GATE_ANGLE), z: Math.sin(GATE_ANGLE) };
 // Вытянутая неровная форма — стены замка потом повторят этот контур.
 export function plateauRadius(theta) {
   return (
-    41 +
-    9 * Math.cos(2 * theta - 0.25) +
+    46 +
+    9.5 * Math.cos(2 * theta - 0.25) +
     3.2 * Math.sin(3 * theta + 0.9) +
     1.6 * Math.cos(5 * theta - 1.3) +
     0.8 * Math.sin(7 * theta + 0.4)
@@ -45,15 +45,18 @@ export const SPUR = {
   drop: 3.2, // насколько терраса ниже площадки
 };
 
-// Река у подножия: полилиния, огибающая холм с юга.
+// Река у подножия: извилистое русло к югу от холма (однозначная функция z(x)),
+// ширина меняется вдоль течения, берега неровные.
 export function riverZ(x) {
-  return 305 + 34 * Math.sin(x / 190 + 0.6) + 12 * Math.sin(x / 71 + 1.7);
+  return 318 + 52 * Math.sin(x / 150 + 0.6) + 24 * Math.sin(x / 61 + 1.7) + 9 * Math.sin(x / 29 + 0.3);
+}
+export function riverHalfWidth(x) {
+  return 8 + 3.2 * Math.sin(x / 97 + 1.1) + 1.8 * Math.sin(x / 41 + 2.3);
 }
 export const RIVER = {
-  halfWidth: 8,
-  bankWidth: 7,
-  depth: 2.6,
+  depth: 2.4,
   waterLevel: -0.35,
+  maxHalfWidth: 14,
 };
 
 // Переход из «рабочей» зоны вокруг замка к дальним холмам.
@@ -61,3 +64,27 @@ export const WORLD = {
   detailHalf: 400, // зона с мелким шагом сетки (±м)
   half: 3600,
 };
+
+// Крепостная стена: идёт по кромке вершины с отступом внутрь.
+export const WALL = {
+  inset: 3.6, // отступ осевой линии стены от кромки площадки
+  thickness: 2.4,
+  walkHeight: 8.5, // высота боевого хода над двором
+  parapetSill: 1.0, // высота бруствера между зубцами
+  merlonHeight: 2.05, // верх зубца над боевым ходом
+  merlonWidth: 1.7,
+  crenelWidth: 0.85,
+  parapetThick: 0.6,
+  gateHalfGap: 4.8, // проём под надвратную башню (этап 4)
+};
+
+// Узлы стены: 6 башен (этап 3) и ворота. Углы — в градусах, как atan2(z, x).
+export const WALL_NODES = [
+  { deg: 35, type: 'tower' },
+  { deg: 90, type: 'gate' },
+  { deg: 140, type: 'tower' },
+  { deg: 190, type: 'tower' },
+  { deg: 237, type: 'tower' },
+  { deg: 286, type: 'tower' },
+  { deg: 338, type: 'tower' },
+];
