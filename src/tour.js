@@ -6,11 +6,12 @@ import * as THREE from 'three';
 import {
   HILL_TOP, GATEHOUSE, BARBICAN, KEEP, BUILDINGS, WELL, TOWERS,
 } from './layout.js';
+import { HALL } from './courtyard.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
 // Точки строятся из планировки, поэтому остаются верными при её изменении.
-function buildStops(terrain, village) {
+function buildStops(terrain, village, extras) {
   const b = (id) => BUILDINGS.find((q) => q.id === id);
   // вид на постройку со стороны двора: камера отходит от фасада к центру
   const facing = (bld, dist, up, side = 0) => {
@@ -57,7 +58,7 @@ function buildStops(terrain, village) {
     },
     {
       title: 'Надвратная башня',
-      text: 'Ворота — самое уязвимое место, поэтому их защищали сильнее всего: подъёмный мост на цепях, опускная решётка (герса) и дубовые створки. Через машикули — отверстия в выступающем парапете — на врага бросали камни.',
+      text: 'Ворота — самое уязвимое место, поэтому их защищали сильнее всего: подъёмный мост на цепях, опускная решётка (герса) и дубовые створки. Через машикули — отверстия в выступающем парапете — на врага бросали камни. Кнопка «Закрыть ворота» (G) покажет, как их запирали.',
       tgt: V(GATEHOUSE.x, HILL_TOP + 4, GATEHOUSE.z + 3),
       pos: V(GATEHOUSE.x + 7, HILL_TOP + 9, BARBICAN.zS - 2),
     },
@@ -102,6 +103,12 @@ function buildStops(terrain, village) {
       text: 'Большой зал — сердце замковой жизни. Здесь сеньор пировал с рыцарями, принимал гостей, вершил суд. Рядом кухня: её ставили отдельно, чтобы при пожаре не сгорел зал.',
       ...facing(hall, 24, 9, 5),
     },
+    ...(HALL.f ? [{
+      title: 'В большом зале',
+      text: 'Внутри — высокий стол сеньора на помосте, длинные столы для рыцарей, очаг посреди зала (дым уходил через дымник в крыше), гобелены на стенах. Здесь пировали, праздновали и вершили суд.',
+      tgt: HALL.f.p(-5.8, HALL.floorY + 1.6, 0),
+      pos: HALL.f.p(6.6, HALL.floorY + 3.0, 2.2),
+    }] : []),
     {
       title: 'Часовня',
       text: 'В каждом замке была своя часовня. Её алтарь обращён на восток. Колокол созывал на службу и поднимал тревогу.',
@@ -119,6 +126,12 @@ function buildStops(terrain, village) {
       tgt: V(mill.x, terrain.heightAt(mill.x, mill.z) + 3, mill.z),
       pos: V(mill.x + 38, terrain.heightAt(mill.x, mill.z) + 24, mill.z + 36),
     },
+    ...(extras.camp ? [{
+      title: 'Осадный лагерь',
+      text: 'Замок редко брали штурмом — чаще осаждали. Враг ставил лагерь, строил требушет, метавший камни на сотни шагов, таран под навесом и лестницы, а сам лагерь прикрывал частоколом. Осада могла длиться месяцами.',
+      tgt: V(0, 0, 0).copy(extras.camp.at(3, 2)).setY(extras.camp.gh(extras.camp.at(3, 2).x, extras.camp.at(3, 2).z) + 3),
+      pos: V(0, 0, 0).copy(extras.camp.at(42, 20)).setY(extras.camp.gh(extras.camp.at(42, 20).x, extras.camp.at(42, 20).z) + 17),
+    }] : []),
   ].map((s) => {
     // камера не должна оказаться под землёй
     const g = terrain.heightAt(s.pos.x, s.pos.z) + 1.5;
@@ -129,8 +142,8 @@ function buildStops(terrain, village) {
 
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-export function createTour(camera, cam, terrain, village) {
-  const stops = buildStops(terrain, village);
+export function createTour(camera, cam, terrain, village, extras = {}) {
+  const stops = buildStops(terrain, village, extras);
   const panel = document.getElementById('tour');
   const list = document.getElementById('tour-list');
   const playBtn = document.getElementById('tour-play');

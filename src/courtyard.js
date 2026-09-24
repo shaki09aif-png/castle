@@ -20,6 +20,9 @@ const UP = new V3(0, 1, 0);
 // Локальная система координат постройки: lx — вдоль стены (−L/2…L/2),
 // lz — к двору (фасад на +W/2, задняя стена на −W/2), y — мировая высота.
 // ---------------------------------------------------------------------------
+// Размеры большого зала (нужны для интерьера)
+export const HALL = {};
+
 export class Frame {
   constructor(b) {
     this.b = b;
@@ -460,6 +463,7 @@ export function createCourtyard(scene, terrain, walls) {
     stoneBox(stone, f, b.L, b.W, floorY, baseY, eaveY, 'gable', pitch);
     const ridge = gableRoof(roof, wood, f, b.L, b.W, eaveY, pitch, photo, 0.6, 0.35);
     const hw = b.W / 2;
+    Object.assign(HALL, { b, f, floorY, eaveY, pitch, ridge });
     // контрфорсы и высокие витражи на фасаде
     const bayX = [-6.4, -3.2, 0, 3.2, 6.4];
     for (const lx of [-8.1, -4.8, -1.6, 1.6, 4.8, 8.1]) buttress(stone, f, Math.max(-8.1, Math.min(8.1, lx)), hw, floorY, eaveY - 1.4, 0.75);

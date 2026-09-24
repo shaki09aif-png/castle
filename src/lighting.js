@@ -26,7 +26,6 @@ export const FOG = {
 
 function installFogChunks() {
   const v3 = (v) => `vec3(${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)})`;
-  const c3 = (c) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`;
   THREE.ShaderChunk.fog_pars_vertex = `
 #ifdef USE_FOG
   varying float vFogDepth;
@@ -64,7 +63,8 @@ function installFogChunks() {
     float optical = dens * dist * integ + dist * ${FOG.haze.toFixed(6)};
     float f = 1.0 - exp( -optical );
     float sunAmt = pow( max( dot( dir, ${v3(SUN_DIR)} ), 0.0 ), 6.0 );
-    vec3 fc = mix( fogColor, ${c3(SUN_COLOR)} * 1.25, sunAmt * 0.55 );
+    // подсветка дымки в сторону солнца — относительно цвета тумана (годится и для заката, и для ночи)
+    vec3 fc = fogColor * ( 1.0 + sunAmt * vec3( 0.95, 0.62, 0.22 ) );
     return mix( col, fc, clamp( f, 0.0, 1.0 ) );
   }
 #endif`;
@@ -93,6 +93,8 @@ const skyFragment = /* glsl */ `
   uniform vec3 sunColor;
   uniform float time;
   uniform float cloudCover;
+  uniform float night;
+  uniform float cloudLight;
   varying vec3 vDir;
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
@@ -118,7 +120,7 @@ const skyFragment = /* glsl */ `
     col = mix(col, horizon * 0.95, smoothstep(0.0, -0.1, h));
     if (h > 0.0) {
       vec2 uv = d.xz / (h + 0.1) * 1.3;
-      vec2 wind = vec2(time * 0.004, time * 0.0015);
+      vec2 wind = vec2(time * 0.012, time * 0.0045); // облака заметно плывут
       float c = fbm(uv + wind);
       float c2 = fbm(uv * 3.1 - wind * 1.7 + 3.0);
       float dens = c * 0.78 + c2 * 0.3;
@@ -127,11 +129,20 @@ const skyFragment = /* glsl */ `
       float cs = fbm(uv + wind + sunDir.xz * 0.1) * 0.78 + c2 * 0.3;
       float lit = clamp(0.62 + (dens - cs) * 3.5, 0.0, 1.0);
       vec3 cloudCol = mix(vec3(0.46, 0.5, 0.58), vec3(1.12, 1.08, 1.02), lit);
+      cloudCol *= cloudLight;
       cloudCol += sunColor * pow(sd, 6.0) * 0.6 * (1.0 - cov * 0.5); // серебристая кромка
       cov *= smoothstep(0.0, 0.2, h);
+      // звёзды ночью (за облаками не видны)
+      if (night > 0.01) {
+        vec3 cell = floor(d * 380.0);
+        float st = hash(cell.xy + cell.z * 17.13);
+        float tw = 0.65 + 0.35 * sin(time * 2.3 + st * 90.0);
+        col += vec3(0.9, 0.93, 1.0) * step(0.9972, st) * tw * night * smoothstep(0.02, 0.25, h) * 1.6;
+      }
       col = mix(col, cloudCol, cov * 0.93);
     }
-    col += sunColor * smoothstep(0.99945, 0.99975, sd) * 30.0; // солнечный диск
+    // солнечный диск; ночью — луна (меньше и тусклее)
+    col += sunColor * smoothstep(0.99945, 0.99975, sd) * mix(30.0, 4.0, night);
     col = mix(col, horizon, (1.0 - smoothstep(0.0, 0.14, abs(h))) * 0.55);
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
@@ -148,6 +159,8 @@ function makeSkyMesh() {
       sunColor: { value: SUN_COLOR.clone() },
       time: { value: 0 },
       cloudCover: { value: 0.5 },
+      night: { value: 0 },
+      cloudLight: { value: 1 },
     },
     vertexShader: skyVertex,
     fragmentShader: skyFragment,
@@ -275,6 +288,7 @@ export function createLighting(scene, renderer, assets) {
 
   const lightRot = new THREE.Matrix4().lookAt(new THREE.Vector3(), SUN_DIR.clone().negate(), new THREE.Vector3(0, 1, 0));
   const lightRotInv = lightRot.clone().invert();
+  let forceShadow = false;
   const tmp = new THREE.Vector3();
   let lastSize = 0;
   // Карта теней пересчитывается не каждый кадр, а только когда теневая область
@@ -287,7 +301,8 @@ export function createLighting(scene, renderer, assets) {
     const dist = camera.position.distanceTo(focus);
     const size = Math.min(260, Math.max(28, dist * 0.85));
     const s = Math.pow(2, Math.round(Math.log2(size) * 2) / 2); // ступенями, без дрожания
-    if (s === lastSize && focus.distanceTo(lastFocus) < s * 0.15) return;
+    if (!forceShadow && s === lastSize && focus.distanceTo(lastFocus) < s * 0.15) return;
+    forceShadow = false;
     lastFocus.copy(focus);
     renderer.shadowMap.needsUpdate = true;
     const cam = sun.shadow.camera;
@@ -313,10 +328,86 @@ export function createLighting(scene, renderer, assets) {
     : new THREE.HemisphereLight(0xb4ccf0, 0x5a5238, 1.9);
   scene.add(hemi);
 
+  // ---------------------------------------------------------------------------
+  // Время суток: день, закат, ночь. Меняются только параметры света, неба и
+  // тумана (без перекомпиляции шейдеров), переход плавный — около 3 секунд.
+  // ---------------------------------------------------------------------------
+  const C = (r, g, b) => new THREE.Color(r, g, b);
+  const day0 = SUN_DIR.clone();
+  const az = Math.atan2(day0.z, day0.x);
+  const dirAt = (a, el) => new THREE.Vector3(Math.cos(a) * Math.cos(el), Math.sin(el), Math.sin(a) * Math.cos(el));
+  const skyU = sky ? sky.material.uniforms : null;
+  const MODES = {
+    day: {
+      dir: day0, sunCol: SUN_COLOR.clone(), sunI: 3.2,
+      hemiSky: hemi.color.clone(), hemiGround: hemi.groundColor.clone(), hemiI: hemi.intensity, env: 1,
+      fog: scene.fog.color.clone(), horizon: HORIZON.clone(), zenith: ZENITH.clone(), skySun: SUN_COLOR.clone(), cloud: 1, night: 0,
+    },
+    sunset: {
+      dir: dirAt(az, 0.17), sunCol: C(1.0, 0.52, 0.24), sunI: 2.6,
+      hemiSky: C(0.95, 0.66, 0.55), hemiGround: C(0.3, 0.22, 0.16), hemiI: hemi.intensity * 0.75, env: 0.55,
+      fog: C(0.74, 0.48, 0.36), horizon: C(1.0, 0.55, 0.28), zenith: C(0.2, 0.22, 0.45), skySun: C(1.0, 0.5, 0.2), cloud: 0.85, night: 0,
+    },
+    night: {
+      dir: dirAt(az + 2.4, 0.8), sunCol: C(0.55, 0.66, 1.0), sunI: 0.55,
+      hemiSky: C(0.3, 0.42, 0.7), hemiGround: C(0.06, 0.07, 0.1), hemiI: Q.envLight ? 0.35 : 0.95, env: 0.15,
+      fog: C(0.03, 0.045, 0.08), horizon: C(0.05, 0.07, 0.13), zenith: C(0.008, 0.014, 0.04), skySun: C(0.75, 0.8, 0.95), cloud: 0.1, night: 1,
+    },
+  };
+  const ORDER = ['day', 'sunset', 'night'];
+  const cur = { ...MODES.day, dir: MODES.day.dir.clone(), sunCol: SUN_COLOR.clone(), hemiSky: hemi.color.clone(), hemiGround: hemi.groundColor.clone(), fog: scene.fog.color.clone(), horizon: HORIZON.clone(), zenith: ZENITH.clone(), skySun: SUN_COLOR.clone() };
+  let from = null, to = MODES.day, k = 1, modeName = 'day';
+  const listeners = [];
+  function lerpState(a, b, t) {
+    cur.dir.copy(a.dir).lerp(b.dir, t).normalize();
+    for (const key of ['sunCol', 'hemiSky', 'hemiGround', 'fog', 'horizon', 'zenith', 'skySun']) cur[key].copy(a[key]).lerp(b[key], t);
+    for (const key of ['sunI', 'hemiI', 'env', 'cloud', 'night']) cur[key] = a[key] + (b[key] - a[key]) * t;
+  }
+  function applyState() {
+    SUN_DIR.copy(cur.dir);
+    lightRot.lookAt(new THREE.Vector3(), SUN_DIR.clone().negate(), new THREE.Vector3(0, 1, 0));
+    lightRotInv.copy(lightRot).invert();
+    forceShadow = true;
+    sun.color.copy(cur.sunCol);
+    sun.intensity = cur.sunI;
+    hemi.color.copy(cur.hemiSky);
+    hemi.groundColor.copy(cur.hemiGround);
+    hemi.intensity = cur.hemiI;
+    scene.environmentIntensity = cur.env;
+    scene.fog.color.copy(cur.fog);
+    if (skyU) {
+      skyU.sunDir.value.copy(SUN_DIR);
+      skyU.horizon.value.copy(cur.horizon);
+      skyU.zenith.value.copy(cur.zenith);
+      skyU.sunColor.value.copy(cur.skySun);
+      skyU.night.value = cur.night;
+      skyU.cloudLight.value = cur.cloud;
+    }
+    for (const f of listeners) f(cur.night, cur);
+  }
+  function setMode(name) {
+    if (!MODES[name] || name === modeName) return;
+    from = { ...cur, dir: cur.dir.clone(), sunCol: cur.sunCol.clone(), hemiSky: cur.hemiSky.clone(), hemiGround: cur.hemiGround.clone(), fog: cur.fog.clone(), horizon: cur.horizon.clone(), zenith: cur.zenith.clone(), skySun: cur.skySun.clone() };
+    to = MODES[name];
+    modeName = name;
+    k = 0;
+  }
+
   return {
     sun,
     sky,
-    update(t, camera, focus) {
+    get mode() { return modeName; },
+    get changing() { return k < 1; },
+    setMode,
+    nextMode() { setMode(ORDER[(ORDER.indexOf(modeName) + 1) % ORDER.length]); return modeName; },
+    onChange(f) { listeners.push(f); },
+    update(t, camera, focus, dt = 0.016) {
+      if (k < 1) {
+        k = Math.min(1, k + dt / 3);
+        const e = k * k * (3 - 2 * k);
+        lerpState(from, to, e);
+        applyState();
+      }
       fitShadow(camera, focus);
       if (sky) {
         sky.position.copy(camera.position);

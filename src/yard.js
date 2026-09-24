@@ -185,7 +185,7 @@ const HG = {
   eye: new THREE.SphereGeometry(0.02, 6, 4),
   tail: new THREE.ConeGeometry(0.07, 0.42, 8).translate(0, -0.21, 0),
 };
-function horse(colorB, x, y, z, yaw, col, rnd) {
+export function horse(colorB, x, y, z, yaw, col, rnd) {
   const r = M(x, y, z, yaw);
   const dark = 0x1a1612, mane = col === 0xe8e0d0 ? 0xd8d0c0 : 0x1e1812;
   const sh = new THREE.Color(col).multiplyScalar(0.8).getHex();
@@ -217,6 +217,7 @@ function horse(colorB, x, y, z, yaw, col, rnd) {
   }
   // ноги: передние прямые, задние с изгибом в скакательном суставе
   for (const [lx, lz, hind] of [[-0.19, 0.55, 0], [0.19, 0.55, 0], [-0.19, -0.62, 1], [0.19, -0.62, 1]]) {
+    colorB.curLimb = [(lx < 0) === !hind ? 0.7 : -0.7, 1.12]; // диагональные пары ног шагают вместе
     const hip = L(r, lx, 1.12, lz, hind ? -0.25 : 0.03);
     colorB.add(HG.upper, hip, col);
     const knee = hip.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.46, 0)).multiply(new THREE.Matrix4().makeRotationX(hind ? 0.3 : -0.03));
@@ -227,6 +228,7 @@ function horse(colorB, x, y, z, yaw, col, rnd) {
     const p = new V3().setFromMatrixPosition(fet);
     colorB.add(HG.hoof, M(p.x, y + 0.045, p.z, yaw), dark);
   }
+  colorB.curLimb = [0, 0];
   // хвост из двух частей
   const tr = L(r, 0, 1.45, -0.95, 0.5);
   colorB.add(new THREE.CylinderGeometry(0.05, 0.06, 0.2, 8).translate(0, -0.1, 0), tr, mane);

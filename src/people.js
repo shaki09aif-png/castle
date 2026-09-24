@@ -9,7 +9,7 @@ import { mulberry32 } from './noise.js';
 const V3 = THREE.Vector3;
 
 export class ColorBuilder {
-  constructor() { this.pos = []; this.nrm = []; this.col = []; this.aux = []; this.idx = []; }
+  constructor() { this.pos = []; this.nrm = []; this.col = []; this.aux = []; this.idx = []; this.limb = []; this.curLimb = [0, 0]; }
   add(geo, m, color, sway = 0, seed = 0) {
     const g = geo.index ? geo : geo;
     const p = g.getAttribute('position'), n = g.getAttribute('normal');
@@ -24,6 +24,7 @@ export class ColorBuilder {
       this.nrm.push(v.x, v.y, v.z);
       this.col.push(c.r, c.g, c.b);
       this.aux.push(sway, seed);
+      this.limb.push(this.curLimb[0], this.curLimb[1]); // для ходьбы: сторона/знак качания и высота шарнира
     }
     if (g.index) for (let i = 0; i < g.index.count; i++) this.idx.push(base + g.index.getX(i));
     else for (let i = 0; i < p.count; i++) this.idx.push(base + i);
@@ -34,6 +35,7 @@ export class ColorBuilder {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
     g.setAttribute('aSway', new THREE.Float32BufferAttribute(this.aux, 2));
+    if (this.limb.some((v) => v !== 0)) g.setAttribute('aLimb', new THREE.Float32BufferAttribute(this.limb, 2));
     g.setIndex(this.idx);
     g.computeBoundingSphere();
     return g;
@@ -114,11 +116,12 @@ const ROLES = {
   woman: { tunic: [0x6e4a2a, 0x3d5a7a, 0x8a3a2a], legs: 0x3a3028, head: 'wimple', dress: true, item: 'bucket' },
   peasant: { tunic: [0x7d6a4a, 0x6a5a3a, 0x8a7a5a, 0x5e6040], legs: 0x5a4a38, head: 'hood', item: 'hoe' },
   child: { tunic: [0x8a6a3a, 0x5a6a3a], legs: 0x4a4038, head: 'hair', scale: 0.62 },
+  foe: { tunic: [0x2e4a26, 0x5a5a1e], legs: 0x3a3430, head: 'helm', item: 'spear', shield: true },
   merchant: { tunic: [0x2e5a4a, 0x7a3a1a, 0x5a4a7a, 0x8a6a2a], legs: 0x3a3028, head: 'hood', apron: 0xd8ccb0, item: null },
   townswoman: { tunic: [0x7a2a3a, 0x3d5a7a, 0x6a5a2a, 0x4a6a4a], legs: 0x3a3028, head: 'wimple', dress: true, item: null },
 };
 
-function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand' }) {
+export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand' }) {
   const R = ROLES[role];
   const rnd = mulberry32(seed * 97 + 13);
   const pick = (a) => a[Math.floor(rnd() * a.length)];
@@ -141,6 +144,7 @@ function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand
   for (const sd of [-1, 1]) {
     const step = pose === 'walk' ? sd * 0.3 : 0;
     const kneeBend = pose === 'walk' ? Math.max(0, -step) * 0.9 + 0.05 : pose === 'work' ? 0.25 : 0.03;
+    B.curLimb = [sd, 0.9 * s]; // нога: качается вокруг бедра
     const hipA = step - (pose === 'work' ? 0.2 : 0);
     const hip = M(sd * 0.095, 0.9, 0, hipA, 0, sd * 0.025);
     B.add(G.thigh, hip, legs, 0, sw);
@@ -150,6 +154,7 @@ function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand
     const ankle = C(knee, 0, -0.43, 0, -(hipA + kneeBend)); // стопа остаётся горизонтальной
     B.add(G.shoe, C(ankle, 0, -0.035, 0), 0x2a1d14, 0, sw);
   }
+  B.curLimb = [0, 0];
 
   // ---- туловище: туника / ряса / платье, кайма по подолу, пояс с кошелём ----
   const body = R.dress ? DRESS : R.robe ? ROBE : TUNIC;
@@ -232,6 +237,7 @@ function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand
   const hands = [];
   [1, -1].forEach((sd, i) => {
     const [fx, sz, eb] = armPose[i];
+    B.curLimb = [-sd * 0.6, 1.4 * s]; // рука — в противофазе с ногой
     const sh = M(sd * 0.225, 1.4, lean * 0.1, fx + lean * 0.3, 0, sd * Math.abs(sz));
     B.add(G.shoulder, sh, sleeve, 0.6, sw);
     B.add(G.upperArm, sh, sleeve, 0.6, sw);
@@ -243,6 +249,7 @@ function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand
     B.add(G.hand, hm, skin, 0.6, sw);
     hands.push(new V3().setFromMatrixPosition(hm));
   });
+  B.curLimb = [0, 0];
 
   // ---- предметы ----
   const up = new V3(0, 1, 0);

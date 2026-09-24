@@ -177,6 +177,9 @@ export function createGate(scene, terrain, walls) {
   dark.box(new V3(cx, floorY + archTop - 0.02, pz), X, UP, Z, w / 2 - 0.3, 0.03, 0.1);
   for (const dz of [2.6, 4.4, 6.2]) dark.box(new V3(cx, floorY + archTop - 0.02, P.frontZ - dz), X, UP, Z, 0.28, 0.02, 0.28);
 
+  // Подвижные части собираются отдельно, чтобы их можно было анимировать:
+  // решётка (сдвиг вниз), створки ворот (поворот на петлях), мост (подъём на цепях)
+  const pOak = new GeoBuilder(walls.woodMaterial.userData.tileMeters), pMetal = new GeoBuilder(1);
   // ---------- опускная решётка (герса): дубовые брусья, окованные железом ----------
   const pcBottom = floorY + 2.55; // приподнята: видны острия
   const pcTop = floorY + archTop + 1.2;
@@ -184,21 +187,23 @@ export function createGate(scene, terrain, walls) {
   for (let k = 0; k < bars; k++) {
     const x = cx - w / 2 + 0.22 + (k / (bars - 1)) * (w - 0.44);
     const hTop = Math.min(pcTop, floorY + spring + archY(x - cx, w) + 1.0);
-    oak.box(new V3(x, (pcBottom + hTop) / 2, pz), UP, X, Z, (hTop - pcBottom) / 2, 0.055, 0.055, { grain: true });
+    pOak.box(new V3(x, (pcBottom + hTop) / 2, pz), UP, X, Z, (hTop - pcBottom) / 2, 0.055, 0.055, { grain: true });
     const spike = new THREE.ConeGeometry(0.06, 0.28, 6);
-    metal.addGeometry(spike, new THREE.Matrix4().makeRotationX(Math.PI).setPosition(x, pcBottom - 0.13, pz));
+    pMetal.addGeometry(spike, new THREE.Matrix4().makeRotationX(Math.PI).setPosition(x, pcBottom - 0.13, pz));
   }
   for (let y = pcBottom + 0.2; y < floorY + spring + 0.8; y += 0.42) {
-    oak.box(new V3(cx, y, pz + 0.07), X, UP, Z, w / 2 - 0.1, 0.05, 0.04, { grain: true });
+    pOak.box(new V3(cx, y, pz + 0.07), X, UP, Z, w / 2 - 0.1, 0.05, 0.04, { grain: true });
     for (let k = 0; k < bars; k++) {
       const x = cx - w / 2 + 0.22 + (k / (bars - 1)) * (w - 0.44);
-      metal.box(new V3(x, y, pz + 0.12), X, UP, Z, 0.07, 0.07, 0.012);
+      pMetal.box(new V3(x, y, pz + 0.12), X, UP, Z, 0.07, 0.07, 0.012);
     }
   }
 
   // ---------- дубовые ворота: две створки, распахнуты внутрь ----------
   const gz = pz - 1.3;
+  const doors = [];
   for (const sx of [-1, 1]) {
+    const dOak = new GeoBuilder(walls.woodMaterial.userData.tileMeters), dMetal = new GeoBuilder(1);
     const hinge = new V3(cx + sx * (w / 2 - 0.08), 0, gz);
     const along = new V3(0, 0, -1).applyAxisAngle(UP, sx * 0.12).normalize(); // почти вдоль стены
     const nrm = new V3().crossVectors(UP, along).multiplyScalar(-sx).normalize();
@@ -206,25 +211,32 @@ export function createGate(scene, terrain, walls) {
     const planks = 5;
     for (let k = 0; k < planks; k++) {
       const c = hinge.clone().addScaledVector(along, (k + 0.5) * (lw / planks)).addScaledVector(nrm, 0.09);
-      oak.box(new V3(c.x, floorY + lh / 2, c.z), UP, along, nrm, lh / 2, lw / planks / 2 - 0.005, 0.05, { grain: true });
+      dOak.box(new V3(c.x, floorY + lh / 2, c.z), UP, along, nrm, lh / 2, lw / planks / 2 - 0.005, 0.05, { grain: true });
     }
     // железные полосы, гвозди, петли
     for (const y of [0.35, 1.2, 2.1, lh - 0.35]) {
       const c = hinge.clone().addScaledVector(along, lw / 2).addScaledVector(nrm, 0.15);
-      metal.box(new V3(c.x, floorY + y, c.z), along, UP, nrm, lw / 2 - 0.02, 0.045, 0.012);
+      dMetal.box(new V3(c.x, floorY + y, c.z), along, UP, nrm, lw / 2 - 0.02, 0.045, 0.012);
       for (let k = 0; k < 6; k++) {
         const nc = hinge.clone().addScaledVector(along, 0.12 + k * (lw - 0.24) / 5).addScaledVector(nrm, 0.165);
-        metal.box(new V3(nc.x, floorY + y, nc.z), along, UP, nrm, 0.02, 0.02, 0.012);
+        dMetal.box(new V3(nc.x, floorY + y, nc.z), along, UP, nrm, 0.02, 0.02, 0.012);
       }
     }
     // диагональные раскосы с обратной стороны
     const back = hinge.clone().addScaledVector(along, lw / 2).addScaledVector(nrm, 0.01);
     const diag = along.clone().multiplyScalar(lw).addScaledVector(UP, lh * 0.6).normalize();
     const dn = new V3().crossVectors(diag, nrm).normalize();
-    oak.box(new V3(back.x, floorY + lh * 0.45, back.z), diag, dn, nrm, Math.hypot(lw, lh * 0.6) / 2 - 0.1, 0.07, 0.04, { grain: true });
+    dOak.box(new V3(back.x, floorY + lh * 0.45, back.z), diag, dn, nrm, Math.hypot(lw, lh * 0.6) / 2 - 0.1, 0.07, 0.04, { grain: true });
     // кольцо-ручка
     const ringM = new THREE.Matrix4().makeBasis(along, UP, nrm).setPosition(back.x + nrm.x * 0.2 + along.x * lw * 0.3, floorY + 1.2, back.z + nrm.z * 0.2 + along.z * lw * 0.3);
-    metal.addGeometry(new THREE.TorusGeometry(0.09, 0.014, 6, 14), ringM);
+    dMetal.addGeometry(new THREE.TorusGeometry(0.09, 0.014, 6, 14), ringM);
+    // угол поворота из открытого положения в закрытое (створка поперёк проезда)
+    const closedAlong = new V3(-sx, 0, 0);
+    const openAng = Math.atan2(along.x, along.z), closedAng = Math.atan2(closedAlong.x, closedAlong.z);
+    let dAng = closedAng - openAng;
+    while (dAng > Math.PI) dAng -= Math.PI * 2;
+    while (dAng < -Math.PI) dAng += Math.PI * 2;
+    doors.push({ oak: dOak, metal: dMetal, pivot: new V3(hinge.x, floorY, hinge.z), dAng });
   }
 
   // ---------- бойницы на фасаде и боках, отверстия для цепей ----------
@@ -263,14 +275,16 @@ export function createGate(scene, terrain, walls) {
   const z0 = P.frontZ, z1 = P.frontZ + dbLen;
   const bw = w / 2 + 0.1; // полуширина моста
   // подъёмная часть: доски поперёк, два продольных бруса, железные оковки
+  const bOak = new GeoBuilder(walls.woodMaterial.userData.tileMeters), bMetal = new GeoBuilder(1);
   for (let z = z0 + 0.12; z < z1 - 0.05; z += 0.26) {
-    oak.box(new V3(cx, deckY - 0.05 + (rnd() - 0.5) * 0.01, z), X, UP, Z, bw, 0.05, 0.12, { grain: true });
+    bOak.box(new V3(cx, deckY - 0.05 + (rnd() - 0.5) * 0.01, z), X, UP, Z, bw, 0.05, 0.12, { grain: true });
   }
   for (const sx of [-1, 1]) {
-    oak.box(new V3(cx + sx * (bw - 0.3), deckY - 0.2, (z0 + z1) / 2), Z, UP, X, dbLen / 2, 0.1, 0.12, { grain: true });
-    metal.box(new V3(cx + sx * (bw - 0.02), deckY - 0.05, (z0 + z1) / 2), Z, UP, X, dbLen / 2, 0.06, 0.012);
+    bOak.box(new V3(cx + sx * (bw - 0.3), deckY - 0.2, (z0 + z1) / 2), Z, UP, X, dbLen / 2, 0.1, 0.12, { grain: true });
+    bMetal.box(new V3(cx + sx * (bw - 0.02), deckY - 0.05, (z0 + z1) / 2), Z, UP, X, dbLen / 2, 0.06, 0.012);
   }
   metal.box(new V3(cx, deckY - 0.15, z0 + 0.05), X, UP, Z, bw + 0.2, 0.08, 0.08); // ось-шарнир
+  const hingeP = new V3(cx, deckY - 0.15, z0 + 0.05);
   // каменный устой в воде, на который опирается мост
   const floorD = 75.2;
   stone.box(new V3(cx, (floorD + deckY - 0.15) / 2, z1 + 0.7), X, UP, Z, bw + 0.4, (deckY - 0.15 - floorD) / 2, 0.7);
@@ -305,14 +319,17 @@ export function createGate(scene, terrain, walls) {
     oak.box(new V3(cx + sx * (bw - 0.05), (deckY + yEnd) / 2 + 1.0, (fz0 + zEnd) / 2), Z, UP, X, (zEnd - fz0) / 2, 0.05, 0.05, { grain: true });
   }
   // цепи подъёмного моста: от внешнего края моста к отверстиям над нишей
+  const chainEnds = [];
   const links = [];
   for (const sx of [-1, 1]) {
     const a = new V3(cx + sx * (bw - 0.05), deckY + 0.05, z1 - 0.15);
     const b = new V3(cx + sx * 2.05, floorY + recessH + 0.6, P.frontZ + 0.05);
+    chainEnds.push({ a, b });
     links.push(...chainLinks(a, b));
-    metal.box(a.clone().add(new V3(0, 0.05, 0)), X, UP, Z, 0.08, 0.06, 0.1);
+    bMetal.box(a.clone().add(new V3(0, 0.05, 0)), X, UP, Z, 0.08, 0.06, 0.1);
   }
-  scene.add(chainMesh(links, ctx.ironMat));
+  const chains = chainMesh(links, ctx.ironMat);
+  scene.add(chains);
 
   // ======================= ВОДА ВО РВУ =======================
   const moat = createMoatWater(scene, terrain);
@@ -326,10 +343,64 @@ export function createGate(scene, terrain, walls) {
   oakMesh.receiveShadow = true;
   oakMesh.name = 'gate-oak';
   scene.add(oakMesh);
+
+  // ---------- подвижные части: группа с центром в оси вращения ----------
+  const movable = (builders, pivot) => {
+    const grp = new THREE.Group();
+    grp.position.copy(pivot);
+    for (const [b, mat] of builders) {
+      if (!b.pos.length) continue;
+      const g = b.build();
+      g.translate(-pivot.x, -pivot.y, -pivot.z);
+      const m = new THREE.Mesh(g, mat);
+      m.castShadow = m.receiveShadow = true;
+      m.name = 'gate-oak';
+      grp.add(m);
+    }
+    scene.add(grp);
+    return grp;
+  };
+  const portc = movable([[pOak, oakMat], [pMetal, ctx.ironMat]], new V3(cx, floorY, pz));
+  const doorGrps = doors.map((d) => ({ grp: movable([[d.oak, oakMat], [d.metal, ctx.ironMat]], d.pivot), dAng: d.dAng }));
+  const bridgeGrp = movable([[bOak, oakMat], [bMetal, ctx.ironMat]], hingeP);
+  const PC_DROP = pcBottom - floorY - 0.02; // насколько опускается решётка
+  const BRIDGE_UP = -1.42; // угол поднятого моста (почти вертикально, в нишу)
+  const lm = new THREE.Matrix4(), ta = new V3();
+  function placeChains(ang) {
+    const rot = new THREE.Matrix4().makeRotationX(ang);
+    let n = 0;
+    for (const { a, b } of chainEnds) {
+      ta.copy(a).sub(hingeP).applyMatrix4(rot).add(hingeP);
+      for (const m of chainLinks(ta, b)) chains.setMatrixAt(n++, m);
+    }
+    chains.count = n;
+    chains.instanceMatrix.needsUpdate = true;
+  }
+  // Состояние: 0 — ворота открыты (как было), 1 — закрыты.
+  // Порядок закрытия: створки → решётка → мост; открытие — наоборот.
+  const state = { target: 0, t: 0 };
+  const seg = (t, a, b) => Math.min(1, Math.max(0, (t - a) / (b - a)));
+  const ease = (x) => x * x * (3 - 2 * x);
+  function apply(t) {
+    const d = ease(seg(t, 0.0, 0.25)), p = ease(seg(t, 0.2, 0.5)), b = ease(seg(t, 0.45, 1.0));
+    doorGrps.forEach((g) => { g.grp.rotation.y = g.dAng * d; });
+    portc.position.y = floorY - PC_DROP * p;
+    bridgeGrp.rotation.x = BRIDGE_UP * b;
+    placeChains(BRIDGE_UP * b);
+  }
   return {
-    update(t) {
+    // true, пока что-то движется (нужно обновлять тени)
+    get animating() { return state.t !== state.target; },
+    get closed() { return state.target === 1; },
+    toggle() { state.target = state.target ? 0 : 1; },
+    update(t, dt = 0.016) {
       vanes(t);
       moat.update(t);
+      if (state.t !== state.target) {
+        const speed = 1 / 9; // полный цикл ~9 с
+        state.t = state.target > state.t ? Math.min(state.target, state.t + dt * speed) : Math.max(state.target, state.t - dt * speed);
+        apply(state.t);
+      }
     },
   };
 }

@@ -34,7 +34,7 @@
         color: #fff; font-size: 15px; padding: 6px 14px; border-radius: 16px; background: rgba(20, 16, 12, 0.55);
       }
       #tour {
-        position: fixed; right: 12px; bottom: 12px; width: 230px; color: #f3ead6; background: rgba(20, 16, 12, 0.66);
+        position: fixed; right: 12px; bottom: 12px; width: 250px; max-height: calc(100vh - 24px); overflow-y: auto; color: #f3ead6; background: rgba(20, 16, 12, 0.66);
         border: 1px solid rgba(233, 220, 192, 0.25); border-radius: 8px; padding: 8px; backdrop-filter: blur(3px);
         font-size: 14px; z-index: 5;
       }
@@ -53,7 +53,10 @@
         border: 1px solid rgba(255, 217, 138, 0.4) !important;
       }
       #tour-play:hover { background: rgba(255, 217, 138, 0.3) !important; }
-      #tour.collapsed #tour-list, #tour.collapsed #tour-play { display: none; }
+      #tour-tools { display: flex; gap: 6px; margin: 0 0 6px; }
+      #tour-tools button { flex: 1; padding: 5px 4px; font-size: 13px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(233, 220, 192, 0.25); }
+      #tour-tools button:hover { background: rgba(255, 255, 255, 0.16); }
+      #tour.collapsed #tour-list, #tour.collapsed #tour-play, #tour.collapsed #tour-tools { display: none; }
       #tour.collapsed header { margin-bottom: 0; }
       #caption {
         position: fixed; left: 50%; top: 14px; transform: translate(-50%, -12px); width: min(560px, calc(100vw - 32px));
@@ -80,7 +83,8 @@
         <b>ЛКМ</b> — вращение · <b>колесо</b> — приближение<br />
         <b>ПКМ</b> — сдвиг камеры<br />
         <b>F</b> — свободный полёт<br />
-        <b>1–0</b>, <b>← →</b> — точки экскурсии · <b>T</b> — вся экскурсия
+        <b>1–0</b>, <b>← →</b> — точки экскурсии · <b>T</b> — вся экскурсия<br />
+        <b>N</b> — время суток · <b>G</b> — ворота
       </div>
       <div class="fly-only">
         <b>Клик</b> — захватить мышь · <b>Esc</b> — отпустить<br />
@@ -100,6 +104,10 @@
     </div>
     <div id="tour">
       <header><b>Экскурсия</b><button id="tour-toggle" type="button" title="Свернуть">–</button></header>
+      <div id="tour-tools">
+        <button id="btn-day" type="button" title="Время суток (N)">☀ День</button>
+        <button id="btn-gate" type="button" title="Подъёмный мост, решётка и ворота (G)">⇅ Закрыть ворота</button>
+      </div>
       <div id="tour-list"></div>
       <button id="tour-play" type="button">▶ Вся экскурсия</button>
     </div>

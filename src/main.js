@@ -19,6 +19,9 @@ import { createPostFX } from './postfx.js';
 import { REFLECT } from './water.js';
 import { createCameraControls } from './camera.js';
 import { createTour } from './tour.js';
+import { createExtras } from './extras.js';
+import { FOLIAGE_SUN } from './vegetation.js';
+import { SUN_DIR } from './lighting.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
 
@@ -113,11 +116,15 @@ async function init() {
   mark = scene.children.length;
   const details = createDetails(scene, terrain, walls, village);
   const torches = createTorches(scene, terrain, walls);
+  await step('интерьер зала, осадный лагерь, птицы');
+  const extras = createExtras(scene, terrain, walls, village);
   toLayer1(mark);
+  // в осадном лагере не растут деревья и трава
+  const campEx = (x, z) => (extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30 ? 1 : 0);
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain, {
-    exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z))),
-    excludeTrees: (x, z) => village.exclude(x, z) > 0,
+    exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z), campEx(x, z))),
+    excludeTrees: (x, z) => village.exclude(x, z) > 0 || campEx(x, z) > 0,
     extraTrees: details.extraTrees,
   });
   if (Q.lambert) toLambert(scene);
@@ -127,7 +134,32 @@ async function init() {
 
   const cam = createCameraControls(camera, renderer.domElement, terrain);
   const controls = cam.orbit; // для отладки и скриншотов
-  const tour = createTour(camera, cam, terrain, village);
+  const tour = createTour(camera, cam, terrain, village, extras);
+
+  // ---- время суток: всё, что зависит от темноты ----
+  const glassMeshes = [], waters = [];
+  scene.traverse((o) => {
+    if (o.name === 'stained-glass') glassMeshes.push(o);
+    if ((o.name === 'river' || o.name === 'moat') && o.material.uniforms && o.material.uniforms.sunDirection) waters.push(o.material.uniforms);
+  });
+  lighting.onChange((night, st) => {
+    torches.setNight(night);
+    extras.setNight(night);
+    FOLIAGE_SUN.copy(SUN_DIR).multiplyScalar(1 - 0.95 * night); // ночью листва не «просвечивает»
+    for (const g of glassMeshes) for (const m of [].concat(g.material)) m.emissiveIntensity = 0.55 + night * 1.8; // свечи за витражами
+    for (const u of waters) { u.sunDirection.value.copy(SUN_DIR); u.sunColor.value.copy(st.sunCol).multiplyScalar(1 - 0.6 * night); }
+  });
+  const dayBtn = document.getElementById('btn-day'), gateBtn = document.getElementById('btn-gate');
+  const DAY_LABEL = { day: '☀ День', sunset: '🌅 Закат', night: '🌙 Ночь' };
+  const cycleDay = () => { lighting.nextMode(); if (dayBtn) dayBtn.textContent = DAY_LABEL[lighting.mode]; };
+  const toggleGate = () => { gate.toggle(); if (gateBtn) gateBtn.textContent = gate.closed ? '⇅ Открыть ворота' : '⇅ Закрыть ворота'; };
+  if (dayBtn) dayBtn.addEventListener('click', cycleDay);
+  if (gateBtn) gateBtn.addEventListener('click', toggleGate);
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat || cam.mode === 'fly' && e.code !== 'KeyN' && e.code !== 'KeyG') return;
+    if (e.code === 'KeyN') cycleDay();
+    if (e.code === 'KeyG') toggleGate();
+  });
   // точка, вокруг которой строятся тени: цель орбиты или место впереди в полёте
   const focus = new THREE.Vector3();
   function shadowFocus() {
@@ -183,17 +215,19 @@ async function init() {
     const t = timer.getElapsed();
     const dt = timer.getDelta();
     if (!tour.update(Math.min(dt, 0.1))) cam.update(dt);
-    lighting.update(t, camera, shadowFocus());
+    lighting.update(t, camera, shadowFocus(), Math.min(dt, 0.1));
     river.update(t);
     vegetation.update(t, camera);
     walls.update(t);
     towers.update(t);
-    gate.update(t);
+    gate.update(t, Math.min(dt, 0.1));
+    if (gate.animating && renderer.shadowMap.enabled) renderer.shadowMap.needsUpdate = true;
     keep.update(t);
     court.update(t);
     village.update(t);
     details.update(t);
     torches.update(t);
+    extras.update(t, dt);
     FLAG_TIME.value = t;
     post.render(dt);
 
@@ -214,7 +248,7 @@ async function init() {
 
   // доступ из консоли браузера для отладки
   window.castle = {
-    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, terrain, assets,
+    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, terrain, assets,
     snapshot() {
       frame();
       return renderer.domElement.toDataURL('image/jpeg', 0.9);

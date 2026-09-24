@@ -371,11 +371,14 @@ function buildSpecies(name, variant) {
 }
 
 // Материал листвы: альфа-отсечение, ветер, просвечивание на солнце, оттенок экземпляра
+// направление «просвета» листвы; длина вектора — сила эффекта (ночью почти 0)
+export const FOLIAGE_SUN = SUN_DIR.clone();
+
 function foliageMaterial(tex) {
   const mat = new THREE.MeshStandardMaterial({
     map: tex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, metalness: 0,
   });
-  const sun = SUN_DIR.clone();
+  const sun = FOLIAGE_SUN; // общий для всех крон: ночью ослабляется (нет просвета листвы)
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = WIND.uTime;
     shader.uniforms.uSun = { value: sun };

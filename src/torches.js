@@ -57,10 +57,11 @@ const glowFS = /* glsl */ `
   varying vec2 vUv;
   varying float vSeed;
   uniform float uTime;
+  uniform float uBoost;
   void main() {
     float d = length(vUv - 0.5) * 2.0;
     float flick = 0.8 + 0.12 * sin(uTime * 9.0 + vSeed * 20.0) + 0.08 * sin(uTime * 23.0 + vSeed * 7.0);
-    float a = pow(max(0.0, 1.0 - d), 2.2) * 0.35 * flick;
+    float a = pow(max(0.0, 1.0 - d), 2.2) * 0.35 * flick * uBoost;
     gl_FragColor = vec4(vec3(1.0, 0.55, 0.2) * a, 1.0);
   }
 `;
@@ -171,8 +172,9 @@ export function createTorches(scene, terrain, walls) {
   // тёплое пятно света на стене вокруг факела
   const gg = new THREE.PlaneGeometry(3.2, 3.2);
   gg.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+  const uBoost = { value: 1 };
   const glowMat = new THREE.ShaderMaterial({
-    uniforms: { uTime }, vertexShader: glowVS, fragmentShader: glowFS,
+    uniforms: { uTime, uBoost }, vertexShader: glowVS, fragmentShader: glowFS,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
@@ -186,5 +188,38 @@ export function createTorches(scene, terrain, walls) {
   gm.layers.set(1);
   scene.add(gm);
 
-  return { count: list.length, update(t) { uTime.value = t; } };
+  // ночью — световые пятна на земле перед факелами (включаются только в темноте)
+  const pools = [];
+  for (const { c, n } of glows) {
+    const pc = c.clone().addScaledVector(n, 1.6);
+    const g = terrain.heightAt(pc.x, pc.z);
+    if (c.y - g < 4.5) pools.push(pc.setY(g + 0.06));
+  }
+  const uPool = { value: 0 };
+  const pg = new THREE.PlaneGeometry(7, 7).rotateX(-Math.PI / 2);
+  pg.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds.slice(0, Math.max(1, pools.length)), 1));
+  const poolMat = new THREE.ShaderMaterial({
+    uniforms: { uTime, uBoost: uPool }, vertexShader: glowVS, fragmentShader: glowFS,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+  });
+  const pm = new THREE.InstancedMesh(pg, poolMat, Math.max(1, pools.length));
+  pools.forEach((c, i) => pm.setMatrixAt(i, new THREE.Matrix4().makeTranslation(c.x, c.y, c.z)));
+  pm.count = pools.length;
+  pm.frustumCulled = false;
+  pm.renderOrder = 9;
+  pm.layers.set(1);
+  pm.visible = false;
+  scene.add(pm);
+
+  return {
+    count: list.length,
+    update(t) { uTime.value = t; },
+    // k: 0 — день, 1 — ночь. Ночью пятна света от факелов ярче и больше.
+    setNight(k) {
+      uBoost.value = 1 + k * 2.6;
+      uPool.value = k * 1.4;
+      pm.visible = k > 0.02;
+    },
+  };
 }
