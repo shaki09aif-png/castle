@@ -7,11 +7,12 @@ import { createTerrain } from './terrain.js';
 import { createRiver } from './water.js';
 import { createVegetation } from './vegetation.js';
 import { createWalls } from './walls.js';
+import { createTowers } from './towers.js';
 import { createPostFX } from './postfx.js';
 import { HILL_TOP } from './layout.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
-const STAGE = 'Этап 2: крепостные стены с зубцами, боевым ходом и бойницами';
+const STAGE = 'Этап 3: башни с коническими и шатровыми крышами, бойницами и флюгерами';
 
 const loading = document.getElementById('loading');
 const loadingText = loading.querySelector('small');
@@ -57,6 +58,8 @@ async function init() {
   const river = createRiver(scene);
   await step('стены замка');
   const walls = createWalls(scene, terrain);
+  await step('башни');
+  const towers = createTowers(scene, terrain, walls);
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain);
   await step('постобработка');
@@ -118,6 +121,7 @@ async function init() {
     river.update(t);
     vegetation.update(t, camera);
     walls.update(t);
+    towers.update(t);
     post.render(timer.getDelta());
 
     frames++;

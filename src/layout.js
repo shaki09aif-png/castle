@@ -88,3 +88,53 @@ export const WALL_NODES = [
   { deg: 286, type: 'tower' },
   { deg: 338, type: 'tower' },
 ];
+
+// Точка осевой линии стены под заданным углом (градусы)
+export function wallNodePoint(deg) {
+  const t = (deg * Math.PI) / 180;
+  const r = plateauRadius(t) - WALL.inset;
+  return { x: Math.cos(t) * r, z: Math.sin(t) * r };
+}
+
+// Башни (этап 3): круглые и квадратные, разного размера и высоты.
+// Центр башни вынесен наружу от линии стены — башня фланкирует стену.
+// extra — насколько верхняя площадка выше боевого хода стены.
+const TOWER_SPECS = {
+  35: { shape: 'round', r: 4.3, extra: 7.5 },
+  140: { shape: 'square', r: 3.9, extra: 6.2 },
+  190: { shape: 'round', r: 5.0, extra: 10, corbel: true },
+  237: { shape: 'square', r: 4.3, extra: 7.4, corbel: true },
+  286: { shape: 'round', r: 3.7, extra: 5.8 },
+  338: { shape: 'round', r: 4.6, extra: 8.6, corbel: true },
+};
+
+export const TOWERS = WALL_NODES.filter((n) => n.type === 'tower').map((n, i) => {
+  const spec = TOWER_SPECS[n.deg];
+  const t = (n.deg * Math.PI) / 180;
+  const node = wallNodePoint(n.deg);
+  const push = spec.r * 0.42;
+  return {
+    id: i,
+    deg: n.deg,
+    ...spec,
+    node,
+    x: node.x + Math.cos(t) * push,
+    z: node.z + Math.sin(t) * push,
+    yaw: t, // квадратные башни развёрнуты «лицом» наружу
+  };
+});
+
+// Лежит ли точка внутри башни (с запасом m)
+export function insideTower(x, z, m = 0) {
+  for (const tw of TOWERS) {
+    const dx = x - tw.x, dz = z - tw.z;
+    if (tw.shape === 'round') {
+      if (Math.hypot(dx, dz) < tw.r + m) return tw;
+    } else {
+      const c = Math.cos(tw.yaw), s = Math.sin(tw.yaw);
+      const lx = dx * c + dz * s, lz = -dx * s + dz * c;
+      if (Math.abs(lx) < tw.r + m && Math.abs(lz) < tw.r + m) return tw;
+    }
+  }
+  return null;
+}

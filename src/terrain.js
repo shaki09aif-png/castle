@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { createNoise2D, fbm, ridged, mulberry32, clamp, lerp, smoothstep } from './noise.js';
 import {
   HILL_TOP, GATE_ANGLE, GATE_DIR, GATE_RADIUS, plateauRadius, KEEP_POS, KEEP_RISE,
-  DITCH, SPUR, riverZ, riverHalfWidth, RIVER, WORLD,
+  DITCH, SPUR, riverZ, riverHalfWidth, RIVER, WORLD, insideTower,
 } from './layout.js';
 import { textureArrays, macroNoiseTexture, pbrMaterial } from './textures.js';
 import { triplanarMaterial, TRIPLANAR_GLSL } from './materials.js';
@@ -879,6 +879,7 @@ function buildRocks(heightAt, roadGrid, groundAt) {
     const th = Math.atan2(z, x);
     if (!opts.allowTop && Math.hypot(x, z) < plateauRadius(th) + 1.5) return false;
     if (shelfDistance(along, across) < 2) return false;
+    if (insideTower(x, z, scale + 1.5)) return false;
     if (!opts.allowWater && riverInfo(x, z).e < scale) return false;
     const sx = scale * (0.8 + rnd() * 0.6);
     const sy = scale * flat * (0.6 + rnd() * 0.5);

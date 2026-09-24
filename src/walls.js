@@ -3,7 +3,7 @@
 // боевой ход с перилами на кронштейнах, хурды (деревянные галереи) на части
 // стен, каменные лестницы со двора, мох у основания и потёки на кладке.
 import * as THREE from 'three';
-import { plateauRadius, WALL, WALL_NODES } from './layout.js';
+import { plateauRadius, WALL, WALL_NODES, insideTower } from './layout.js';
 import { pbrMaterial, macroNoiseTexture } from './textures.js';
 import { createNoise2D, mulberry32 } from './noise.js';
 
@@ -36,6 +36,33 @@ class GeoBuilder {
     const i3 = this.vert(p3, n, uvs[3][0], uvs[3][1], a[3]);
     if (flip) this.idx.push(i0, i2, i1, i0, i3, i2);
     else this.idx.push(i0, i1, i2, i0, i2, i3);
+  }
+  // четырёхугольник с отдельной нормалью в каждой вершине (гладкие круглые поверхности)
+  quad4(ps, ns, uvs, as = [9, 9, 9, 9]) {
+    const avg = ns[0].clone().add(ns[1]).add(ns[2]).add(ns[3]);
+    const e1 = new V3().subVectors(ps[1], ps[0]), e2 = new V3().subVectors(ps[3], ps[0]);
+    const flip = new V3().crossVectors(e1, e2).dot(avg) < 0;
+    const ids = ps.map((p, k) => this.vert(p, ns[k], uvs[k][0], uvs[k][1], as[k]));
+    if (flip) this.idx.push(ids[0], ids[2], ids[1], ids[0], ids[3], ids[2]);
+    else this.idx.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
+  }
+  // добавить готовую геометрию (с матрицей преобразования)
+  addGeometry(geo, matrix) {
+    const g = geo.index ? geo : geo;
+    const pos = g.getAttribute('position'), nrm = g.getAttribute('normal'), uv = g.getAttribute('uv');
+    const nm = new THREE.Matrix3().getNormalMatrix(matrix);
+    const base = this.pos.length / 3;
+    const p = new V3(), n = new V3();
+    for (let i = 0; i < pos.count; i++) {
+      p.fromBufferAttribute(pos, i).applyMatrix4(matrix);
+      n.fromBufferAttribute(nrm, i).applyMatrix3(nm).normalize();
+      this.pos.push(p.x, p.y, p.z);
+      this.nrm.push(n.x, n.y, n.z);
+      this.uv.push(uv ? uv.getX(i) : 0, uv ? uv.getY(i) : 0);
+      this.aux.push(9);
+    }
+    if (g.index) for (let i = 0; i < g.index.count; i++) this.idx.push(base + g.index.getX(i));
+    else for (let i = 0; i < pos.count; i++) this.idx.push(base + i);
   }
   // Брус: центр c, оси ax/ay/az (единичные), полуразмеры h. Развёртка по граням
   // в мировых координатах; волокна дерева (ось v) идут вдоль длинной оси бруса.
@@ -191,15 +218,16 @@ export function createWalls(scene, terrain) {
       for (let k = 0; k < rows - 1; k++) {
         const y00 = yAt(ya, k, top0), y01 = yAt(ya, k + 1, top0);
         const y10 = yAt(yb, k, top1), y11 = yAt(yb, k + 1, top1);
-        const outAt = (o, y, b) => {
+        const outAt = (o, y, b, t) => {
           const h = y - b;
           const extra = h < batterH ? batter * (1 - h / batterH) : 0;
           const p = o.clone().addScaledVector(N, extra);
           p.y = y;
-          if (h > 0.9 && y < top0 - 0.3) p.addScaledVector(N, bump(p));
+          // неровность кладки; на стыках сегментов — ноль, чтобы не было щелей
+          if (h > 0.9 && y < top0 - 0.3 && t > 0 && t < 1) p.addScaledVector(N, bump(p));
           return p;
         };
-        const q0 = outAt(o0, y00, b0), q1 = outAt(o1, y10, b1), q2 = outAt(o1, y11, b1), q3 = outAt(o0, y01, b0);
+        const q0 = outAt(o0, y00, b0, t0), q1 = outAt(o1, y10, b1, t1), q2 = outAt(o1, y11, b1, t1), q3 = outAt(o0, y01, b0, t0);
         const nq = N.clone();
         if (y01 - b0 < batterH + 0.01) nq.addScaledVector(UP, batter / batterH).normalize();
         stone.quad(q0, q1, q2, q3, nq, [[s0, y00], [s1, y10], [s1, y11], [s0, y01]], [y00 - b0 - 0.9, y10 - b1 - 0.9, y11 - b1 - 0.9, y01 - b0 - 0.9]);
@@ -213,8 +241,8 @@ export function createWalls(scene, terrain) {
       const irows = Math.max(ia.length, ib.length);
       for (let k = 0; k < irows - 1; k++) {
         const y00 = yAt(ia, k, w0), y01 = yAt(ia, k + 1, w0), y10 = yAt(ib, k, w1), y11 = yAt(ib, k + 1, w1);
-        const at = (p0, y) => { const p = p0.clone(); p.y = y; if (y > p0.y + 0.5) p.addScaledVector(N, -bump(p)); return p; };
-        stone.quad(at(i0, y00), at(i1, y10), at(i1, y11), at(i0, y01), N.clone().negate(),
+        const at = (p0, y, t) => { const p = p0.clone(); p.y = y; if (y > g0 + 0.5 && t > 0 && t < 1) p.addScaledVector(N, -bump(p)); return p; };
+        stone.quad(at(i0, y00, t0), at(i1, y10, t1), at(i1, y11, t1), at(i0, y01, t0), N.clone().negate(),
           [[s0, y00], [s1, y10], [s1, y11], [s0, y01]], [y00 - g0 - 0.5, y10 - g1 - 0.5, y11 - g1 - 0.5, y01 - g0 - 0.5]);
       }
       // --- верх стены под настилом и внутренняя сторона бруствера ---
@@ -237,6 +265,7 @@ export function createWalls(scene, terrain) {
       const baseY = walk[i] + (walk[i + 1] - walk[i]) * tc + sill;
       const hTop = walk[i] + (walk[i + 1] - walk[i]) * tc + mTop + (rnd() - 0.5) * 0.06;
       const center = P[i].clone().addScaledVector(D, (a0 + a1) / 2).addScaledVector(N, T / 2 - pT / 2);
+      if (insideTower(center.x, center.z, 1.0)) continue;
       const hw = WALL.merlonWidth / 2, hd = pT / 2 + 0.01;
       const slit = m % 2 === 1;
       if (!slit) {
@@ -261,6 +290,7 @@ export function createWalls(scene, terrain) {
       const a = (k + 0.5) * (L / nSlits);
       const tt = a / L;
       const base = P[i].clone().addScaledVector(D, a).addScaledVector(N, T / 2);
+      if (insideTower(base.x, base.z, 1.0)) continue;
       const gy = groundOut(base, N) + 0.9;
       const wy0 = walk[i] + (walk[i + 1] - walk[i]) * tt;
       const y = Math.max(gy + 3.2, wy0 - 3.4);
@@ -289,12 +319,13 @@ export function createWalls(scene, terrain) {
   for (let i = 0; i < n - 1; i++) {
     const N = segNrm[i], D = segDir[i], L = segLen[i];
     const inner = -T / 2 - over, outer = T / 2 - pT;
-    const nPieces = Math.max(1, Math.round(L / 3));
+    const nPieces = Math.max(1, Math.round(L / 1.5));
     for (let k = 0; k < nPieces; k++) {
       const a0 = (k / nPieces) * L, a1 = ((k + 1) / nPieces) * L;
       const tm = (a0 + a1) / 2 / L;
       const y = walk[i] + (walk[i + 1] - walk[i]) * tm + 0.05;
       const c = P[i].clone().addScaledVector(D, (a0 + a1) / 2).addScaledVector(N, (inner + outer) / 2);
+      if (insideTower(c.x, c.z, 0.2)) continue;
       // настил: доски вдоль стены
       wood.box(new V3(c.x, y, c.z), D, UP, N, (a1 - a0) / 2 + 0.02, 0.05, (outer - inner) / 2, { grain: true });
     }
@@ -305,6 +336,7 @@ export function createWalls(scene, terrain) {
       const tt = a / L;
       const y = walk[i] + (walk[i + 1] - walk[i]) * tt;
       const face = P[i].clone().addScaledVector(D, a).addScaledVector(N, -T / 2);
+      if (insideTower(face.x - N.x * over, face.z - N.z * over, 0.3)) continue;
       // балка под настилом
       const beamC = face.clone().addScaledVector(N, -over / 2 + 0.25);
       wood.box(new V3(beamC.x, y - 0.12, beamC.z), N, UP, D, over / 2 + 0.25, 0.1, 0.08, { grain: true });
@@ -317,13 +349,17 @@ export function createWalls(scene, terrain) {
       const post = face.clone().addScaledVector(N, -over + 0.06);
       wood.box(new V3(post.x, y + 0.55, post.z), UP, D, N, 0.55, 0.055, 0.055, { grain: true });
     }
-    // поручни (верхний и средний)
-    for (const [h, r] of [[1.05, 0.05], [0.55, 0.035]]) {
-      const c = P[i].clone().addScaledVector(D, L / 2).addScaledVector(N, -T / 2 - over + 0.06);
-      const y = (walk[i] + walk[i + 1]) / 2 + h;
-      const len = L / 2;
-      const slope = new V3().addScaledVector(D, L).addScaledVector(UP, walk[i + 1] - walk[i]).normalize();
-      wood.box(new V3(c.x, y, c.z), slope, UP, N, len, r, r, { grain: true });
+    // поручни (верхний и средний) — отрезками между стойками, чтобы не заходить в башни
+    const slope = new V3().addScaledVector(D, L).addScaledVector(UP, walk[i + 1] - walk[i]).normalize();
+    const nRail = Math.max(1, Math.round(L / 1.9));
+    for (let k = 0; k < nRail; k++) {
+      const a = ((k + 0.5) / nRail) * L;
+      const c = P[i].clone().addScaledVector(D, a).addScaledVector(N, -T / 2 - over + 0.06);
+      if (insideTower(c.x, c.z, 0.4)) continue;
+      const yb = walk[i] + (walk[i + 1] - walk[i]) * (a / L);
+      for (const [h, r] of [[1.05, 0.05], [0.55, 0.035]]) {
+        wood.box(new V3(c.x, yb + h, c.z), slope, UP, N, L / nRail / 2 + 0.02, r, r, { grain: true });
+      }
     }
   }
 
@@ -346,8 +382,15 @@ export function createWalls(scene, terrain) {
     m.name = 'walls';
     scene.add(m);
   }
+  // высота боевого хода в ближайшей точке трассы (для башен и ворот)
+  function walkAt(x, z) {
+    let best = 0, bd = Infinity;
+    P.forEach((p, i) => { const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; best = i; } });
+    return walk[best];
+  }
   return {
-    trace, walk,
+    trace, walk, walkAt, segDir, segNrm, points: P,
+    stoneMaterial: stoneMat, woodMaterial: woodMat,
     update() {},
   };
 }
@@ -375,8 +418,11 @@ function pickStairSegments(segLen, segNrm, trace) {
 function buildHoarding(wood, stone, P0, D, N, L, w0, w1, T) {
   const out = 1.7; // вынос галереи
   const H = 2.5;
-  const margin = 1.5;
-  const a0 = margin, a1 = L - margin;
+  let a0 = 1.5, a1 = L - 1.5;
+  const at = (a) => P0.clone().addScaledVector(D, a).addScaledVector(N, T / 2 + 0.8);
+  while (a0 < L / 2 && insideTower(at(a0).x, at(a0).z, 1.2)) a0 += 0.25;
+  while (a1 > L / 2 && insideTower(at(a1).x, at(a1).z, 1.2)) a1 -= 0.25;
+  if (a1 - a0 < 4) return;
   const n = Math.max(2, Math.round((a1 - a0) / 1.6));
   const yAt = (a) => w0 + (w1 - w0) * (a / L);
   const face = (a) => P0.clone().addScaledVector(D, a).addScaledVector(N, T / 2);
@@ -445,7 +491,7 @@ function buildStairs(stone, terrain, P0, D, N, L, w0, w1, T, over) {
     const y = yTop - k * rise;
     const c = inner.clone().addScaledVector(D, -k * run);
     const gy = terrain.heightAt(c.x, c.z) - 0.4;
-    if (y < gy + 0.3) break;
+    if (y < gy + 0.3 || insideTower(c.x, c.z, 1.5)) break;
     stone.box(new V3(c.x, (y + gy) / 2, c.z), D, UP, N, run / 2 + 0.01, (y - gy) / 2, width / 2, { a: 9 });
   }
   // площадка наверху, примыкает к настилу

@@ -249,7 +249,7 @@ export function createLighting(scene, renderer, assets) {
     envScene.add(makeSkyMesh());
     scene.environment = pmrem.fromScene(envScene, 0.02, 1, 2000).texture;
   }
-  scene.environmentIntensity = 0.75;
+  scene.environmentIntensity = 1.0;
   pmrem.dispose();
 
   // 3) Солнце. Теневая «коробка» следует за точкой, на которую смотрит камера,
@@ -294,7 +294,7 @@ export function createLighting(scene, renderer, assets) {
   }
 
   // лёгкая голубоватая подсветка от неба (дополняет HDRI)
-  const hemi = new THREE.HemisphereLight(0xa9c4ff, 0x4a4630, 0.25);
+  const hemi = new THREE.HemisphereLight(0xa9c4ff, 0x4a4630, 0.4);
   scene.add(hemi);
 
   return {

@@ -305,7 +305,7 @@ const GENERATORS = {
   wallStone() {
     return makeMasonry({
       seed: 7, courseMin: 34, courseMax: 72, lenMin: 0.8, lenMax: 2.3, mortar: 2.4, jitter: 3.2,
-      base: [0.6, 0.56, 0.48], tint: 0.2, mortarColor: [0.6, 0.57, 0.5], tileMeters: 3.8,
+      base: [0.6, 0.56, 0.48], tint: 0.12, mortarColor: [0.6, 0.57, 0.5], tileMeters: 3.8,
     });
   },
 
@@ -357,6 +357,67 @@ const GENERATORS = {
       }
     }
     return finishSet(rgb, hgt, rough, S, { normal: 3, ao: 2, aoRadius: 3, tileMeters: 1.2 });
+  },
+
+  // Черепица «бобровый хвост»: 4 ряда по 6 плиток со смещением, разные оттенки,
+  // лишайник и сажа. Каждый ряд геометрии крыши берёт одну полосу текстуры.
+  roof() {
+    const S = 512, ROWS = 4, PER = 6;
+    const rh = S / ROWS, tw = S / PER;
+    const n = createTileNoise(141);
+    const rnd = mulberry32(142);
+    const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    const rough = new Float32Array(S * S);
+    const tiles = [];
+    for (let r = 0; r < ROWS; r++) {
+      tiles.push([]);
+      for (let i = 0; i < PER; i++) {
+        const age = rnd();
+        const l = 0.8 + rnd() * 0.4;
+        tiles[r].push({
+          col: age > 0.85 ? [0.36 * l, 0.26 * l, 0.2 * l] : [0.55 * l, 0.29 * l + age * 0.04, 0.19 * l],
+          tilt: (rnd() - 0.5) * 0.3,
+          seed: rnd() * 10,
+        });
+      }
+    }
+    for (let y = 0; y < S; y++) {
+      const r = Math.floor(y / rh);
+      const ly = (y - r * rh) / rh; // 0 — верх полосы, 1 — нижняя кромка плитки
+      const off = (r % 2) * tw * 0.5;
+      for (let x = 0; x < S; x++) {
+        const xs = (x - off + S) % S;
+        const ti = Math.floor(xs / tw);
+        const lx = (xs - ti * tw) / tw;
+        const t = tiles[r][ti];
+        const u = x / S, v = y / S;
+        // форма плитки: зазоры по бокам, скруглённый низ
+        const dx = (lx - 0.5) * 2;
+        const bottom = 0.72 + 0.28 * Math.sqrt(Math.max(0, 1 - dx * dx));
+        const inTile = lx > 0.035 && lx < 0.965 && ly < bottom;
+        const i = y * S + x;
+        if (!inTile) {
+          const k = 0.35 + 0.2 * ly;
+          rgb[i * 3] = 0.2 * k; rgb[i * 3 + 1] = 0.13 * k; rgb[i * 3 + 2] = 0.1 * k;
+          hgt[i] = 0.05;
+          rough[i] = 0.95;
+          continue;
+        }
+        const grain = n.fbm(u + t.seed, v, 32, 3);
+        const lichen = smoothstep(0.64, 0.72, n.fbm(u + 0.5, v + 0.2, 16, 3));
+        const soot = smoothstep(0.5, 0.8, n.fbm(u * 0.5 + 0.3, v, 4, 3)) * 0.35;
+        let sh = (0.78 + 0.3 * grain) * (0.85 + 0.25 * ly) * (1 - soot);
+        sh *= 1 + t.tilt * (lx - 0.5);
+        let cr = t.col[0] * sh, cg = t.col[1] * sh, cb = t.col[2] * sh;
+        cr += (0.62 - cr) * lichen * 0.55; cg += (0.6 - cg) * lichen * 0.55; cb += (0.45 - cb) * lichen * 0.55;
+        rgb[i * 3] = cr; rgb[i * 3 + 1] = cg; rgb[i * 3 + 2] = cb;
+        // плитка утолщается к нижней кромке
+        hgt[i] = 0.25 + ly * 0.6 + grain * 0.12 + t.tilt * (lx - 0.5) * 0.3;
+        rough[i] = 0.72 + lichen * 0.2;
+      }
+    }
+    return finishSet(rgb, hgt, rough, S, { normal: 3.5, ao: 2.4, aoRadius: 4, tileMeters: 1.56 });
   },
 
   // Кора дуба/бука: продольные борозды
@@ -665,9 +726,9 @@ function makeMasonry({
 }
 
 function stoneColor(base, tint, rnd) {
-  const l = 1 + (rnd() - 0.5) * tint * 2.4;
-  const warm = (rnd() - 0.5) * tint;
-  return [base[0] * l + warm, base[1] * l + warm * 0.4, base[2] * l - warm * 0.3];
+  const l = 1 + (rnd() - 0.5) * tint * 2.6;
+  const warm = (rnd() - 0.35) * tint * 0.5; // в основном тёплые оттенки известняка, изредка сероватые
+  return [base[0] * l + warm, base[1] * l + warm * 0.5, base[2] * l - warm * 0.4];
 }
 
 function splitStone(x, y, w, h, rnd, rubble) {

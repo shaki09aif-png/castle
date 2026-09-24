@@ -2,7 +2,7 @@
 // пород и кусты. Густота убывает к вершине холма; у реки трава сочнее.
 import * as THREE from 'three';
 import { mulberry32, createNoise2D, fbm, smoothstep, clamp, lerp } from './noise.js';
-import { plateauRadius, GATE_DIR, GATE_RADIUS, DITCH } from './layout.js';
+import { plateauRadius, GATE_DIR, GATE_RADIUS, DITCH, insideTower } from './layout.js';
 import { shelfDistance, riverInfo } from './terrain.js';
 import { pbrMaterial, foliageTexture, macroNoiseTexture } from './textures.js';
 import { SUN_DIR } from './lighting.js';
@@ -433,7 +433,7 @@ function scatterTrees(terrain) {
     if (g.road > 0.02 || g.river < 3 || g.rock > 0.35 || g.gravel > 0.4 || g.slope > 0.45) return;
     const th = Math.atan2(z, x);
     const eEdge = Math.hypot(x, z) - plateauRadius(th);
-    if (eEdge < 4) return; // на вершине — замок
+    if (eEdge < 4 || insideTower(x, z, 5)) return; // на вершине — замок
     const along = x * GATE_DIR.x + z * GATE_DIR.z - GATE_RADIUS;
     const across = x * GATE_DIR.z - z * GATE_DIR.x;
     if (shelfDistance(along, across) < 6) return;
@@ -466,7 +466,7 @@ function scatterTrees(terrain) {
     const r = R + 6 + rnd() * 140;
     const x = Math.cos(th) * r, z = Math.sin(th) * r;
     const g = terrain.groundAt(x, z);
-    if (g.road > 0.02 || g.rock > 0.5 || g.slope > 0.5 || g.river < 3) continue;
+    if (g.road > 0.02 || g.rock > 0.5 || g.slope > 0.5 || g.river < 3 || insideTower(x, z, 2.5)) continue;
     if (rnd() > 0.25) continue;
     const along = x * GATE_DIR.x + z * GATE_DIR.z - GATE_RADIUS;
     const across = x * GATE_DIR.z - z * GATE_DIR.x;
