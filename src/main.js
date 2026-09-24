@@ -40,12 +40,14 @@ async function init() {
   const assets = await loadAssets();
   setLoadedAssets(assets.sets);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
+  // Без постобработки (низкое качество) сглаживание и тональная компрессия
+  // делаются самим рендерером — это намного дешевле.
+  const renderer = new THREE.WebGLRenderer({ antialias: !Q.post, powerPreference: 'high-performance', stencil: false });
   const maxRatio = Math.min(window.devicePixelRatio, Q.pixelRatio);
   renderer.setPixelRatio(maxRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping; // ACES делается в постобработке
+  renderer.toneMapping = Q.post ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping; // с постобработкой ACES делает она
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap; // мягкая PCF-фильтрация (радиус задан у тени)
   document.body.appendChild(renderer.domElement);
@@ -82,7 +84,9 @@ async function init() {
     extraTrees: details.extraTrees,
   });
   await step('постобработка');
-  const post = createPostFX(renderer, scene, camera);
+  const post = Q.post
+    ? createPostFX(renderer, scene, camera)
+    : { setSize() {}, render() { renderer.render(scene, camera); } };
 
   const cam = createCameraControls(camera, renderer.domElement, terrain);
   const controls = cam.orbit; // для отладки и скриншотов
@@ -111,7 +115,7 @@ async function init() {
   let ratio = maxRatio;
   function adaptResolution(fps) {
     let next = ratio;
-    if (fps < 32) next = Math.max(0.6, ratio - 0.1);
+    if (fps < 32) next = Math.max(Q.minPixelRatio, ratio - 0.1);
     else if (fps > 55) next = Math.min(maxRatio, ratio + 0.05);
     if (Math.abs(next - ratio) > 0.001) {
       ratio = next;

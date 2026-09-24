@@ -634,17 +634,20 @@ function makeTerrainMaterial() {
           w.y = clamp(w.y + edgeN * 0.9 * w.y * (1.0 - w.y) * 4.0, 0.0, 1.0);
           w.w = clamp(w.w - edgeN * 0.6 * w.w * (1.0 - w.w) * 4.0, 0.0, 1.0);
           w /= max(1e-4, w.x + w.y + w.z + w.w);
-          if (w.x > 0.004) { sc = tileInv.x; triSampleArr(tArrC, tArrN, tArrO, 0.0, vWPos * sc, dx * sc, dy * sc, n, bw, 0.55, c0, o0, n0); }
+          if (w.x > 0.004) { sc = tileInv.x; planarSampleArr(tArrC, tArrN, tArrO, 0.0, vWPos * sc, dx * sc, dy * sc, n, 0.55, c0, o0, n0); }
           if (w.y > 0.004) {
             sc = tileInv.y; triSampleArr(tArrC, tArrN, tArrO, 1.0, vWPos * sc, dx * sc, dy * sc, n, bw, 1.3, c1, o1, n1);
+            #ifdef ROCK_DETAIL
             // второй, крупный масштаб скалы — без заметных повторов
             vec3 cb, ob, nb; float s2 = sc * 0.23;
             triSampleArr(tArrC, tArrN, tArrO, 1.0, vWPos * s2 + 0.37, dx * s2, dy * s2, n, bw, 1.0, cb, ob, nb);
-            c1 = mix(c1, cb, 0.45) * mix(0.85, 1.1, macro2.b);
+            c1 = mix(c1, cb, 0.45);
             n1 = normalize(n1 + nb - n);
+            #endif
+            c1 *= mix(0.85, 1.1, macro2.b);
           }
-          if (w.z > 0.004) { sc = tileInv.z; triSampleArr(tArrC, tArrN, tArrO, 2.0, vWPos * sc, dx * sc, dy * sc, n, bw, 1.0, c2, o2, n2); }
-          if (w.w > 0.004) { sc = tileInv.w; triSampleArr(tArrC, tArrN, tArrO, 3.0, vWPos * sc, dx * sc, dy * sc, n, bw, 1.0, c3, o3, n3); }
+          if (w.z > 0.004) { sc = tileInv.z; planarSampleArr(tArrC, tArrN, tArrO, 2.0, vWPos * sc, dx * sc, dy * sc, n, 1.0, c2, o2, n2); }
+          if (w.w > 0.004) { sc = tileInv.w; planarSampleArr(tArrC, tArrN, tArrO, 3.0, vWPos * sc, dx * sc, dy * sc, n, 1.0, c3, o3, n3); }
 
           // трава: крупные пятна оттенков, сухость на высоте, леса на дальних холмах
           c0 *= mix(vec3(0.82, 0.88, 0.8), vec3(1.1, 1.05, 0.92), macro.r);
@@ -679,7 +682,8 @@ function makeTerrainMaterial() {
         reflectedLight.directDiffuse *= mix(1.0, gOrm.r, 0.5);`
       );
   };
-  mat.customProgramCacheKey = () => 'terrain-v2';
+  if (Q.rockDetail) mat.defines = { ROCK_DETAIL: '' };
+  mat.customProgramCacheKey = () => 'terrain-v3' + (Q.rockDetail ? 'd' : '');
   return mat;
 }
 
@@ -874,11 +878,12 @@ export function rockGeometry(seed, detail) {
 function buildRocks(heightAt, roadGrid, groundAt) {
   const rnd = mulberry32(77);
   // крупные глыбы, валуны, мелкие камни осыпей
+  const d = Q.rockDetail ? 0 : 1; // на низком качестве камни проще
   const kinds = [
-    { geo: rockGeometry(1, 3), list: [] },
-    { geo: rockGeometry(2, 3), list: [] },
-    { geo: rockGeometry(3, 2), list: [] },
-    { geo: rockGeometry(4, 2), list: [] },
+    { geo: rockGeometry(1, 3 - d), list: [] },
+    { geo: rockGeometry(2, 3 - d), list: [] },
+    { geo: rockGeometry(3, 2 - d), list: [] },
+    { geo: rockGeometry(4, 2 - d), list: [] },
     { geo: rockGeometry(5, 1), list: [] },
     { geo: rockGeometry(6, 1), list: [] },
   ];

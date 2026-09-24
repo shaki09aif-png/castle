@@ -11,6 +11,7 @@ import {
 } from './towers.js';
 import { pbrMaterial, makeCanvas, toTexture, assetSource } from './textures.js';
 import { mulberry32, createNoise2D } from './noise.js';
+import { Q } from './quality.js';
 
 const V3 = THREE.Vector3;
 const UP = new V3(0, 1, 0);
@@ -670,9 +671,11 @@ export function createCourtyard(scene, terrain, walls) {
     stone.box(hp.clone().setY((floorY + 2.6 + backY + 1.8) / 2).addScaledVector(f.N, -0.3), f.X, UP, f.N, 0.45, (backY + 1.8 - floorY - 2.6) / 2, 0.4);
     smokes.push(new Smoke(scene, hp.clone().setY(backY + 2.2).addScaledVector(f.N, -0.3), { count: 14, alpha: 0.35, size: 0.6, grow: 3, rise: 1.3, color: 0x6e6a66 }));
     // свет от горна (мерцает)
+    // точечный свет заставляет каждый материал сцены считать ещё один источник —
+    // на слабом компьютере горн только светится сам, без света вокруг
     const light = new THREE.PointLight(0xff7a2a, 12, 9, 2);
     light.position.copy(hp).setY(floorY + 1.4).addScaledVector(f.N, 0.8);
-    scene.add(light);
+    if (Q.pointLights) scene.add(light);
     updaters.push((t) => {
       const fl = 0.8 + 0.2 * Math.sin(t * 11.3) * Math.sin(t * 7.1 + 1.3);
       light.intensity = 12 * fl;

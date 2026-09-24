@@ -272,10 +272,19 @@ export function createLighting(scene, renderer, assets) {
   const lightRotInv = lightRot.clone().invert();
   const tmp = new THREE.Vector3();
   let lastSize = 0;
+  // Карта теней пересчитывается не каждый кадр, а только когда теневая область
+  // заметно сместилась или изменила размер (солнце неподвижно) — это главная
+  // экономия: иначе каждый кадр заново рисуются миллионы треугольников.
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
+  const lastFocus = new THREE.Vector3(1e9, 0, 0);
   function fitShadow(camera, focus) {
     const dist = camera.position.distanceTo(focus);
     const size = Math.min(260, Math.max(28, dist * 0.85));
-    const s = Math.pow(2, Math.round(Math.log2(size) * 4) / 4); // ступенями, без дрожания
+    const s = Math.pow(2, Math.round(Math.log2(size) * 2) / 2); // ступенями, без дрожания
+    if (s === lastSize && focus.distanceTo(lastFocus) < s * 0.15) return;
+    lastFocus.copy(focus);
+    renderer.shadowMap.needsUpdate = true;
     const cam = sun.shadow.camera;
     if (s !== lastSize) {
       cam.left = -s; cam.right = s; cam.top = s; cam.bottom = -s;

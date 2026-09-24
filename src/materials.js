@@ -35,6 +35,15 @@ export const TRIPLANAR_GLSL = /* glsl */ `
     }
     nrm = normalize(nx.zyx * bw.x + ny.xzy * bw.y + nz.xyz * bw.z + n * 1e-4);
   }
+  // одна проекция сверху (для пологих слоёв: трава, земля, галька) — в 3 раза дешевле
+  void planarSampleArr(sampler2DArray tC, sampler2DArray tN, sampler2DArray tO, float L, vec3 p, vec3 dx, vec3 dy,
+                       vec3 n, float nStr, out vec3 col, out vec3 orm, out vec3 nrm) {
+    vec3 uv = vec3(p.xz, L);
+    col = textureGrad(tC, uv, dx.xz, dy.xz).rgb;
+    orm = textureGrad(tO, uv, dx.xz, dy.xz).rgb;
+    vec3 t = textureGrad(tN, uv, dx.xz, dy.xz).xyz * 2.0 - 1.0; t.xy *= nStr;
+    nrm = normalize(vec3(t.xy + n.xz, abs(t.z) * n.y).xzy);
+  }
   // то же для текстурного массива (слой L)
   void triSampleArr(sampler2DArray tC, sampler2DArray tN, sampler2DArray tO, float L, vec3 p, vec3 dx, vec3 dy,
                     vec3 n, vec3 bw, float nStr, out vec3 col, out vec3 orm, out vec3 nrm) {

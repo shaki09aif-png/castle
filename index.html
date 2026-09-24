@@ -30,8 +30,8 @@
       #help .muted { opacity: 0.7; }
       #mode { font-size: 14px; margin-bottom: 4px; color: #fff; }
       #click-to-fly {
-        position: fixed; inset: 0; display: none; align-items: center; justify-content: center; cursor: pointer;
-        color: #fff; font-size: 20px; text-shadow: 0 2px 6px #000; background: rgba(0, 0, 0, 0.18);
+        position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: none; pointer-events: none;
+        color: #fff; font-size: 15px; padding: 6px 14px; border-radius: 16px; background: rgba(20, 16, 12, 0.55);
       }
     </style>
   </head>
@@ -42,7 +42,7 @@
       <div id="stage"></div>
     </div>
     <div id="fps"></div>
-    <div id="click-to-fly">Кликните, чтобы продолжить полёт</div>
+    <div id="click-to-fly">Кликните по сцене, чтобы управлять мышью</div>
     <div id="help" data-mode="orbit">
       <div id="mode">Режим: орбита</div>
       <div class="orbit-only">
