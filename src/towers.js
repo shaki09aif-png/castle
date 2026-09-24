@@ -12,8 +12,8 @@ import { mulberry32 } from './noise.js';
 const V3 = THREE.Vector3;
 const smoothstep01 = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
 const UP = new V3(0, 1, 0);
-const TILE_W = 0.26; // ширина одной черепицы, м
-const ROW_H = 0.3; // шаг рядов черепицы по скату, м
+export const TILE_W = 0.26; // ширина одной черепицы, м
+export const ROW_H = 0.3; // шаг рядов черепицы по скату, м
 
 // ---------------------------------------------------------------------------
 // Контур башни: для круглой — одна замкнутая линия с радиальными нормалями,
@@ -187,7 +187,7 @@ export function windowWithShutters(stone, wood, dark, metal, p, n, y, w = 0.7, h
 // ---------------------------------------------------------------------------
 // Крыши: ряды черепицы ступеньками — каждый ряд чуть выступает над предыдущим
 // ---------------------------------------------------------------------------
-function rowUV(k, u, isTop) {
+export function rowUV(k, u, isTop) {
   // полоса ряда k в текстуре (4 ряда в текстуре; v растёт вверх)
   const r = k % 4;
   const v0 = 1 - (r + 1) / 4, v1 = 1 - r / 4;
@@ -286,38 +286,32 @@ function roofUnderside(wood, C, tw, eaveR, eaveY, H) {
 // ---------------------------------------------------------------------------
 // Флюгер: шпиль, позолоченный шар и вращающийся флажок-вымпел
 // ---------------------------------------------------------------------------
-export function weathervane(scene, apex, iron, gold, seed) {
-  const g = new THREE.Group();
-  g.position.copy(apex);
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.06, 2.6, 8), iron);
-  pole.position.y = 1.0;
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 10), gold);
-  ball.position.y = 0.75;
-  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 12), iron);
-  cap.position.y = 0.05;
-  const vane = new THREE.Group();
-  vane.position.y = 1.85;
-  const shape = new THREE.Shape();
-  shape.moveTo(0, -0.18);
-  shape.lineTo(0.75, -0.2);
-  shape.lineTo(0.62, 0);
-  shape.lineTo(0.75, 0.2);
-  shape.lineTo(0, 0.18);
-  shape.lineTo(0, -0.18);
-  const plate = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.015, bevelEnabled: false }), iron);
-  plate.position.set(0.05, 0, -0.0075);
-  const counter = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.3, 8), iron);
-  counter.rotation.z = Math.PI / 2;
-  counter.position.x = -0.2;
-  vane.add(plate, counter);
-  // буквы сторон света не ставим (это позднейшая деталь); только крест-указатель
-  const cross = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.02, 0.02), iron);
-  cross.position.y = 1.35;
-  const cross2 = cross.clone();
-  cross2.rotation.y = Math.PI / 2;
-  g.add(pole, ball, cap, vane, cross, cross2);
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  scene.add(g);
+export function weathervane(ctx, apex, seed) {
+  // неподвижные части сливаются в общие сетки (меньше вызовов отрисовки)
+  const at = (x, y, z) => new THREE.Matrix4().makeTranslation(apex.x + x, apex.y + y, apex.z + z);
+  ctx.metal.addGeometry(new THREE.CylinderGeometry(0.035, 0.06, 2.6, 8), at(0, 1.0, 0));
+  ctx.metal.addGeometry(new THREE.ConeGeometry(0.22, 0.5, 12), at(0, 0.05, 0));
+  ctx.metal.addGeometry(new THREE.BoxGeometry(0.9, 0.02, 0.02), at(0, 1.35, 0));
+  ctx.metal.addGeometry(new THREE.BoxGeometry(0.02, 0.02, 0.9), at(0, 1.35, 0));
+  ctx.gold.addGeometry(new THREE.SphereGeometry(0.13, 16, 10), at(0, 0.75, 0));
+  // вращающийся вымпел — одна сетка
+  if (!ctx.vaneGeo) {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, -0.18);
+    shape.lineTo(0.75, -0.2);
+    shape.lineTo(0.62, 0);
+    shape.lineTo(0.75, 0.2);
+    shape.lineTo(0, 0.18);
+    shape.lineTo(0, -0.18);
+    const vb = new GeoBuilder(1);
+    vb.addGeometry(new THREE.ExtrudeGeometry(shape, { depth: 0.015, bevelEnabled: false }), new THREE.Matrix4().makeTranslation(0.05, 0, -0.0075));
+    vb.addGeometry(new THREE.ConeGeometry(0.05, 0.3, 8), new THREE.Matrix4().makeRotationZ(Math.PI / 2).setPosition(-0.2, 0, 0));
+    ctx.vaneGeo = vb.build();
+  }
+  const vane = new THREE.Mesh(ctx.vaneGeo, ctx.ironMat);
+  vane.position.set(apex.x, apex.y + 1.85, apex.z);
+  vane.castShadow = true;
+  ctx.scene.add(vane);
   const rnd = mulberry32(seed);
   const phase = rnd() * 10;
   return (t) => {
@@ -346,6 +340,7 @@ export function makeTowerContext(scene, terrain, walls) {
   ctx.dark = new GeoBuilder(1);
   ctx.metal = new GeoBuilder(1);
   ctx.roof = new GeoBuilder(1);
+  ctx.gold = new GeoBuilder(1);
   return ctx;
 }
 
@@ -356,6 +351,7 @@ export function finishTowerContext(ctx, name) {
     new THREE.Mesh(ctx.dark.build(), ctx.darkMat),
     new THREE.Mesh(ctx.metal.build(), ctx.ironMat),
     new THREE.Mesh(ctx.roof.build(), ctx.roofMat),
+    new THREE.Mesh(ctx.gold.build(), ctx.goldMat),
   ];
   for (const m of meshes) {
     m.castShadow = true;
@@ -521,7 +517,7 @@ export function buildTower(ctx, tw, opts = {}) {
     apexY = pyramidRoof(roof, C, tw.yaw, E, eaveY, H, photoRoof);
     roofUnderside(wood, C, tw, E, eaveY, H);
   }
-  if (opts.roof !== false) vanes.push(weathervane(scene, C.clone().setY(apexY - 0.3), ironMat, goldMat, tw.id));
+  if (opts.roof !== false) vanes.push(weathervane(ctx, C.clone().setY(apexY - 0.3), tw.id));
 
   // --- бойницы на нескольких ярусах (обращены наружу) ---
   const out = outDir.clone();

@@ -195,3 +195,101 @@ export function insideTower(x, z, m = 0) {
   }
   return null;
 }
+
+// Трасса крепостной стены (осевая линия): узлы + изломы там, где кромка вершины
+// отходит от прямой. Начинается и заканчивается у проёма ворот.
+export function wallTrace() {
+  const nodes = WALL_NODES.map((n) => ({ ...n, p: wallNodePoint(n.deg) }));
+  const pts = [];
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i], b = nodes[(i + 1) % nodes.length];
+    pts.push({ p: a.p, node: a });
+    let d1 = b.deg - a.deg;
+    if (d1 < 0) d1 += 360;
+    for (const f of [0.33, 0.66]) {
+      const edge = wallNodePoint(a.deg + d1 * f);
+      const onLine = { x: a.p.x + (b.p.x - a.p.x) * f, z: a.p.z + (b.p.z - a.p.z) * f };
+      if (dist(edge, onLine) > 1.6) pts.push({ p: edge, node: null });
+    }
+  }
+  const gi = pts.findIndex((q) => q.node && q.node.type === 'gate');
+  const ordered = [...pts.slice(gi + 1), ...pts.slice(0, gi)];
+  const g = pts[gi].p;
+  const toward = (q) => {
+    const d = dist(q, g);
+    return { x: g.x + ((q.x - g.x) / d) * WALL.gateHalfGap, z: g.z + ((q.z - g.z) / d) * WALL.gateHalfGap };
+  };
+  return [
+    { p: toward(ordered[0].p), node: null, cap: true },
+    ...ordered,
+    { p: toward(ordered[ordered.length - 1].p), node: null, cap: true },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Постройки двора (этап 6). Большинство примыкает задней стеной к крепостной
+// стене: deg — место на стене, t — сдвиг вдоль участка стены (−0.5…0.5),
+// L — длина вдоль стены, W — глубина, gap — отступ задней стены от оси стены
+// (под деревянным боевым ходом остаётся проход).
+// ---------------------------------------------------------------------------
+const BUILDING_SPECS = [
+  { id: 'hall', deg: 5, t: -0.22, L: 17, W: 10.5, gap: 3.0 },
+  { id: 'kitchen', deg: 26, t: 0.12, L: 8, W: 6.5, gap: 3.0 },
+  { id: 'barracks', deg: 60, t: 0.05, L: 12, W: 6, gap: 2.9 },
+  { id: 'store', deg: 107, t: 0.05, L: 8, W: 5.5, gap: 2.9 },
+  { id: 'forge', deg: 124, t: -0.12, L: 7, W: 5.2, gap: 2.9 },
+  { id: 'stable', deg: 162, t: 0.0, L: 12, W: 5.2, gap: 2.9 },
+  { id: 'granary', deg: 218, t: 0.05, L: 8.5, W: 5.5, gap: 2.9 },
+];
+
+function segmentNear(trace, px, pz) {
+  let best = null, bd = Infinity;
+  for (let i = 0; i < trace.length - 1; i++) {
+    const a = trace[i].p, b = trace[i + 1].p;
+    const ex = b.x - a.x, ez = b.z - a.z, l2 = ex * ex + ez * ez;
+    const t = Math.max(0, Math.min(1, ((px - a.x) * ex + (pz - a.z) * ez) / l2));
+    const d = Math.hypot(px - (a.x + ex * t), pz - (a.z + ez * t));
+    if (d < bd) { bd = d; best = { a, b }; }
+  }
+  return best;
+}
+
+function placeBuildings() {
+  const trace = wallTrace();
+  const out = BUILDING_SPECS.map((s) => {
+    const wp = wallNodePoint(s.deg);
+    const { a, b } = segmentNear(trace, wp.x, wp.z);
+    let dx = b.x - a.x, dz = b.z - a.z;
+    const len = Math.hypot(dx, dz);
+    dx /= len; dz /= len;
+    let nx = -dz, nz = dx; // внутрь двора (к центру)
+    const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+    if (nx * -mx + nz * -mz < 0) { nx = -nx; nz = -nz; }
+    const along = len / 2 + s.t * len;
+    const off = s.gap + s.W / 2;
+    return {
+      ...s,
+      x: a.x + dx * along + nx * off,
+      z: a.z + dz * along + nz * off,
+      ax: dx, az: dz, // вдоль стены
+      nx, nz, // лицом во двор
+    };
+  });
+  // Часовня стоит отдельно у северной стены, ориентирована алтарём на восток
+  out.push({ id: 'chapel', L: 12.5, W: 7, x: -1.5, z: -25.6, ax: 1, az: 0, nx: 0, nz: 1 });
+  return out;
+}
+export const BUILDINGS = placeBuildings();
+export const WELL = { x: 9, z: 3, r: 1.3 };
+
+// Лежит ли точка внутри постройки (с запасом m)
+export function insideBuilding(x, z, m = 0) {
+  for (const b of BUILDINGS) {
+    const dx = x - b.x, dz = z - b.z;
+    const la = dx * b.ax + dz * b.az, ln = dx * b.nx + dz * b.nz;
+    if (Math.abs(la) < b.L / 2 + m && Math.abs(ln) < b.W / 2 + m) return b;
+  }
+  if (Math.hypot(x - WELL.x, z - WELL.z) < WELL.r + 1.2 + m) return WELL;
+  return null;
+}

@@ -3,7 +3,7 @@
 // боевой ход с перилами на кронштейнах, хурды (деревянные галереи) на части
 // стен, каменные лестницы со двора, мох у основания и потёки на кладке.
 import * as THREE from 'three';
-import { plateauRadius, WALL, WALL_NODES, insideTower } from './layout.js';
+import { WALL, insideTower, wallTrace, insideBuilding } from './layout.js';
 import { pbrMaterial, macroNoiseTexture } from './textures.js';
 import { createNoise2D, mulberry32 } from './noise.js';
 
@@ -104,36 +104,8 @@ class GeoBuilder {
 // ---------------------------------------------------------------------------
 // Трасса стены: узлы (башни, ворота) + промежуточные изломы по кромке вершины
 // ---------------------------------------------------------------------------
-function wallPoint(deg) {
-  const t = (deg * Math.PI) / 180;
-  const r = plateauRadius(t) - WALL.inset;
-  return new V3(Math.cos(t) * r, 0, Math.sin(t) * r);
-}
-
 function buildTrace() {
-  const nodes = WALL_NODES.map((n) => ({ ...n, p: wallPoint(n.deg) }));
-  const pts = [];
-  for (let i = 0; i < nodes.length; i++) {
-    const a = nodes[i], b = nodes[(i + 1) % nodes.length];
-    pts.push({ p: a.p, node: a });
-    let d1 = b.deg - a.deg;
-    if (d1 < 0) d1 += 360;
-    // излом там, где прямая заметно отходит от кромки
-    for (const f of [0.33, 0.66]) {
-      const deg = a.deg + d1 * f;
-      const edge = wallPoint(deg);
-      const onLine = a.p.clone().lerp(b.p, f);
-      if (edge.distanceTo(onLine) > 1.6) pts.push({ p: edge, node: null });
-    }
-  }
-  // разрыв у ворот: трасса начинается и заканчивается у проёма
-  const gi = pts.findIndex((q) => q.node && q.node.type === 'gate');
-  const ordered = [...pts.slice(gi + 1), ...pts.slice(0, gi)];
-  const g = pts[gi].p;
-  const next = ordered[0].p, prev = ordered[ordered.length - 1].p;
-  const start = g.clone().add(next.clone().sub(g).setLength(WALL.gateHalfGap));
-  const end = g.clone().add(prev.clone().sub(g).setLength(WALL.gateHalfGap));
-  return [{ p: start, node: null, cap: true }, ...ordered, { p: end, node: null, cap: true }];
+  return wallTrace().map((q) => ({ ...q, p: new V3(q.p.x, 0, q.p.z) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -368,8 +340,9 @@ export function createWalls(scene, terrain) {
   for (const i of hoardSegs) buildHoarding(wood, stone, P[i], segDir[i], segNrm[i], segLen[i], walk[i], walk[i + 1], T);
 
   // ---------- каменные лестницы со двора на стену ----------
-  const stairSegs = pickStairSegments(segLen, segNrm, trace);
-  for (const i of stairSegs) buildStairs(stone, terrain, P[i], segDir[i], segNrm[i], segLen[i], walk[i], walk[i + 1], T, over);
+  for (const { i, f } of pickStairs(P, segDir, segLen, segNrm)) {
+    buildStairs(stone, terrain, P[i], segDir[i], segNrm[i], segLen[i], walk[i], walk[i + 1], T, over, f);
+  }
 
   const meshes = [
     new THREE.Mesh(stone.build(), stoneMat),
@@ -404,15 +377,31 @@ function pickHoardingSegments(trace, segLen, segNrm) {
   return out.slice(0, 3);
 }
 
-function pickStairSegments(segLen, segNrm, trace) {
-  const cand = segLen.map((L, i) => ({ L, i })).filter((q) => q.L > 16);
-  // по одной лестнице на восточной, западной и северной сторонах
-  const pick = [];
-  for (const test of [(v) => v.x > 0.5, (v) => v.x < -0.5, (v) => v.z < -0.6]) {
-    const c = cand.find((q) => test(segNrm[q.i]) && !pick.includes(q.i));
-    if (c) pick.push(c.i);
+// По одной лестнице на восточной, западной, северной и южной сторонах —
+// там, где лестница не упирается в постройки двора и башни.
+function pickStairs(P, segDir, segLen, segNrm) {
+  const T = WALL.thickness, over = 0.95, width = 1.25;
+  const need = 11; // длина марша, м
+  const fits = (i, f) => {
+    const aTop = segLen[i] * f;
+    if (aTop < need - 1) return false;
+    for (let s = -1.2; s <= need; s += 0.5) {
+      const p = P[i].clone().addScaledVector(segDir[i], aTop - s).addScaledVector(segNrm[i], -T / 2 - over - width / 2);
+      if (insideBuilding(p.x, p.z, 1.2) || insideTower(p.x, p.z, 1.5)) return false;
+    }
+    return true;
+  };
+  const out = [];
+  for (const test of [(v) => v.x > 0.5, (v) => v.x < -0.5, (v) => v.z < -0.6, (v) => v.z > 0.6]) {
+    const order = segLen.map((L, i) => i).filter((i) => test(segNrm[i])).sort((x, y) => segLen[y] - segLen[x]);
+    let done = false;
+    for (const i of order) {
+      for (const f of [0.95, 0.85, 0.75, 0.65]) {
+        if (!done && !out.some((q) => q.i === i) && fits(i, f)) { out.push({ i, f }); done = true; }
+      }
+    }
   }
-  return pick;
+  return out;
 }
 
 function buildHoarding(wood, stone, P0, D, N, L, w0, w1, T) {
@@ -478,10 +467,10 @@ function buildHoarding(wood, stone, P0, D, N, L, w0, w1, T) {
   }
 }
 
-function buildStairs(stone, terrain, P0, D, N, L, w0, w1, T, over) {
+function buildStairs(stone, terrain, P0, D, N, L, w0, w1, T, over, f) {
   const width = 1.25;
   const rise = 0.24, run = 0.3;
-  const aTop = L * 0.62;
+  const aTop = L * f;
   const yTop = w0 + (w1 - w0) * (aTop / L);
   // лестница вдоль внутренней стены, поднимается к боевому ходу (под настил)
   const inner = P0.clone().addScaledVector(D, aTop).addScaledVector(N, -T / 2 - over - width / 2 - 0.05);

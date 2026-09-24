@@ -270,12 +270,8 @@ export function createKeep(scene, terrain, walls) {
       arrowSlit(stone, dark, tc.clone().addScaledVector(d, tr), d, yB + 1.9, false);
     }
     const apex = coneRoof(roof, tc, tr + 0.3, yT, (tr + 0.3) * 2.6, ctx.photoRoof);
-    const spike = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 1.3, 6), iron);
-    spike.position.set(tc.x, apex + 0.4, tc.z);
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), ctx.goldMat);
-    ball.position.set(tc.x, apex + 0.3, tc.z);
-    spike.castShadow = ball.castShadow = true;
-    scene.add(spike, ball);
+    ctx.metal.addGeometry(new THREE.CylinderGeometry(0.03, 0.05, 1.3, 6), new THREE.Matrix4().makeTranslation(tc.x, apex + 0.4, tc.z));
+    ctx.gold.addGeometry(new THREE.SphereGeometry(0.1, 12, 8), new THREE.Matrix4().makeTranslation(tc.x, apex + 0.3, tc.z));
   }
 
   // ---------- флагшток и флаг ----------

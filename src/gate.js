@@ -354,6 +354,13 @@ function createMoatWater(scene) {
     mesh.material.transparent = true;
     mesh.material.uniforms.size.value = 1.1;
     guardReflection(mesh);
+    if (Q.reflectionEvery > 1) {
+      const orig = mesh.onBeforeRender;
+      let n = 1; // со сдвигом относительно реки: отражения обновляются в разных кадрах
+      mesh.onBeforeRender = function (...args) {
+        if (n++ % Q.reflectionEvery === 0) orig.apply(this, args);
+      };
+    }
   } else {
     const nm = waterNormalTexture().clone();
     nm.repeat.set(3, 1);

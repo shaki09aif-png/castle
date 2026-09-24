@@ -10,11 +10,13 @@ import { createWalls } from './walls.js';
 import { createTowers } from './towers.js';
 import { createGate } from './gate.js';
 import { createKeep } from './keep.js';
+import { createCourtyard } from './courtyard.js';
+import { insideBuilding } from './layout.js';
 import { createPostFX } from './postfx.js';
 import { HILL_TOP } from './layout.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
-const STAGE = 'Этап 5: донжон — пять этажей, поднятый вход, бартизаны, флаг';
+const STAGE = 'Этап 6: постройки двора — зал, часовня, кухня, колодец, конюшня, кузница';
 
 const loading = document.getElementById('loading');
 const loadingText = loading.querySelector('small');
@@ -66,8 +68,12 @@ async function init() {
   const gate = createGate(scene, terrain, walls);
   await step('донжон');
   const keep = createKeep(scene, terrain, walls);
+  await step('постройки двора');
+  const court = createCourtyard(scene, terrain, walls);
   await step('трава и деревья');
-  const vegetation = createVegetation(scene, terrain);
+  const vegetation = createVegetation(scene, terrain, {
+    exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : court.paveMask(x, z)),
+  });
   await step('постобработка');
   const post = createPostFX(renderer, scene, camera);
 
@@ -130,6 +136,7 @@ async function init() {
     towers.update(t);
     gate.update(t);
     keep.update(t);
+    court.update(t);
     post.render(timer.getDelta());
 
     frames++;

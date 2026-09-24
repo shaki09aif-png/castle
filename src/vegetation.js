@@ -16,7 +16,7 @@ const WIND = { uTime: { value: 0 } };
 const GROUND_HALF = 420;
 const GROUND_RES = 512;
 
-function buildGroundTexture(terrain) {
+function buildGroundTexture(terrain, exclude) {
   const S = GROUND_RES;
   const data = new Uint16Array(S * S * 4);
   const toH = THREE.DataUtils.toHalfFloat;
@@ -29,6 +29,7 @@ function buildGroundTexture(terrain) {
       if (g.eP < -2) dens *= 0.12; // внутри стен — вытоптано, трава только местами
       if (g.river < 0.4) dens = 0;
       if (insideTower(x, z, 1.0)) dens = 0; // в башнях и в проезде ворот травы нет
+      if (exclude) dens *= 1 - exclude(x, z); // постройки двора и мостовая
       if (Math.abs(x - GATEHOUSE.x) < 3 && z > GATE_PASSAGE.rampEndZ && z < BARBICAN.zS + 2) dens = 0; // мостовая, мост
       const lush = 1 - smoothstep(0, 18, g.river);
       const dry = smoothstep(35, 80, g.h) * (1 - lush);
@@ -543,8 +544,8 @@ function createTrees(scene, terrain) {
 }
 
 // ---------------------------------------------------------------------------
-export function createVegetation(scene, terrain) {
-  const groundTex = buildGroundTexture(terrain);
+export function createVegetation(scene, terrain, { exclude } = {}) {
+  const groundTex = buildGroundTexture(terrain, exclude);
   const d = Q.grassDensity;
   const inner = grassLayer(groundTex, {
     spacing: 0.34 / Math.sqrt(d), radius: 22, inner: 0, blades: 8, segs: 2, height: 0.34, width: 0.07, clumpR: 0.2, seed: 1,

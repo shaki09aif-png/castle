@@ -362,62 +362,51 @@ const GENERATORS = {
   // Черепица «бобровый хвост»: 4 ряда по 6 плиток со смещением, разные оттенки,
   // лишайник и сажа. Каждый ряд геометрии крыши берёт одну полосу текстуры.
   roof() {
-    const S = 512, ROWS = 4, PER = 6;
-    const rh = S / ROWS, tw = S / PER;
-    const n = createTileNoise(141);
-    const rnd = mulberry32(142);
+    return tileRoof({ seed: 141, per: 6, round: true, palette: (l, age) => (age > 0.85 ? [0.36 * l, 0.26 * l, 0.2 * l] : [0.55 * l, 0.29 * l + age * 0.04, 0.19 * l]) });
+  },
+
+  // Деревянная дранка (лемех): узкие дощечки, серо-коричневые, выветренные
+  shingle() {
+    return tileRoof({ seed: 171, per: 9, round: false, grain: true, palette: (l, age) => {
+      const g = (0.34 + age * 0.12) * l;
+      return [g * 1.08, g * 0.98, g * 0.86];
+    } });
+  },
+
+
+  // Булыжная мостовая: окатанные камни, утопленные в утоптанную землю
+  cobble() {
+    const S = 512;
+    const n = createTileNoise(151);
+    const rnd = mulberry32(152);
     const rgb = new Float32Array(S * S * 3);
     const hgt = new Float32Array(S * S);
-    const rough = new Float32Array(S * S);
-    const tiles = [];
-    for (let r = 0; r < ROWS; r++) {
-      tiles.push([]);
-      for (let i = 0; i < PER; i++) {
-        const age = rnd();
-        const l = 0.8 + rnd() * 0.4;
-        tiles[r].push({
-          col: age > 0.85 ? [0.36 * l, 0.26 * l, 0.2 * l] : [0.55 * l, 0.29 * l + age * 0.04, 0.19 * l],
-          tilt: (rnd() - 0.5) * 0.3,
-          seed: rnd() * 10,
-        });
-      }
-    }
+    const rough = new Float32Array(S * S).fill(0.95);
     for (let y = 0; y < S; y++) {
-      const r = Math.floor(y / rh);
-      const ly = (y - r * rh) / rh; // 0 — верх полосы, 1 — нижняя кромка плитки
-      const off = (r % 2) * tw * 0.5;
       for (let x = 0; x < S; x++) {
-        const xs = (x - off + S) % S;
-        const ti = Math.floor(xs / tw);
-        const lx = (xs - ti * tw) / tw;
-        const t = tiles[r][ti];
         const u = x / S, v = y / S;
-        // форма плитки: зазоры по бокам, скруглённый низ
-        const dx = (lx - 0.5) * 2;
-        const bottom = 0.72 + 0.28 * Math.sqrt(Math.max(0, 1 - dx * dx));
-        const inTile = lx > 0.035 && lx < 0.965 && ly < bottom;
+        const a = n.fbm(u, v, 16, 4);
+        const t = 0.2 + 0.08 * (a - 0.5) + (rnd() - 0.5) * 0.04;
         const i = y * S + x;
-        if (!inTile) {
-          const k = 0.35 + 0.2 * ly;
-          rgb[i * 3] = 0.2 * k; rgb[i * 3 + 1] = 0.13 * k; rgb[i * 3 + 2] = 0.1 * k;
-          hgt[i] = 0.05;
-          rough[i] = 0.95;
-          continue;
-        }
-        const grain = n.fbm(u + t.seed, v, 32, 3);
-        const lichen = smoothstep(0.64, 0.72, n.fbm(u + 0.5, v + 0.2, 16, 3));
-        const soot = smoothstep(0.5, 0.8, n.fbm(u * 0.5 + 0.3, v, 4, 3)) * 0.35;
-        let sh = (0.78 + 0.3 * grain) * (0.85 + 0.25 * ly) * (1 - soot);
-        sh *= 1 + t.tilt * (lx - 0.5);
-        let cr = t.col[0] * sh, cg = t.col[1] * sh, cb = t.col[2] * sh;
-        cr += (0.62 - cr) * lichen * 0.55; cg += (0.6 - cg) * lichen * 0.55; cb += (0.45 - cb) * lichen * 0.55;
-        rgb[i * 3] = cr; rgb[i * 3 + 1] = cg; rgb[i * 3 + 2] = cb;
-        // плитка утолщается к нижней кромке
-        hgt[i] = 0.25 + ly * 0.6 + grain * 0.12 + t.tilt * (lx - 0.5) * 0.3;
-        rough[i] = 0.72 + lichen * 0.2;
+        rgb[i * 3] = t * 1.2; rgb[i * 3 + 1] = t * 1.02; rgb[i * 3 + 2] = t * 0.78;
+        hgt[i] = a * 0.05;
       }
     }
-    return finishSet(rgb, hgt, rough, S, { normal: 3.5, ao: 2.4, aoRadius: 4, tileMeters: 1.56 });
+    scatterStones(rgb, hgt, rough, S, 1500, rnd, {
+      rMin: 11, rMax: 20, heightK: 0.7, roughV: 0.7, flat: 0.7,
+      colorFn: (r) => {
+        const g = 0.26 + r() * 0.2, w = r() * 0.06;
+        return [g + w, g * 0.94 + w * 0.4, g * 0.8];
+      },
+    });
+    // мох и земля в швах
+    for (let i = 0; i < S * S; i++) {
+      if (hgt[i] < 0.1) {
+        const m = n.fbm((i % S) / S + 0.3, Math.floor(i / S) / S, 8, 3);
+        if (m > 0.55) { rgb[i * 3] *= 0.7; rgb[i * 3 + 1] *= 0.95; rgb[i * 3 + 2] *= 0.6; }
+      }
+    }
+    return finishSet(rgb, hgt, rough, S, { normal: 3, ao: 4, aoRadius: 5, tileMeters: 2.4 });
   },
 
   // Кора дуба/бука: продольные борозды
@@ -524,6 +513,66 @@ export function foliageTexture(kind, hue = [0.2, 0.32, 0.1]) {
     t.premultiplyAlpha = false;
     return t;
   });
+}
+
+// Черепица/дранка рядами: 4 ряда по PER плиток со смещением
+function tileRoof({ seed, per, round, grain: grain0 = false, palette }) {
+  const S = 512, ROWS = 4, PER = per;
+  const rh = S / ROWS, tw = S / PER;
+  const n = createTileNoise(seed);
+  const rnd = mulberry32(seed + 1);
+  const rgb = new Float32Array(S * S * 3);
+  const hgt = new Float32Array(S * S);
+  const rough = new Float32Array(S * S);
+  const tiles = [];
+  for (let r = 0; r < ROWS; r++) {
+    tiles.push([]);
+    for (let i = 0; i < PER; i++) {
+      const age = rnd();
+      const l = 0.8 + rnd() * 0.4;
+      tiles[r].push({
+        col: palette(l, age),
+        tilt: (rnd() - 0.5) * 0.3,
+        seed: rnd() * 10,
+      });
+    }
+  }
+  for (let y = 0; y < S; y++) {
+    const r = Math.floor(y / rh);
+    const ly = (y - r * rh) / rh; // 0 — верх полосы, 1 — нижняя кромка плитки
+    const off = (r % 2) * tw * 0.5;
+    for (let x = 0; x < S; x++) {
+      const xs = (x - off + S) % S;
+      const ti = Math.floor(xs / tw);
+      const lx = (xs - ti * tw) / tw;
+      const t = tiles[r][ti];
+      const u = x / S, v = y / S;
+      // форма плитки: зазоры по бокам, скруглённый низ
+      const dx = (lx - 0.5) * 2;
+      const bottom = round ? 0.72 + 0.28 * Math.sqrt(Math.max(0, 1 - dx * dx)) : 0.97 - Math.abs(dx) * 0.03;
+      const inTile = lx > 0.035 && lx < 0.965 && ly < bottom;
+      const i = y * S + x;
+      if (!inTile) {
+        const k = 0.35 + 0.2 * ly;
+        rgb[i * 3] = 0.2 * k; rgb[i * 3 + 1] = 0.13 * k; rgb[i * 3 + 2] = 0.1 * k;
+        hgt[i] = 0.05;
+        rough[i] = 0.95;
+        continue;
+      }
+      const grain = grain0 ? n.fbm(u * 0.15 + t.seed, v * 2, 64, 3) : n.fbm(u + t.seed, v, 32, 3);
+      const lichen = smoothstep(0.64, 0.72, n.fbm(u + 0.5, v + 0.2, 16, 3));
+      const soot = smoothstep(0.5, 0.8, n.fbm(u * 0.5 + 0.3, v, 4, 3)) * 0.35;
+      let sh = (0.78 + 0.3 * grain) * (0.85 + 0.25 * ly) * (1 - soot);
+      sh *= 1 + t.tilt * (lx - 0.5);
+      let cr = t.col[0] * sh, cg = t.col[1] * sh, cb = t.col[2] * sh;
+      cr += (0.62 - cr) * lichen * 0.55; cg += (0.6 - cg) * lichen * 0.55; cb += (0.45 - cb) * lichen * 0.55;
+      rgb[i * 3] = cr; rgb[i * 3 + 1] = cg; rgb[i * 3 + 2] = cb;
+      // плитка утолщается к нижней кромке
+      hgt[i] = 0.25 + ly * 0.6 + grain * 0.12 + t.tilt * (lx - 0.5) * 0.3;
+      rough[i] = 0.72 + lichen * 0.2;
+    }
+  }
+  return finishSet(rgb, hgt, rough, S, { normal: 3.5, ao: 2.4, aoRadius: 4, tileMeters: 1.56 });
 }
 
 // Получить набор: сначала Poly Haven, иначе процедурный.
