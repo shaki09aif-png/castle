@@ -3,6 +3,7 @@
 // (см. README и scripts/download-assets.mjs), берутся они. Иначе — процедурные
 // текстуры, которые рисуются здесь же, на <canvas>.
 import * as THREE from 'three';
+import { Q } from './quality.js';
 import { createTileNoise, mulberry32, clamp, smoothstep } from './noise.js';
 
 let ANISO = 8;
@@ -661,7 +662,7 @@ export function pbrMaterial(slot, opts = {}) {
   const t = materialTextures(slot);
   const mat = new THREE.MeshStandardMaterial({
     map: t.map,
-    normalMap: t.normalMap,
+    normalMap: Q.cheapShading ? null : t.normalMap, // на слабых видеокартах без карт нормалей
     roughnessMap: t.roughnessMap,
     aoMap: t.aoMap,
     aoMapIntensity: 1,

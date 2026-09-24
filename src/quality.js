@@ -17,7 +17,7 @@ const PRESETS = {
     grassDensity: 0.3,
     grassRadius: 32,
     treeDetailDistance: 60,
-    treeCount: 0.45,
+    treeCount: 0.32,
     waterReflection: false,
     reflectionSize: 256,
     reflectionEvery: 2,
@@ -25,9 +25,15 @@ const PRESETS = {
     terrainDetail: 0.6,
     rockDetail: false,
     pointLights: false,
+    lambert: true, // простые матовые материалы вместо PBR
+    envLight: false, // вместо HDRI-освещения — полусферический свет
+    cheapShading: true, // без карт нормалей и с резким трипланаром — вдвое меньше выборок текстур
   },
   medium: {
     label: 'Среднее',
+    lambert: false,
+    envLight: true,
+    cheapShading: false,
     post: true,
     pixelRatio: 1,
     minPixelRatio: 0.6,
@@ -54,6 +60,9 @@ const PRESETS = {
   // а дорогие и малозаметные эффекты убраны или урезаны.
   high: {
     label: 'Высокое',
+    lambert: false,
+    envLight: true,
+    cheapShading: false,
     post: true,
     pixelRatio: 2, // полное разрешение экрана — не снижать, иначе «мыло»
     minPixelRatio: 1,
@@ -79,6 +88,9 @@ const PRESETS = {
   // Прежнее максимальное качество — только по адресу ?quality=ultra
   ultra: {
     label: 'Максимальное',
+    lambert: false,
+    envLight: true,
+    cheapShading: false,
     post: true,
     pixelRatio: 2,
     minPixelRatio: 1,
@@ -128,4 +140,12 @@ function readLevel() {
 }
 
 export const QUALITY_LEVEL = readLevel();
-export const Q = PRESETS[QUALITY_LEVEL];
+export const Q = { ...PRESETS[QUALITY_LEVEL] };
+// Для замеров: любой параметр можно переопределить в адресе, например ?q_msaa=2&q_bloom=0
+if (typeof location !== 'undefined') {
+  for (const [k, v] of new URLSearchParams(location.search)) {
+    if (!k.startsWith('q_') || !(k.slice(2) in Q)) continue;
+    const key = k.slice(2);
+    Q[key] = typeof Q[key] === 'boolean' ? v === '1' || v === 'true' : Number(v);
+  }
+}

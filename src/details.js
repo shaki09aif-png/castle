@@ -4,7 +4,8 @@
 import * as THREE from 'three';
 import { BUILDINGS, WELL, KEEP, BARBICAN, GATE_PASSAGE, WALL } from './layout.js';
 import { GeoBuilder } from './walls.js';
-import { Frame, strawMaterial } from './courtyard.js';
+import { Frame, strawMaterial, buildBarrels } from './courtyard.js';
+import { addYardLife, yardExclude } from './yard.js';
 import { wattleFence, gardenBeds } from './village.js';
 import { ColorBuilder, createPeople } from './people.js';
 import { pbrMaterial, makeCanvas, toTexture, foliageTexture } from './textures.js';
@@ -395,6 +396,10 @@ export function createDetails(scene, terrain, walls, village) {
     const bd = b.clone().sub(a).normalize();
     add({ x: m.x, y: terrain.road.find((q) => q.bridge).h + 0.05, z: m.z, yaw: face(-bd.x, -bd.z), role: 'peasant', pose: 'walk' });
   }
+  // хозяйственная жизнь двора: рынок, лошади, свиньи, поленница и т. д.
+  const yardBarrels = [];
+  addYardLife({ terrain, wood, metal, straw, colorB, stone, people, rnd, barrels: yardBarrels });
+  if (yardBarrels.length) buildBarrels(scene, terrain, yardBarrels, walls.woodMaterial, iron, rnd);
   const peopleUpd = createPeople(scene, people);
 
   // ---- сборка ----
@@ -419,7 +424,7 @@ export function createDetails(scene, terrain, walls, village) {
       if (Math.abs(x - G2.x) < G2.w / 2 + 0.5 && Math.abs(z - G2.z) < G2.d / 2 + 0.5) return 1;
       for (const t of E.tents) if (Math.hypot(x - t.x, z - t.z) < t.r) return 1;
       if (Math.hypot(x - E.coop.x, z - E.coop.z - 1) < 3) return 0.7;
-      return 0;
+      return yardExclude(x, z);
     },
     update(t) { peopleUpd.update(t); },
   };

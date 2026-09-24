@@ -1,12 +1,19 @@
 // Общие материалы и шейдерные вставки для MeshStandardMaterial.
 import * as THREE from 'three';
 import { materialTextures, macroNoiseTexture } from './textures.js';
+import { Q } from './quality.js';
 
 // GLSL: трипланарная выборка цвета, ORM и нормали (смешивание нормалей «whiteout»).
 // Текстура проецируется по трём мировым осям — нет растяжения на отвесных гранях.
-export const TRIPLANAR_GLSL = /* glsl */ `
+export const TRIPLANAR_GLSL = (Q.cheapShading ? '#define CHEAP_SHADING\n' : '') + /* glsl */ `
   vec3 triBlend(vec3 n) {
+    #ifdef CHEAP_SHADING
+    // резкий переход: почти везде одна проекция вместо двух-трёх
+    vec3 b = max(abs(n) - 0.45, 0.0001);
+    b = b * b * b;
+    #else
     vec3 b = pow(abs(n), vec3(4.0));
+    #endif
     return b / (b.x + b.y + b.z);
   }
   // для обычных 2D-текстур; производные считаются заранее (выборка внутри ветвлений)
@@ -18,19 +25,31 @@ export const TRIPLANAR_GLSL = /* glsl */ `
     if (bw.x > 0.01) {
       vec2 uv = p.zy;
       col += textureGrad(tC, uv, dx.zy, dy.zy).rgb * bw.x; orm += textureGrad(tO, uv, dx.zy, dy.zy).rgb * bw.x;
+      #ifdef CHEAP_SHADING
+      vec3 t = vec3(0.0, 0.0, 1.0);
+      #else
       vec3 t = textureGrad(tN, uv, dx.zy, dy.zy).xyz * 2.0 - 1.0; t.xy *= nStr;
+      #endif
       nx = vec3(t.xy + n.zy, abs(t.z) * n.x);
     }
     if (bw.y > 0.01) {
       vec2 uv = p.xz;
       col += textureGrad(tC, uv, dx.xz, dy.xz).rgb * bw.y; orm += textureGrad(tO, uv, dx.xz, dy.xz).rgb * bw.y;
+      #ifdef CHEAP_SHADING
+      vec3 t = vec3(0.0, 0.0, 1.0);
+      #else
       vec3 t = textureGrad(tN, uv, dx.xz, dy.xz).xyz * 2.0 - 1.0; t.xy *= nStr;
+      #endif
       ny = vec3(t.xy + n.xz, abs(t.z) * n.y);
     }
     if (bw.z > 0.01) {
       vec2 uv = p.xy;
       col += textureGrad(tC, uv, dx.xy, dy.xy).rgb * bw.z; orm += textureGrad(tO, uv, dx.xy, dy.xy).rgb * bw.z;
+      #ifdef CHEAP_SHADING
+      vec3 t = vec3(0.0, 0.0, 1.0);
+      #else
       vec3 t = textureGrad(tN, uv, dx.xy, dy.xy).xyz * 2.0 - 1.0; t.xy *= nStr;
+      #endif
       nz = vec3(t.xy + n.xy, abs(t.z) * n.z);
     }
     nrm = normalize(nx.zyx * bw.x + ny.xzy * bw.y + nz.xyz * bw.z + n * 1e-4);
@@ -41,8 +60,12 @@ export const TRIPLANAR_GLSL = /* glsl */ `
     vec3 uv = vec3(p.xz, L);
     col = textureGrad(tC, uv, dx.xz, dy.xz).rgb;
     orm = textureGrad(tO, uv, dx.xz, dy.xz).rgb;
+    #ifdef CHEAP_SHADING
+    nrm = n;
+    #else
     vec3 t = textureGrad(tN, uv, dx.xz, dy.xz).xyz * 2.0 - 1.0; t.xy *= nStr;
     nrm = normalize(vec3(t.xy + n.xz, abs(t.z) * n.y).xzy);
+    #endif
   }
   // то же для текстурного массива (слой L)
   void triSampleArr(sampler2DArray tC, sampler2DArray tN, sampler2DArray tO, float L, vec3 p, vec3 dx, vec3 dy,
@@ -52,19 +75,31 @@ export const TRIPLANAR_GLSL = /* glsl */ `
     if (bw.x > 0.01) {
       vec3 uv = vec3(p.zy, L);
       col += textureGrad(tC, uv, dx.zy, dy.zy).rgb * bw.x; orm += textureGrad(tO, uv, dx.zy, dy.zy).rgb * bw.x;
+      #ifdef CHEAP_SHADING
+      vec3 t = vec3(0.0, 0.0, 1.0);
+      #else
       vec3 t = textureGrad(tN, uv, dx.zy, dy.zy).xyz * 2.0 - 1.0; t.xy *= nStr;
+      #endif
       nx = vec3(t.xy + n.zy, abs(t.z) * n.x);
     }
     if (bw.y > 0.01) {
       vec3 uv = vec3(p.xz, L);
       col += textureGrad(tC, uv, dx.xz, dy.xz).rgb * bw.y; orm += textureGrad(tO, uv, dx.xz, dy.xz).rgb * bw.y;
+      #ifdef CHEAP_SHADING
+      vec3 t = vec3(0.0, 0.0, 1.0);
+      #else
       vec3 t = textureGrad(tN, uv, dx.xz, dy.xz).xyz * 2.0 - 1.0; t.xy *= nStr;
+      #endif
       ny = vec3(t.xy + n.xz, abs(t.z) * n.y);
     }
     if (bw.z > 0.01) {
       vec3 uv = vec3(p.xy, L);
       col += textureGrad(tC, uv, dx.xy, dy.xy).rgb * bw.z; orm += textureGrad(tO, uv, dx.xy, dy.xy).rgb * bw.z;
+      #ifdef CHEAP_SHADING
+      vec3 t = vec3(0.0, 0.0, 1.0);
+      #else
       vec3 t = textureGrad(tN, uv, dx.xy, dy.xy).xyz * 2.0 - 1.0; t.xy *= nStr;
+      #endif
       nz = vec3(t.xy + n.xy, abs(t.z) * n.z);
     }
     nrm = normalize(nx.zyx * bw.x + ny.xzy * bw.y + nz.xyz * bw.z + n * 1e-4);

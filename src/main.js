@@ -34,6 +34,33 @@ const step = (text) =>
     requestAnimationFrame(() => setTimeout(res, 20));
   });
 
+// На слабых видеокартах PBR-материалы (GGX) заменяются на более простые
+// ламбертовы: вид почти тот же (почти всё в сцене матовое), а считать в разы проще.
+function toLambert(scene) {
+  const cache = new Map();
+  const conv = (m) => {
+    if (!m || !m.isMeshStandardMaterial || m.isMeshPhysicalMaterial) return m;
+    if (cache.has(m)) return cache.get(m);
+    const l = new THREE.MeshLambertMaterial();
+    for (const k of ['map', 'alphaTest', 'side', 'transparent', 'opacity', 'vertexColors', 'emissiveMap', 'emissiveIntensity',
+      'aoMap', 'aoMapIntensity', 'fog', 'depthWrite', 'depthTest', 'polygonOffset', 'polygonOffsetFactor', 'polygonOffsetUnits',
+      'alphaToCoverage', 'flatShading', 'name', 'visible', 'toneMapped', 'blending']) l[k] = m[k];
+    l.color.copy(m.color);
+    l.emissive.copy(m.emissive);
+    if (m.defines) { l.defines = { ...m.defines }; delete l.defines.STANDARD; delete l.defines.PHYSICAL; }
+    l.userData = m.userData;
+    if (m.onBeforeCompile) l.onBeforeCompile = m.onBeforeCompile;
+    const key = m.customProgramCacheKey ? m.customProgramCacheKey.bind(m) : null;
+    if (key) l.customProgramCacheKey = () => 'lam-' + key();
+    cache.set(m, l);
+    return l;
+  };
+  scene.traverse((o) => {
+    if (!o.material) return;
+    o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
+  });
+}
+
 init().catch((e) => {
   console.error(e);
   loadingText.textContent = 'Ошибка: ' + e.message;
@@ -46,7 +73,7 @@ async function init() {
 
   // Без постобработки (низкое качество) сглаживание и тональная компрессия
   // делаются самим рендерером — это намного дешевле.
-  const renderer = new THREE.WebGLRenderer({ antialias: !Q.post, powerPreference: 'high-performance', stencil: false });
+  const renderer = new THREE.WebGLRenderer({ antialias: !Q.post && !new URLSearchParams(location.search).has('noaa'), powerPreference: 'high-performance', stencil: false });
   const maxRatio = Math.min(window.devicePixelRatio, Q.pixelRatio);
   renderer.setPixelRatio(maxRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -95,6 +122,7 @@ async function init() {
     excludeTrees: (x, z) => village.exclude(x, z) > 0,
     extraTrees: details.extraTrees,
   });
+  if (Q.lambert) toLambert(scene);
   await step('постобработка');
   const direct = { setSize() {}, render() { renderer.render(scene, camera); } };
   let post = Q.post ? createPostFX(renderer, scene, camera) : direct;
@@ -149,6 +177,7 @@ async function init() {
 
   const timer = new THREE.Timer();
   const still = new URLSearchParams(location.search).has('still'); // режим для автоматических скриншотов
+  const noAdapt = new URLSearchParams(location.search).has('noadapt'); // без автоупрощения (для замеров)
   const frame = () => {
     timer.update();
     const t = timer.getElapsed();
@@ -172,7 +201,7 @@ async function init() {
     const now = performance.now();
     if (now - fpsTime > 1000) {
       const fps = (frames * 1000) / (now - fpsTime);
-      if (!still) adaptQuality(fps);
+      if (!still && !noAdapt) adaptQuality(fps);
       fpsEl.textContent = `${Math.round(fps)} FPS · ${QUALITY_LEVEL}` + (simplified.length ? ` · упрощено: ${simplified.join(', ')}` : '');
       frames = 0;
       fpsTime = now;
@@ -185,7 +214,7 @@ async function init() {
 
   // доступ из консоли браузера для отладки
   window.castle = {
-    scene, camera, controls, cam, tour, renderer, terrain, assets,
+    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, terrain, assets,
     snapshot() {
       frame();
       return renderer.domElement.toDataURL('image/jpeg', 0.9);

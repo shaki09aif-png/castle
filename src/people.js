@@ -91,6 +91,8 @@ const ROLES = {
   woman: { tunic: [0x6e4a2a, 0x3d5a7a, 0x8a3a2a], legs: 0x3a3028, head: 'wimple', dress: true, item: 'bucket' },
   peasant: { tunic: [0x7d6a4a, 0x6a5a3a, 0x8a7a5a, 0x5e6040], legs: 0x5a4a38, head: 'hood', item: 'hoe' },
   child: { tunic: [0x8a6a3a, 0x5a6a3a], legs: 0x4a4038, head: 'hair', scale: 0.62 },
+  merchant: { tunic: [0x2e5a4a, 0x7a3a1a, 0x5a4a7a, 0x8a6a2a], legs: 0x3a3028, head: 'hood', apron: 0xd8ccb0, item: null },
+  townswoman: { tunic: [0x7a2a3a, 0x3d5a7a, 0x6a5a2a, 0x4a6a4a], legs: 0x3a3028, head: 'wimple', dress: true, item: null },
 };
 
 function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand' }) {

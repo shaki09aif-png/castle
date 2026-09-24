@@ -251,6 +251,9 @@ export function createLighting(scene, renderer, assets) {
   }
   scene.environmentIntensity = 1.0;
   pmrem.dispose();
+  // На слабых видеокартах окружающий свет от HDRI (несколько выборок кубической
+  // карты на каждый пиксель) заменяется дешёвым полусферическим светом.
+  if (!Q.envLight) scene.environment = null;
 
   // 3) Солнце. Теневая «коробка» следует за точкой, на которую смотрит камера,
   // и сжимается при приближении — вблизи тени получаются чёткими.
@@ -305,7 +308,9 @@ export function createLighting(scene, renderer, assets) {
   }
 
   // лёгкая голубоватая подсветка от неба (дополняет HDRI)
-  const hemi = new THREE.HemisphereLight(0xa9c4ff, 0x4a4630, 0.4);
+  const hemi = Q.envLight
+    ? new THREE.HemisphereLight(0xa9c4ff, 0x4a4630, 0.4)
+    : new THREE.HemisphereLight(0xb4ccf0, 0x5a5238, 1.9);
   scene.add(hemi);
 
   return {

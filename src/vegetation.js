@@ -518,28 +518,62 @@ function createTrees(scene, terrain, excludeTrees, extraTrees = []) {
       });
     }
   }
+  // Матрицы и цвета считаются один раз; при движении камеры в буферы копируются
+  // только деревья, попавшие в поле зрения (отсечение по пирамиде видимости) —
+  // деревья за спиной и сбоку больше не рисуются.
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const up = new THREE.Vector3(0, 1, 0);
   const col = new THREE.Color();
-  let lastX = Infinity, lastZ = Infinity;
-  function relod(camPos) {
-    if (Math.hypot(camPos.x - lastX, camPos.z - lastZ) < 20) return; // пересчёт LOD — не чаще, чем раз в 20 м
-    lastX = camPos.x; lastZ = camPos.z;
+  for (const g of groups) {
+    g.mat = new Float32Array(g.inst.length * 16);
+    g.col = new Float32Array(g.inst.length * 3);
+    g.inst.forEach((t, i) => {
+      q.setFromAxisAngle(up, t.rot);
+      m.compose(new THREE.Vector3(t.x, t.y, t.z), q, new THREE.Vector3(t.s, t.s, t.s));
+      m.toArray(g.mat, i * 16);
+      col.setRGB(t.tint, t.tint * (0.95 + (t.tint - 1) * 0.3), t.tint * 0.9);
+      col.toArray(g.col, i * 3);
+    });
+  }
+  const frustum = new THREE.Frustum();
+  const pv = new THREE.Matrix4();
+  const sphere = new THREE.Sphere();
+  const lastPos = new THREE.Vector3(Infinity, 0, 0);
+  const lastDir = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const copyTo = (im, g, src, dst) => {
+    im.instanceMatrix.array.set(g.mat.subarray(src * 16, src * 16 + 16), dst * 16);
+    im.instanceColor.array.set(g.col.subarray(src * 3, src * 3 + 3), dst * 3);
+  };
+  function relod(camera) {
+    const camPos = camera.position;
+    camera.getWorldDirection(dir);
+    // пересчёт — только при заметном сдвиге или повороте камеры
+    if (camPos.distanceTo(lastPos) < 4 && dir.dot(lastDir) > 0.998) return;
+    lastPos.copy(camPos);
+    lastDir.copy(dir);
+    camera.updateMatrixWorld();
+    // пирамида чуть шире кадра, чтобы при повороте края не «проявлялись»
+    const fov = camera.fov;
+    camera.fov = Math.min(120, fov * 1.35);
+    camera.updateProjectionMatrix();
+    pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+    frustum.setFromProjectionMatrix(pv);
     const R = Q.treeDetailDistance;
+    const near = Math.min(R, 45); // в тени нужны и ближние деревья вне кадра
     for (const g of groups) {
       let nn = 0, nf = 0;
-      for (const t of g.inst) {
+      for (let i = 0; i < g.inst.length; i++) {
+        const t = g.inst[i];
         const d = Math.hypot(t.x - camPos.x, t.z - camPos.z, t.y - camPos.y);
-        q.setFromAxisAngle(up, t.rot);
-        m.compose(new THREE.Vector3(t.x, t.y, t.z), q, new THREE.Vector3(t.s, t.s, t.s));
-        col.setRGB(t.tint, t.tint * (0.95 + (t.tint - 1) * 0.3), t.tint * 0.9);
-        const tgt = d < R ? g.near : g.far;
-        const idx = d < R ? nn++ : nf++;
-        for (const im of tgt) {
-          im.setMatrixAt(idx, m);
-          im.setColorAt(idx, col);
-        }
+        sphere.center.set(t.x, t.y + 5 * t.s, t.z);
+        sphere.radius = 9 * t.s;
+        if (d > near && !frustum.intersectsSphere(sphere)) continue;
+        if (d < R) { for (const im of g.near) copyTo(im, g, i, nn); nn++; }
+        else { for (const im of g.far) copyTo(im, g, i, nf); nf++; }
       }
       for (const im of g.near) { im.count = nn; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; }
       for (const im of g.far) { im.count = nf; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; }
@@ -570,7 +604,7 @@ export function createVegetation(scene, terrain, { exclude, excludeTrees, extraT
       // трава рисуется вокруг камеры; если камера высоко — вокруг точки под ней
       inner.uniforms.uCam.value.set(camera.position.x, camera.position.z);
       outer.uniforms.uCam.value.set(camera.position.x, camera.position.z);
-      trees.relod(camera.position);
+      trees.relod(camera);
     },
   };
 }

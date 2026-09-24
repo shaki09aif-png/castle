@@ -22,7 +22,12 @@ function buildStops(terrain, village) {
     pos.y = terrain.heightAt(pos.x, pos.z) + up;
     return { tgt, pos };
   };
-  const hall = b('hall'), chapel = b('chapel'), forge = b('forge');
+  // точка в системе координат постройки: lx — вдоль стены, lz — от фасада во двор, h — над землёй
+  const local = (bld, lx, h, lz) => {
+    const x = bld.x + bld.ax * lx + bld.nx * lz, z = bld.z + bld.az * lx + bld.nz * lz;
+    return V(x, terrain.heightAt(x, z) + h, z);
+  };
+  const hall = b('hall'), chapel = b('chapel'), forge = b('forge'), stable = b('stable'), kitchen = b('kitchen');
   const bridge = village.bridge;
   const bm = bridge.a.clone().add(bridge.b).multiplyScalar(0.5);
   const mill = village.mill;
@@ -66,6 +71,24 @@ function buildStops(terrain, village) {
       text: 'Во дворе шла повседневная жизнь: конюшня, кузница, казармы, склады и амбар. Колодец был важнее всего — без своей воды замок не выдержал бы осады.',
       tgt: V(WELL.x - 4, HILL_TOP + 2, WELL.z - 2),
       pos: V(WELL.x + 22, HILL_TOP + 14, WELL.z + 24),
+    },
+    {
+      title: 'Рынок у ворот',
+      text: 'В ярмарочные дни во двор пускали торговцев: хлеб, горшки, ткани, овощи, рыба. С каждого прилавка сеньор брал пошлину — это был важный доход замка.',
+      tgt: V(-2, HILL_TOP + 1.2, 14.5),
+      pos: V(10, HILL_TOP + 7.5, 4),
+    },
+    {
+      title: 'Конюшня и скотный двор',
+      text: 'Боевой конь рыцаря стоил как целая деревня, за лошадьми ухаживали конюхи. Рядом — свинарник и куры: мясо и яйца запасали на зиму и на случай осады.',
+      tgt: local(stable, -0.5, 1.3, stable.W / 2 + 3.4),
+      pos: local(stable, -6.5, 4.2, stable.W / 2 + 13),
+    },
+    {
+      title: 'Кухня и поленница',
+      text: 'Кухню ставили отдельно — из-за пожаров. Во дворе на треноге варили похлёбку. Дров замку требовалось очень много, поэтому у кухни всегда росла поленница.',
+      tgt: local(kitchen, 0, 1.0, kitchen.W / 2 + 2.2),
+      pos: local(kitchen, 2.5, 4.2, kitchen.W / 2 + 10.5),
     },
     {
       title: 'Большой зал',
@@ -112,7 +135,7 @@ export function createTour(camera, cam, terrain, village) {
   const buttons = stops.map((s, i) => {
     const el = document.createElement('button');
     el.type = 'button';
-    el.innerHTML = `<span>${(i + 1) % 10}</span>${s.title}`;
+    el.innerHTML = `<span>${i < 10 ? (i + 1) % 10 : ""}</span>${s.title}`;
     el.addEventListener('click', () => { stopAuto(); go(i); });
     list.appendChild(el);
     return el;
