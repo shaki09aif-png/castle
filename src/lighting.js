@@ -266,6 +266,8 @@ export function createLighting(scene, renderer, assets) {
   sun.shadow.blurSamples = 12;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 1800;
+  sun.shadow.camera.layers.enable(1); // объекты двора (слой 1) тоже отбрасывают тени
+  sun.shadow.camera.layers.enable(2);
   scene.add(sun);
 
   const lightRot = new THREE.Matrix4().lookAt(new THREE.Vector3(), SUN_DIR.clone().negate(), new THREE.Vector3(0, 1, 0));

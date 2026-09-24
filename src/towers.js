@@ -8,6 +8,7 @@ import { TOWERS, WALL } from './layout.js';
 import { GeoBuilder } from './walls.js';
 import { pbrMaterial, assetSource } from './textures.js';
 import { mulberry32 } from './noise.js';
+import { createFlag } from './flags.js';
 
 const V3 = THREE.Vector3;
 const smoothstep01 = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
@@ -517,7 +518,15 @@ export function buildTower(ctx, tw, opts = {}) {
     apexY = pyramidRoof(roof, C, tw.yaw, E, eaveY, H, photoRoof);
     roofUnderside(wood, C, tw, E, eaveY, H);
   }
-  if (opts.roof !== false) vanes.push(weathervane(ctx, C.clone().setY(apexY - 0.3), tw.id));
+  if (opts.roof !== false) {
+    if (tw.flag || opts.flag) {
+      // древко с флагом вместо флюгера
+      const h = 4.2;
+      ctx.metal.addGeometry(new THREE.CylinderGeometry(0.05, 0.08, h, 8), new THREE.Matrix4().makeTranslation(C.x, apexY - 0.3 + h / 2, C.z));
+      ctx.gold.addGeometry(new THREE.SphereGeometry(0.12, 12, 8), new THREE.Matrix4().makeTranslation(C.x, apexY - 0.3 + h + 0.1, C.z));
+      vanes.push(createFlag(scene, C.clone().setY(apexY - 0.3 + h - 0.1), undefined, { size: 2.4, field: tw.flagColor }));
+    } else vanes.push(weathervane(ctx, C.clone().setY(apexY - 0.3), tw.id));
+  }
 
   // --- бойницы на нескольких ярусах (обращены наружу) ---
   const out = outDir.clone();

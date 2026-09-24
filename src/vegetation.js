@@ -524,7 +524,7 @@ function createTrees(scene, terrain, excludeTrees, extraTrees = []) {
   const col = new THREE.Color();
   let lastX = Infinity, lastZ = Infinity;
   function relod(camPos) {
-    if (Math.hypot(camPos.x - lastX, camPos.z - lastZ) < 6) return;
+    if (Math.hypot(camPos.x - lastX, camPos.z - lastZ) < 20) return; // пересчёт LOD — не чаще, чем раз в 20 м
     lastX = camPos.x; lastZ = camPos.z;
     const R = Q.treeDetailDistance;
     for (const g of groups) {

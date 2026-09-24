@@ -12,12 +12,14 @@ import { createKeep } from './keep.js';
 import { createCourtyard } from './courtyard.js';
 import { createVillage } from './village.js';
 import { createDetails } from './details.js';
+import { createTorches } from './torches.js';
+import { FLAG_TIME } from './flags.js';
 import { insideBuilding } from './layout.js';
 import { createPostFX } from './postfx.js';
 import { createCameraControls } from './camera.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
-const STAGE = 'Этап 7: деревня, мост, мельница, поля, люди, мелкие детали';
+const STAGE = 'Этап 8: факелы, флаги, свет, оптимизация — модель готова';
 
 const loading = document.getElementById('loading');
 const loadingText = loading.querySelector('small');
@@ -71,12 +73,20 @@ async function init() {
   const gate = createGate(scene, terrain, walls);
   await step('донжон');
   const keep = createKeep(scene, terrain, walls);
+  // объекты двора не видны в воде — убираем их из отражений (слой 1),
+  // это заметно ускоряет перерисовку отражений реки и рва
+  const toLayer1 = (from) => { for (let i = from; i < scene.children.length; i++) scene.children[i].traverse((o) => o.layers.set(1)); };
   await step('постройки двора');
+  let mark = scene.children.length;
   const court = createCourtyard(scene, terrain, walls);
+  toLayer1(mark);
   await step('деревня у подножия');
   const village = createVillage(scene, terrain, walls);
   await step('мелкие детали и люди');
+  mark = scene.children.length;
   const details = createDetails(scene, terrain, walls, village);
+  const torches = createTorches(scene, terrain, walls);
+  toLayer1(mark);
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain, {
     exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z))),
@@ -141,6 +151,8 @@ async function init() {
     court.update(t);
     village.update(t);
     details.update(t);
+    torches.update(t);
+    FLAG_TIME.value = t;
     post.render(dt);
 
     frames++;

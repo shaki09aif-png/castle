@@ -108,10 +108,10 @@ export function wallNodePoint(deg) {
 const TOWER_SPECS = {
   35: { shape: 'round', r: 4.3, extra: 7.5 },
   140: { shape: 'square', r: 3.9, extra: 6.2 },
-  190: { shape: 'round', r: 5.0, extra: 10, corbel: true },
+  190: { shape: 'round', r: 5.0, extra: 10, corbel: true, flag: true, flagColor: '#1f3f8a' },
   237: { shape: 'square', r: 4.3, extra: 7.4, corbel: true },
   286: { shape: 'round', r: 3.7, extra: 5.8 },
-  338: { shape: 'round', r: 4.6, extra: 8.6, corbel: true },
+  338: { shape: 'round', r: 4.6, extra: 8.6, corbel: true, flag: true },
 };
 
 export const TOWERS = WALL_NODES.filter((n) => n.type === 'tower').map((n, i) => {
@@ -143,6 +143,7 @@ export const GATEHOUSE = {
   extra: 7.8,
   corbel: true,
   corbelOut: 0.62, // машикули: парапет вынесен далеко, между консолями — отверстия
+  flag: true,
   node: GATE_NODE,
 };
 // Проезд через ворота: ширина, высота пят арки, уровень порога (у рва) и конец во дворе
