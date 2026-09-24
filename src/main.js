@@ -11,12 +11,14 @@ import { createTowers } from './towers.js';
 import { createGate } from './gate.js';
 import { createKeep } from './keep.js';
 import { createCourtyard } from './courtyard.js';
+import { createVillage } from './village.js';
+import { createDetails } from './details.js';
 import { insideBuilding } from './layout.js';
 import { createPostFX } from './postfx.js';
 import { HILL_TOP } from './layout.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
-const STAGE = 'Этап 6: постройки двора — зал, часовня, кухня, колодец, конюшня, кузница';
+const STAGE = 'Этап 7: деревня, мост, мельница, поля, люди, мелкие детали';
 
 const loading = document.getElementById('loading');
 const loadingText = loading.querySelector('small');
@@ -70,9 +72,15 @@ async function init() {
   const keep = createKeep(scene, terrain, walls);
   await step('постройки двора');
   const court = createCourtyard(scene, terrain, walls);
+  await step('деревня у подножия');
+  const village = createVillage(scene, terrain, walls);
+  await step('мелкие детали и люди');
+  const details = createDetails(scene, terrain, walls, village);
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain, {
-    exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : court.paveMask(x, z)),
+    exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z))),
+    excludeTrees: (x, z) => village.exclude(x, z) > 0,
+    extraTrees: details.extraTrees,
   });
   await step('постобработка');
   const post = createPostFX(renderer, scene, camera);
@@ -137,6 +145,8 @@ async function init() {
     gate.update(t);
     keep.update(t);
     court.update(t);
+    village.update(t);
+    details.update(t);
     post.render(timer.getDelta());
 
     frames++;

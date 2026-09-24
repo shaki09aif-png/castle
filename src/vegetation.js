@@ -427,11 +427,12 @@ function foliageMaterial(tex) {
 // ---------------------------------------------------------------------------
 // Расстановка деревьев и кустов
 // ---------------------------------------------------------------------------
-function scatterTrees(terrain) {
+function scatterTrees(terrain, excludeTrees) {
   const rnd = mulberry32(4242);
   const nForest = createNoise2D(4343);
   const out = { oak: [], beech: [], birch: [], pine: [], bush: [] };
   const tryPlace = (x, z, far) => {
+    if (excludeTrees && excludeTrees(x, z)) return; // поля, огороды, дворы деревни
     const g = terrain.groundAt(x, z);
     if (g.road > 0.02 || g.river < 3 || g.rock > 0.35 || g.gravel > 0.4 || g.slope > 0.45) return;
     const th = Math.atan2(z, x);
@@ -470,6 +471,7 @@ function scatterTrees(terrain) {
     const x = Math.cos(th) * r, z = Math.sin(th) * r;
     const g = terrain.groundAt(x, z);
     if (g.road > 0.02 || g.rock > 0.5 || g.slope > 0.5 || g.river < 3 || insideTower(x, z, 2.5)) continue;
+    if (excludeTrees && excludeTrees(x, z)) continue;
     if (rnd() > 0.25) continue;
     const along = x * GATE_DIR.x + z * GATE_DIR.z - GATE_RADIUS;
     const across = x * GATE_DIR.z - z * GATE_DIR.x;
@@ -481,8 +483,12 @@ function scatterTrees(terrain) {
   return out;
 }
 
-function createTrees(scene, terrain) {
-  const placed = scatterTrees(terrain);
+function createTrees(scene, terrain, excludeTrees, extraTrees = []) {
+  const placed = scatterTrees(terrain, excludeTrees);
+  // отдельные деревья (например, старая липа во дворе замка)
+  for (const t of extraTrees) {
+    placed[t.sp].push({ x: t.x, y: terrain.heightAt(t.x, t.z) - 0.15, z: t.z, s: t.s, rot: t.rot || 0, tint: 1, v: t.v || 0 });
+  }
   const groups = [];
   const barkMats = { bark: pbrMaterial('bark'), birchBark: pbrMaterial('birchBark') };
   for (const [name, list] of Object.entries(placed)) {
@@ -544,7 +550,7 @@ function createTrees(scene, terrain) {
 }
 
 // ---------------------------------------------------------------------------
-export function createVegetation(scene, terrain, { exclude } = {}) {
+export function createVegetation(scene, terrain, { exclude, excludeTrees, extraTrees } = {}) {
   const groundTex = buildGroundTexture(terrain, exclude);
   const d = Q.grassDensity;
   const inner = grassLayer(groundTex, {
@@ -554,7 +560,7 @@ export function createVegetation(scene, terrain, { exclude } = {}) {
     spacing: 1.0 / Math.sqrt(d), radius: Q.grassRadius, inner: 20, blades: 8, segs: 2, height: 0.42, width: 0.08, clumpR: 0.45, seed: 2,
   });
   scene.add(inner.mesh, outer.mesh);
-  const trees = createTrees(scene, terrain);
+  const trees = createTrees(scene, terrain, excludeTrees, extraTrees);
   return {
     trees,
     update(t, camera) {

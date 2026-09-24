@@ -19,7 +19,7 @@ const UP = new V3(0, 1, 0);
 // Локальная система координат постройки: lx — вдоль стены (−L/2…L/2),
 // lz — к двору (фасад на +W/2, задняя стена на −W/2), y — мировая высота.
 // ---------------------------------------------------------------------------
-class Frame {
+export class Frame {
   constructor(b) {
     this.b = b;
     this.C = new V3(b.x, 0, b.z);
@@ -77,7 +77,7 @@ function slope(b, a0, a1, b0, b1, photo) {
 }
 
 // Двускатная крыша с коньком вдоль lx; возвращает высоту конька
-function gableRoof(roofB, woodB, f, L, W, eaveY, pitch, photo, over = 0.55, overEnd = 0.45) {
+export function gableRoof(roofB, woodB, f, L, W, eaveY, pitch, photo, over = 0.55, overEnd = 0.45) {
   const run = W / 2 + over;
   const H = (W / 2) * pitch;
   const ridgeY = eaveY + H;
@@ -131,7 +131,7 @@ function leanRoof(roofB, woodB, f, L, W, backY, frontY, photo, over = 0.5) {
 // Каменная коробка: стены, цоколь, угловые камни (руст), фронтоны
 // roof: 'gable' (конёк вдоль lx, фронтоны на торцах) или 'lean' (высокая задняя стена)
 // ---------------------------------------------------------------------------
-function stoneBox(stone, f, L, W, floorY, baseY, eaveY, roofType, pitch, backY) {
+export function stoneBox(stone, f, L, W, floorY, baseY, eaveY, roofType, pitch, backY) {
   const face = (lx0, lz0, lx1, lz1, n, yTop0, yTop1) => {
     const p0 = f.p(lx0, baseY, lz0), p1 = f.p(lx1, baseY, lz1);
     const p2 = f.p(lx1, yTop1, lz1), p3 = f.p(lx0, yTop0, lz0);
@@ -286,7 +286,7 @@ function smokeTexture() {
   return toTexture(c, { repeat: false });
 }
 
-class Smoke {
+export class Smoke {
   constructor(scene, pos, { count = 22, life = 9, rise = 1.3, size = 1.2, grow = 5, color = 0x8a8680, alpha = 0.5 } = {}) {
     this.pos = pos.clone();
     this.items = [];
@@ -320,7 +320,7 @@ class Smoke {
 // ---------------------------------------------------------------------------
 // Простые деревянные изделия
 // ---------------------------------------------------------------------------
-function plankDoor(wood, metal, p, n, y0, w, h) {
+export function plankDoor(wood, metal, p, n, y0, w, h) {
   const t = new V3().crossVectors(UP, n).normalize();
   const k = Math.max(3, Math.round(w / 0.28));
   for (let i = 0; i < k; i++) {
@@ -413,7 +413,7 @@ function wheel(wood, metal, c, axis, r) {
 }
 
 // Телега: кузов, оглобли, два колеса
-function cart(wood, metal, terrain, x, z, yaw, rnd) {
+export function cart(wood, metal, terrain, x, z, yaw, rnd) {
   const X = new V3(Math.cos(yaw), 0, Math.sin(yaw)), N = new V3(-Math.sin(yaw), 0, Math.cos(yaw));
   const g = terrain.heightAt(x, z);
   const r = 0.6;
@@ -898,7 +898,7 @@ function spearRack(wood, metal, terrain, p, along, rnd) {
   }
 }
 
-function haystack(strawB, terrain, p, s, rnd, noGround = false) {
+export function haystack(strawB, terrain, p, s, rnd, noGround = false) {
   const g = new THREE.IcosahedronGeometry(1, 4);
   const n = createNoise2D(Math.floor(rnd() * 1000));
   const pos = g.getAttribute('position');
@@ -912,7 +912,7 @@ function haystack(strawB, terrain, p, s, rnd, noGround = false) {
   strawB.addGeometry(g, new THREE.Matrix4().compose(new V3(p.x, gy + 0.05, p.z), new THREE.Quaternion().setFromAxisAngle(UP, rnd() * 6), new V3(s, s, s)));
 }
 
-function strawMaterial() {
+export function strawMaterial() {
   const S = 256;
   const c = makeCanvas(S, S);
   const g = c.getContext('2d');
@@ -992,7 +992,7 @@ function targetTexture() {
   return targetTex;
 }
 
-function buildBarrels(scene, terrain, list, woodMat, ironMat, rnd) {
+export function buildBarrels(scene, terrain, list, woodMat, ironMat, rnd) {
   const geo = barrelGeometry();
   const hoops = [];
   for (const y of [0.12, 0.35, 0.6, 0.83]) {
@@ -1018,7 +1018,7 @@ function buildBarrels(scene, terrain, list, woodMat, ironMat, rnd) {
   for (const x of [im, imH, imLid]) { x.castShadow = x.receiveShadow = true; scene.add(x); }
 }
 
-function buildCrates(scene, terrain, list, woodMat) {
+export function buildCrates(scene, terrain, list, woodMat) {
   const geo = new THREE.BoxGeometry(0.75, 0.62, 0.62);
   const uv = geo.getAttribute('uv');
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 0.62, uv.getY(i) * 0.55);
@@ -1033,7 +1033,7 @@ function buildCrates(scene, terrain, list, woodMat) {
   scene.add(im);
 }
 
-function mergeSimple(geos) {
+export function mergeSimple(geos) {
   const pos = [], nrm = [], uv = [], idx = [];
   let base = 0;
   for (const g of geos) {

@@ -409,6 +409,70 @@ const GENERATORS = {
     return finishSet(rgb, hgt, rough, S, { normal: 3, ao: 4, aoRadius: 5, tileMeters: 2.4 });
   },
 
+  // Соломенная кровля: плотные пучки соломы вдоль ската, потемневшая, с мхом
+  thatch() {
+    const S = 512;
+    const n = createTileNoise(181);
+    const rnd = mulberry32(182);
+    const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const u = x / S, v = y / S;
+        const a = n.fbm(u, v, 8, 4);
+        const moss = smoothstep(0.58, 0.72, n.fbm(u + 0.3, v, 4, 4));
+        let t = 0.36 + 0.12 * (a - 0.5);
+        let r = t * 1.05, g = t * 0.88, b = t * 0.55;
+        r += (0.22 - r) * moss * 0.6; g += (0.26 - g) * moss * 0.6; b += (0.12 - b) * moss * 0.6;
+        const i = y * S + x;
+        rgb[i * 3] = r; rgb[i * 3 + 1] = g; rgb[i * 3 + 2] = b;
+        hgt[i] = a * 0.3;
+      }
+    }
+    // соломины: короткие штрихи вдоль v, светлые кончики
+    for (let k = 0; k < 42000; k++) {
+      let x = rnd() * S, y = rnd() * S;
+      const len = 10 + rnd() * 26, lean = (rnd() - 0.5) * 0.25;
+      const l = 0.28 + rnd() * 0.32;
+      for (let s = 0; s < len; s++) {
+        const px = ((Math.round(x) % S) + S) % S, py = ((Math.round(y) % S) + S) % S;
+        const i = py * S + px;
+        const tt = s / len;
+        const c = l * (0.75 + 0.4 * tt);
+        rgb[i * 3] = c * 1.08; rgb[i * 3 + 1] = c * 0.9; rgb[i * 3 + 2] = c * 0.55;
+        hgt[i] = Math.max(hgt[i], 0.35 + tt * 0.6 + rnd() * 0.05);
+        y += 1; x += lean;
+      }
+    }
+    return finishSet(rgb, hgt, 0.97, S, { normal: 4, ao: 2.5, aoRadius: 3, tileMeters: 2 });
+  },
+
+  // Обмазка стен (глина с известью по плетню): светлая, с трещинами и потёками
+  daub() {
+    const S = 512;
+    const n = createTileNoise(191);
+    const rnd = mulberry32(192);
+    const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const u = x / S, v = y / S;
+        const a = n.fbm(u, v, 8, 5);
+        const crack = smoothstep(0.975, 0.995, 1 - Math.abs(n.fbm(u + 0.2, v + 0.5, 4, 4) * 2 - 1));
+        const dirt = smoothstep(0.45, 0.85, n.fbm(u * 0.6 + 0.4, v * 0.25, 4, 3));
+        const patch = smoothstep(0.64, 0.8, n.fbm(u + 0.7, v + 0.1, 4, 3)); // обвалившаяся побелка — видна глина
+        let t = 0.62 + 0.08 * (a - 0.5) + (rnd() - 0.5) * 0.03;
+        let r = t * 1.0, g = t * 0.93, b = t * 0.8;
+        r += (0.5 - r) * patch * 0.45; g += (0.4 - g) * patch * 0.45; b += (0.28 - b) * patch * 0.45;
+        const k = 1 - dirt * 0.22 - crack * 0.18;
+        const i = y * S + x;
+        rgb[i * 3] = r * k; rgb[i * 3 + 1] = g * k; rgb[i * 3 + 2] = b * k;
+        hgt[i] = a * 0.4 - crack * 0.6 - patch * 0.25;
+      }
+    }
+    return finishSet(rgb, hgt, 0.95, S, { normal: 3, ao: 2, aoRadius: 3, tileMeters: 2.5 });
+  },
+
   // Кора дуба/бука: продольные борозды
   bark() {
     const S = 256;

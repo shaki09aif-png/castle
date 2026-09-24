@@ -356,9 +356,10 @@ function createMoatWater(scene) {
     guardReflection(mesh);
     if (Q.reflectionEvery > 1) {
       const orig = mesh.onBeforeRender;
-      let n = 1; // со сдвигом относительно реки: отражения обновляются в разных кадрах
+      let n = 0; // со сдвигом относительно реки: отражения обновляются в разных кадрах
       mesh.onBeforeRender = function (...args) {
-        if (n++ % Q.reflectionEvery === 0) orig.apply(this, args);
+        if (n === 0 || n % Q.reflectionEvery === 1) orig.apply(this, args);
+        n++;
       };
     }
   } else {
