@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { BUILDINGS, WELL, KEEP, BARBICAN, GATE_PASSAGE, WALL } from './layout.js';
 import { GeoBuilder } from './walls.js';
 import { Frame, strawMaterial, buildBarrels } from './courtyard.js';
-import { addYardLife, yardExclude } from './yard.js';
+import { addYardLife, yardExclude, SACK } from './yard.js';
 import { wattleFence, gardenBeds } from './village.js';
 import { ColorBuilder, createPeople } from './people.js';
 import { pbrMaterial, makeCanvas, toTexture, foliageTexture } from './textures.js';
@@ -271,11 +271,13 @@ export function createDetails(scene, terrain, walls, village) {
   const byId = Object.fromEntries(BUILDINGS.map((b) => [b.id, b]));
   for (const [id, lx0] of [['store', 3.2], ['granary', -3.0]]) {
     const f = new Frame(byId[id]);
-    for (let k = 0; k < 6; k++) {
-      const p = f.p(lx0 + (k % 3) * 0.55, 0, byId[id].W / 2 + 0.6 + Math.floor(k / 3) * 0.1);
+    // три мешка в ряд и один лежит сверху (форма мешка — с перевязанной горловиной)
+    for (let k = 0; k < 4; k++) {
+      const lying = k === 3;
+      const p = f.p(lx0 + (lying ? 0.55 : k * 0.55), 0, byId[id].W / 2 + 0.6);
       const g = terrain.heightAt(p.x, p.z);
-      const sack = new THREE.SphereGeometry(0.28, 10, 8);
-      colorB.add(sack, new THREE.Matrix4().compose(p.setY(g + 0.28 + Math.floor(k / 3) * 0.3), new THREE.Quaternion().setFromAxisAngle(UP, rnd() * 3), new V3(1, 1.25, 0.8)), 0xb8a67e);
+      const q = lying ? new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, rnd() * 0.4, 0)) : new THREE.Quaternion().setFromAxisAngle(UP, rnd() * 3);
+      colorB.add(SACK, new THREE.Matrix4().compose(p.setY(g + (lying ? 0.72 : 0)), q, new V3(1, 1, 1)), [0x9a8660, 0x8a7654, 0xa8946c][k % 3]);
     }
   }
   {

@@ -1,6 +1,7 @@
 // Экскурсия по замку: кнопки с точками обзора, плавный перелёт камеры
 // и короткие исторические пояснения для доклада.
-// Клавиши: 1–9, 0 — точки экскурсии, T — автоэкскурсия, Esc — закрыть подпись.
+// Клавиши: 1–9, 0 — первые десять точек, ← → — предыдущая/следующая,
+// T — автоэкскурсия, Esc — закрыть подпись.
 import * as THREE from 'three';
 import {
   HILL_TOP, GATEHOUSE, BARBICAN, KEEP, BUILDINGS, WELL, TOWERS,
@@ -91,6 +92,12 @@ function buildStops(terrain, village) {
       pos: local(kitchen, 2.5, 4.2, kitchen.W / 2 + 10.5),
     },
     {
+      title: 'Кузница',
+      text: 'Кузнец был одним из самых нужных людей в замке: ковал подковы, гвозди, петли и замки, чинил оружие и доспехи. Горн раздували мехами, раскалённое железо остужали в корыте с водой.',
+      tgt: local(forge, -0.6, 1.1, forge.W / 2 + 0.6),
+      pos: local(forge, 3.5, 3.4, forge.W / 2 + 8.5),
+    },
+    {
       title: 'Большой зал',
       text: 'Большой зал — сердце замковой жизни. Здесь сеньор пировал с рыцарями, принимал гостей, вершил суд. Рядом кухня: её ставили отдельно, чтобы при пожаре не сгорел зал.',
       ...facing(hall, 24, 9, 5),
@@ -135,7 +142,7 @@ export function createTour(camera, cam, terrain, village) {
   const buttons = stops.map((s, i) => {
     const el = document.createElement('button');
     el.type = 'button';
-    el.innerHTML = `<span>${i < 10 ? (i + 1) % 10 : ""}</span>${s.title}`;
+    el.innerHTML = `<span>${i + 1}</span>${s.title}`;
     el.addEventListener('click', () => { stopAuto(); go(i); });
     list.appendChild(el);
     return el;
@@ -186,6 +193,10 @@ export function createTour(camera, cam, terrain, village) {
       const n = Number(e.code.slice(5));
       const i = n === 0 ? 9 : n - 1;
       if (i < stops.length) { stopAuto(); go(i); }
+    } else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+      const d = e.code === 'ArrowRight' ? 1 : -1;
+      stopAuto();
+      go((Math.max(current, 0) + d + stops.length) % stops.length);
     } else if (e.code === 'KeyT') {
       auto ? stopAuto() : startAuto();
     } else if (e.code === 'Escape') {

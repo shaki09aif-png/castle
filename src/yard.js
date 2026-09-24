@@ -37,6 +37,13 @@ function M(x, y, z, yaw = 0, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0) {
 const L = (root, x, y, z, sx = 1, sy = 1, sz = 1, rx = 0, ry = 0, rz = 0) =>
   root.clone().multiply(new THREE.Matrix4().compose(new V3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new V3(sx, sy, sz)));
 
+// Мешок: округлое дно, перехваченная верёвкой горловина
+export const SACK = (() => {
+  const pts = [[0.0, 0], [0.2, 0.02], [0.25, 0.12], [0.24, 0.32], [0.18, 0.46], [0.08, 0.52], [0.06, 0.56], [0.1, 0.62], [0.0, 0.64]].map(([a, b]) => new THREE.Vector2(a, b));
+  const g = new THREE.LatheGeometry(pts, 12);
+  g.scale(1, 1, 0.8);
+  return g;
+})();
 const G = {
   sph: new THREE.SphereGeometry(1, 10, 7),
   sphLo: new THREE.SphereGeometry(1, 7, 5),
@@ -112,9 +119,10 @@ function stall(B, terrain, s, rnd, people) {
       colorB.add(G.sph, M(p.x, p.y + h * 0.55, p.z, 0, r * 1.2, h * 0.6, r * 1.2), col);
       colorB.add(G.cyl, M(p.x, p.y + h * 1.05, p.z, 0, r * 0.7, h * 0.25, r * 0.7), col);
     }
-    for (let i = 0; i < 5; i++) {
-      const p = f.p(-1.0 + i * 0.5, g, hd + 0.7 + rnd() * 0.3);
-      colorB.add(G.sph, M(p.x, g + 0.2, p.z, 0, 0.2, 0.22, 0.2), 0x9a5a30);
+    for (let i = 0; i < 3; i++) { // большие корчаги на земле
+      const p = f.p(-0.9 + i * 0.8, g, hd + 0.75 + rnd() * 0.2);
+      colorB.add(G.sph, M(p.x, g + 0.24, p.z, 0, 0.19, 0.24, 0.19), 0x8a4a2a);
+      colorB.add(G.cyl, M(p.x, g + 0.5, p.z, 0, 0.1, 0.08, 0.1), 0x8a4a2a);
     }
   } else if (s.goods === 'veg') {
     for (let i = 0; i < 4; i++) {
@@ -123,9 +131,9 @@ function stall(B, terrain, s, rnd, people) {
       const col = [0x3f7a24, 0xa02a1a, 0xc8a030, 0x6a8a2a][i];
       for (let k = 0; k < 7; k++) colorB.add(G.sphLo, M(p.x + (rnd() - 0.5) * 0.3, p.y + 0.2 + rnd() * 0.05, p.z + (rnd() - 0.5) * 0.3, 0, 0.08, 0.08, 0.08), col);
     }
-    for (let i = 0; i < 3; i++) { // мешки
-      const p = f.p(-0.9 + i * 0.75, g, hd + 0.8);
-      colorB.add(G.sph, M(p.x, g + 0.3, p.z, rnd(), 0.26, 0.34, 0.22), 0xc8b88a);
+    for (let i = 0; i < 2; i++) { // мешки
+      const p = f.p(-0.8 + i * 1.5, g, hd + 0.8);
+      colorB.add(SACK, M(p.x, g, p.z, rnd() * 3), 0x9a8660);
     }
   } else if (s.goods === 'cloth') {
     const cols = [0x8a2a2a, 0x2a4a8a, 0xd8c890, 0x3a6a3a, 0x6a3a7a, 0xe8e0d0];
@@ -161,39 +169,98 @@ function stall(B, terrain, s, rnd, people) {
 }
 
 // ---------------------------------------------------------------------------
-// Лошадь (стоит, голова чуть опущена)
+// Лошадь: бочкообразное туловище, грудь и круп, изогнутая шея, голова с
+// мордой, ноги с суставами и копытами, грива, хвост, седло и уздечка
+const HG = {
+  barrel: (() => { const g = new THREE.CapsuleGeometry(0.34, 0.9, 6, 14); g.rotateX(Math.PI / 2); g.scale(0.95, 1.08, 1); return g; })(),
+  neck: new THREE.CylinderGeometry(0.13, 0.24, 0.78, 12).translate(0, 0.39, 0),
+  head: (() => { const g = new THREE.CylinderGeometry(0.075, 0.125, 0.52, 10).translate(0, -0.26, 0); g.scale(0.85, 1, 1.15); return g; })(),
+  cheek: new THREE.SphereGeometry(0.12, 10, 8),
+  muzzle: new THREE.SphereGeometry(0.085, 10, 8),
+  upper: new THREE.CylinderGeometry(0.1, 0.065, 0.46, 8).translate(0, -0.23, 0),
+  lower: new THREE.CylinderGeometry(0.045, 0.04, 0.4, 8).translate(0, -0.2, 0),
+  joint: new THREE.SphereGeometry(0.058, 8, 6),
+  hoof: new THREE.CylinderGeometry(0.055, 0.07, 0.09, 10),
+  ear: new THREE.ConeGeometry(0.035, 0.13, 6),
+  eye: new THREE.SphereGeometry(0.02, 6, 4),
+  tail: new THREE.ConeGeometry(0.07, 0.42, 8).translate(0, -0.21, 0),
+};
 function horse(colorB, x, y, z, yaw, col, rnd) {
   const r = M(x, y, z, yaw);
-  const dark = 0x1e1a16, mane = col === 0xe8e0d0 ? 0xcfc6b4 : 0x2a2018;
-  colorB.add(G.sph, L(r, 0, 1.28, 0, 0.36, 0.42, 0.95), col); // туловище
-  colorB.add(G.sph, L(r, 0, 1.35, 0.72, 0.33, 0.4, 0.38), col); // грудь
-  colorB.add(G.sph, L(r, 0, 1.36, -0.72, 0.36, 0.42, 0.4), col); // круп
-  const down = rnd() < 0.5 ? 0.35 : 0;
-  colorB.add(G.cyl, L(r, 0, 1.75 - down * 0.4, 1.02, 0.15, 0.75, 0.2, 0.75 + down), col); // шея
-  const hy = 2.05 - down * 0.9, hz = 1.3 + down * 0.25;
-  colorB.add(G.box, L(r, 0, hy, hz, 0.2, 0.22, 0.52, 0.55 + down), col); // голова
-  colorB.add(G.box, L(r, 0, hy - 0.2, hz + 0.2, 0.17, 0.16, 0.2, 0.55 + down), dark === col ? 0x3a3028 : col); // морда
-  for (const s of [-1, 1]) colorB.add(G.cone, L(r, s * 0.08, hy + 0.2, hz - 0.2, 0.04, 0.14, 0.04), col); // уши
-  colorB.add(G.box, L(r, 0, 1.8 - down * 0.3, 0.95, 0.05, 0.12, 0.8, 0.75 + down), mane); // грива
-  for (const [lx, lz] of [[-0.2, 0.62], [0.2, 0.62], [-0.2, -0.7], [0.2, -0.7]]) {
-    colorB.add(G.cylLo, L(r, lx, 0.47, lz, 0.075, 0.9, 0.075), col);
-    colorB.add(G.cylLo, L(r, lx, 0.05, lz, 0.085, 0.1, 0.085), dark);
+  const dark = 0x1a1612, mane = col === 0xe8e0d0 ? 0xd8d0c0 : 0x1e1812;
+  const sh = new THREE.Color(col).multiplyScalar(0.8).getHex();
+  colorB.add(HG.barrel, L(r, 0, 1.25, -0.02), col); // туловище
+  colorB.add(G.sph, L(r, 0, 1.3, 0.55, 0.33, 0.38, 0.34), col); // грудь
+  colorB.add(G.sph, L(r, 0, 1.33, -0.6, 0.35, 0.37, 0.38), col); // круп
+  colorB.add(G.sph, L(r, 0, 1.52, -0.45, 0.28, 0.12, 0.3), col); // верх крупа
+  const down = rnd() < 0.5 ? 0.3 : 0;
+  // шея наклонена вперёд, голова вниз
+  const neck = L(r, 0, 1.45, 0.62, 0.55 + down * 0.6);
+  colorB.add(HG.neck, neck, col);
+  const poll = neck.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0.74, 0));
+  // голова смотрит вперёд-вниз (ось головы — локальная −Y, темя — локальная +Z)
+  const head = poll.clone().multiply(new THREE.Matrix4().makeRotationX(-1.35 + down * 0.2));
+  colorB.add(HG.cheek, head.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.08, -0.02)), col);
+  colorB.add(HG.head, head, col);
+  colorB.add(HG.muzzle, head.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.52, 0.01)), col === 0xe8e0d0 ? 0x9a8a80 : sh);
+  for (const sd of [-1, 1]) {
+    colorB.add(HG.ear, head.clone().multiply(new THREE.Matrix4().compose(new V3(sd * 0.065, 0.03, 0.1), new THREE.Quaternion().setFromEuler(new THREE.Euler(1.2, 0, sd * -0.25)), new V3(1, 1, 1))), col);
+    colorB.add(HG.eye, head.clone().multiply(new THREE.Matrix4().makeTranslation(sd * 0.105, -0.13, 0.05)), dark);
   }
-  colorB.add(G.cone, L(r, 0, 1.0, -1.18, 0.09, 0.8, 0.09, 0.35), mane); // хвост
-  // попона и седло
-  colorB.add(G.box, L(r, 0, 1.62, 0.05, 0.74, 0.04, 0.6), [0x7a1c1c, 0x1d3f8a, 0x3a5a2a][Math.floor(rnd() * 3)]);
-  colorB.add(G.box, L(r, 0, 1.7, 0.1, 0.42, 0.08, 0.38), 0x4a2e18);
+  // уздечка: ремни вокруг морды и за ушами, поводья
+  colorB.add(new THREE.TorusGeometry(0.1, 0.012, 4, 12), head.clone().multiply(new THREE.Matrix4().compose(new V3(0, -0.38, 0.0), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)), new V3(1, 1, 1.2))), 0x3a2414);
+  colorB.add(new THREE.TorusGeometry(0.13, 0.012, 4, 12), head.clone().multiply(new THREE.Matrix4().compose(new V3(0, -0.02, 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)), new V3(1, 1, 1.1))), 0x3a2414);
+  // грива — ряд прядей вдоль шеи
+  for (let k = 0; k < 7; k++) {
+    const t = k / 6;
+    colorB.add(G.box, neck.clone().multiply(new THREE.Matrix4().compose(new V3(0, 0.08 + t * 0.66, -0.13 - (1 - t) * 0.08), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, 0, (k % 2 ? 0.25 : -0.25))), new V3(0.05, 0.14, 0.09))), mane);
+  }
+  // ноги: передние прямые, задние с изгибом в скакательном суставе
+  for (const [lx, lz, hind] of [[-0.19, 0.55, 0], [0.19, 0.55, 0], [-0.19, -0.62, 1], [0.19, -0.62, 1]]) {
+    const hip = L(r, lx, 1.12, lz, hind ? -0.25 : 0.03);
+    colorB.add(HG.upper, hip, col);
+    const knee = hip.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.46, 0)).multiply(new THREE.Matrix4().makeRotationX(hind ? 0.3 : -0.03));
+    colorB.add(HG.joint, knee, col);
+    colorB.add(HG.lower, knee, col);
+    const fet = knee.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.4, 0));
+    colorB.add(HG.joint, fet.clone().multiply(new THREE.Matrix4().makeScale(0.85, 0.85, 0.85)), col);
+    const p = new V3().setFromMatrixPosition(fet);
+    colorB.add(HG.hoof, M(p.x, y + 0.045, p.z, yaw), dark);
+  }
+  // хвост из двух частей
+  const tr = L(r, 0, 1.45, -0.95, 0.5);
+  colorB.add(new THREE.CylinderGeometry(0.05, 0.06, 0.2, 8).translate(0, -0.1, 0), tr, mane);
+  colorB.add(HG.tail, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.18, 0)).multiply(new THREE.Matrix4().makeRotationX(-0.45)), mane);
+  colorB.add(HG.tail, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.5, -0.05)).multiply(new THREE.Matrix4().makeRotationX(-0.1)).multiply(new THREE.Matrix4().makeScale(0.8, 1.2, 0.8)), mane);
+  // попона, седло с лукой, стремена
+  const cloth = [0x7a1c1c, 0x1d3f8a, 0x3a5a2a][Math.floor(rnd() * 3)];
+  colorB.add(new THREE.CylinderGeometry(0.4, 0.4, 0.62, 16, 1, true, -Math.PI * 0.45, Math.PI * 0.9).rotateX(Math.PI / 2), L(r, 0, 1.28, 0.02, 0, 0, 0, 1.0), cloth);
+  colorB.add(G.box, L(r, 0, 1.66, 0.05, 0.3, 0.05, 0.4), 0x4a2e18);
+  colorB.add(G.box, L(r, 0, 1.73, 0.22, 0.2, 0.07, 0.05), 0x4a2e18);
+  colorB.add(G.box, L(r, 0, 1.72, -0.13, 0.26, 0.09, 0.05), 0x4a2e18);
+  for (const sd of [-1, 1]) {
+    colorB.add(G.box, L(r, sd * 0.37, 1.35, 0.05, 0.015, 0.5, 0.03), 0x2a1a10);
+    colorB.add(new THREE.TorusGeometry(0.05, 0.01, 4, 10), L(r, sd * 0.37, 1.06, 0.05, 1, 1, 1, 0, 0), 0x6a6a70);
+  }
 }
 
-// Свинья
+// Свинья: вытянутое туловище, пятачок, висячие уши, хвостик-завиток
 function pig(colorB, x, y, z, yaw, rnd) {
   const r = M(x, y, z, yaw);
-  const c = rnd() < 0.3 ? 0x5a4038 : 0xd8a090;
-  colorB.add(G.sph, L(r, 0, 0.36, 0, 0.26, 0.24, 0.42), c);
-  colorB.add(G.sph, L(r, 0, 0.38, 0.42, 0.17, 0.16, 0.16), c);
-  colorB.add(G.cylLo, L(r, 0, 0.35, 0.58, 0.07, 0.06, 0.07, Math.PI / 2), 0xc08070);
-  for (const s of [-1, 1]) colorB.add(G.cone, L(r, s * 0.1, 0.52, 0.4, 0.05, 0.08, 0.03, -0.4), c);
-  for (const [lx, lz] of [[-0.13, 0.25], [0.13, 0.25], [-0.13, -0.25], [0.13, -0.25]]) colorB.add(G.cylLo, L(r, lx, 0.1, lz, 0.05, 0.2, 0.05), c);
+  const c = rnd() < 0.3 ? 0x5a4038 : 0xdca494;
+  const sn = rnd() < 0.3 ? 0x7a5a50 : 0xc88070;
+  colorB.add(new THREE.CapsuleGeometry(0.24, 0.42, 5, 12).rotateX(Math.PI / 2), L(r, 0, 0.4, 0, 1, 0.95, 1), c);
+  colorB.add(G.sph, L(r, 0, 0.42, 0.42, 0.18, 0.17, 0.17), c);
+  colorB.add(G.cyl, L(r, 0, 0.38, 0.6, 0.075, 0.07, 0.065, Math.PI / 2), sn);
+  for (const sd of [-1, 1]) {
+    colorB.add(G.sphLo, L(r, sd * 0.1, 0.54, 0.42, 0.06, 0.02, 0.08, 0.6, 0, sd * 0.3), c); // уши
+    colorB.add(G.sphLo, L(r, sd * 0.08, 0.46, 0.55, 0.012, 0.012, 0.012), 0x1a1410); // глаза
+  }
+  for (const [lx, lz] of [[-0.12, 0.28], [0.12, 0.28], [-0.12, -0.28], [0.12, -0.28]]) {
+    colorB.add(G.cylLo, L(r, lx, 0.1, lz, 0.05, 0.2, 0.05), c);
+    colorB.add(G.cylLo, L(r, lx, 0.015, lz, 0.052, 0.03, 0.052), 0x3a2a22);
+  }
+  colorB.add(new THREE.TorusGeometry(0.035, 0.01, 4, 8, Math.PI * 1.6), L(r, 0, 0.47, -0.5, 1, 1, 1, 0, Math.PI / 2), c);
 }
 
 // Собака (стоит или лежит)
@@ -223,9 +290,9 @@ export function addYardLife(ctx) {
 
   // ---- рынок ----
   for (const s of YARD.stalls) stall(B, terrain, s, rnd, people);
-  // мешки и корзины между прилавками
-  for (const [x, z] of [[-7.4, 13.2], [-7.6, 17.6], [6.0, 11.4], [11.0, 14.2]]) {
-    for (let k = 0; k < 3; k++) colorB.add(G.sph, M(x + (rnd() - 0.5) * 0.8, gh(x, z) + 0.28, z + (rnd() - 0.5) * 0.8, rnd() * 3, 0.24, 0.3, 0.2), 0xc0ae80);
+  // мешки между прилавками (по одному-два)
+  for (const [x, z, n] of [[-7.4, 13.2, 2], [-7.6, 17.6, 1], [6.0, 11.4, 1], [11.0, 14.2, 2]]) {
+    for (let k = 0; k < n; k++) colorB.add(SACK, M(x + k * 0.55, gh(x, z), z + (rnd() - 0.5) * 0.3, rnd() * 3, 1, 0.9 + rnd() * 0.2, 1), [0x9a8660, 0x8a7654, 0xa8946c][k % 3]);
   }
   // гуляющие по рынку
   for (const [x, z, yaw, role] of [[-1.5, 14, 0.4, 'townswoman'], [1.6, 17.5, 2.9, 'peasant'], [-2.8, 8.6, -2.2, 'noble'], [2.6, 6.5, 3.6, 'child']])
@@ -384,6 +451,34 @@ export function addYardLife(ctx) {
     }
     colorB.add(G.cyl, M(a.x + 0.9, gh(a.x + 0.9, a.z + 0.8) + 0.2, a.z + 0.8, 0, 0.35, 0.36, 0.35), 0x7a5a30); // корзина
     people.push({ x: a.x + 1.4, y: gh(a.x + 1.4, a.z + 1.3), z: a.z + 1.3, yaw: yaw - Math.PI / 2, role: 'woman', pose: 'work' });
+  }
+
+  // ---- у кузницы: подковка лошади, корыто для закалки, подковы, прутья железа, подмастерье у мехов ----
+  {
+    const b = byId.forge, f = new Frame(b);
+    const along = Math.atan2(f.X.x, f.X.z);
+    const hp = f.p(2.6, 0, b.W / 2 + 2.7);
+    horse(colorB, hp.x, gh(hp.x, hp.z), hp.z, along + Math.PI, 0x6a4424, rnd);
+    const fp = f.p(1.7, 0, b.W / 2 + 1.9);
+    people.push({ x: fp.x, y: gh(fp.x, fp.z), z: fp.z, yaw: Math.atan2(hp.x - fp.x, hp.z - fp.z), role: 'smith', pose: 'work' });
+    // корыто с водой для закалки
+    const tq = f.p(-2.3, 0, b.W / 2 + 0.9);
+    wood.box(new V3(tq.x, gh(tq.x, tq.z) + 0.3, tq.z), f.X, UP, f.N, 0.55, 0.3, 0.28, { grain: true });
+    colorB.add(G.box, M(tq.x, gh(tq.x, tq.z) + 0.58, tq.z, along, 0.46, 0.02, 1.0), 0x1e3032);
+    // доска с подковами у входа
+    const hb = f.p(0.3, 0, b.W / 2 + 0.25);
+    const hg = gh(hb.x, hb.z);
+    wood.box(new V3(hb.x, hg + 1.3, hb.z), f.X, UP, f.N, 0.5, 0.25, 0.025, { grain: true });
+    for (let k = 0; k < 6; k++) {
+      const p = f.p(0.3 - 0.36 + (k % 3) * 0.36, 0, b.W / 2 + 0.29);
+      metal.addGeometry(new THREE.TorusGeometry(0.06, 0.013, 4, 10, Math.PI * 1.3), M(p.x, hg + 1.42 - Math.floor(k / 3) * 0.2, p.z, along + Math.PI / 2, 1, 1, 1, 0, Math.PI * 1.15));
+    }
+    // прутья железа
+    const ib = f.p(-b.L / 2 + 0.6, 0, b.W / 2 + 1.3);
+    for (let k = 0; k < 8; k++) metal.box(new V3(ib.x, gh(ib.x, ib.z) + 0.05 + Math.floor(k / 4) * 0.05, ib.z).addScaledVector(f.N, (k % 4) * 0.06), f.X, UP, f.N, 0.7, 0.02, 0.02);
+    // подмастерье у мехов
+    const ap = f.p(0.4, 0, -b.W / 2 + 1.65);
+    people.push({ x: ap.x, y: gh(ap.x, ap.z) + 0.1, z: ap.z, yaw: Math.atan2(-f.N.x, -f.N.z), role: 'servant', pose: 'work' });
   }
 
   // ---- собаки ----

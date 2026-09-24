@@ -21,11 +21,9 @@ import { createCameraControls } from './camera.js';
 import { createTour } from './tour.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
 
-const STAGE = 'Экскурсия — кнопки справа или клавиши 1–0';
 
 const loading = document.getElementById('loading');
 const loadingText = loading.querySelector('small');
-document.getElementById('stage').textContent = STAGE;
 
 // Сообщение на экране загрузки + пауза, чтобы браузер успел его отрисовать
 const step = (text) =>
@@ -150,6 +148,8 @@ async function init() {
 
   // Счётчик кадров
   const fpsEl = document.getElementById('fps');
+  // счётчик кадров скрыт; показать — параметром адреса ?fps
+  if (new URLSearchParams(location.search).has('fps')) fpsEl.style.display = 'block';
   let frames = 0, fpsTime = performance.now();
   // Автоупрощение без «мыла»: если FPS ниже 28, по шагам выключается то, что
   // дороже всего и меньше всего заметно. Разрешение снижается только в конце.
