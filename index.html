@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Рыцарский замок XIII века</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb3c8; font-family: Georgia, 'Times New Roman', serif; }
+      canvas { display: block; }
+      #loading {
+        position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: #1d1a16; color: #e9dcc0; font-size: 22px; letter-spacing: 0.04em; z-index: 10; transition: opacity 0.8s;
+      }
+      #loading small { margin-top: 10px; font-size: 14px; opacity: 0.7; }
+      #hud {
+        position: fixed; left: 14px; top: 12px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+        font-size: 14px; line-height: 1.45; pointer-events: none; max-width: 360px;
+      }
+      #hud h1 { font-size: 19px; margin: 0 0 4px; font-weight: normal; }
+      #fps { position: fixed; right: 12px; top: 10px; color: #fff; font: 13px monospace; text-shadow: 0 1px 2px #000; }
+    </style>
+  </head>
+  <body>
+    <div id="loading">Строим холм…<small>генерация рельефа и текстур</small></div>
+    <div id="hud">
+      <h1>Рыцарский замок XIII века</h1>
+      <div id="stage"></div>
+      <div style="opacity:0.8">ЛКМ — вращение · колесо — приближение · ПКМ — сдвиг</div>
+    </div>
+    <div id="fps"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
