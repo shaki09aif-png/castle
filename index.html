@@ -48,15 +48,25 @@
       #tour-list button span { width: 24px; flex: none; opacity: 0.55; font-family: monospace; }
       #tour-list button:hover { background: rgba(255, 255, 255, 0.1); }
       #tour-list button.active { background: rgba(255, 217, 138, 0.22); color: #fff; }
-      #tour-play {
-        width: 100%; margin-top: 6px; padding: 6px !important; background: rgba(255, 217, 138, 0.18) !important;
+      #tour-play-row { display: flex; gap: 6px; margin-top: 6px; }
+      #tour-play, #tour-play-all {
+        flex: 1 1 50%; padding: 6px !important; background: rgba(255, 217, 138, 0.18) !important;
         border: 1px solid rgba(255, 217, 138, 0.4) !important;
       }
-      #tour-play:hover { background: rgba(255, 217, 138, 0.3) !important; }
+      #tour-play-all { flex: 0 0 34%; background: rgba(255, 255, 255, 0.08) !important; border-color: rgba(233, 220, 192, 0.25) !important; }
+      #tour-play:hover, #tour-play-all:hover { background: rgba(255, 217, 138, 0.3) !important; }
+      #tour-list .tour-group { display: flex; justify-content: space-between; width: 100%; text-align: left; padding: 5px 6px; margin-top: 2px;
+        color: #ffd98a; border-bottom: 1px solid rgba(233, 220, 192, 0.15); border-radius: 0; }
+      #tour-list .tour-group::before { content: '▸'; margin-right: 6px; opacity: 0.7; }
+      #tour-list .tour-group.open::before { content: '▾'; }
+      #tour-list .tour-group em { font-style: normal; opacity: 0.5; margin-left: auto; font-size: 12px; }
+      #tour-list .tour-sec { display: none; padding: 2px 0 4px 6px; }
+      #tour-list .tour-sec.open { display: block; }
+      #tour-list button.main span::after { content: '★'; color: #ffd98a; font-size: 10px; margin-left: 1px; }
       #tour-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
       #tour-tools button { flex: 1 1 45%; padding: 5px 4px; font-size: 13px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(233, 220, 192, 0.25); }
       #tour-tools button:hover { background: rgba(255, 255, 255, 0.16); }
-      #tour.collapsed #tour-list, #tour.collapsed #tour-play, #tour.collapsed #tour-tools { display: none; }
+      #tour.collapsed #tour-list, #tour.collapsed #tour-play-row, #tour.collapsed #tour-tools { display: none; }
       #tour.collapsed header { margin-bottom: 0; }
       #caption {
         position: fixed; left: 50%; top: 14px; transform: translate(-50%, -12px); width: min(560px, calc(100vw - 32px));
@@ -93,7 +103,7 @@
         <b>ЛКМ</b> — вращение · <b>колесо</b> — приближение<br />
         <b>ПКМ</b> — сдвиг камеры<br />
         <b>F</b> — свободный полёт<br />
-        <b>1–0</b>, <b>← →</b> — точки экскурсии · <b>T</b> — вся экскурсия<br />
+        <b>1–0</b>, <b>← →</b> — точки экскурсии · <b>T</b> — экскурсия для доклада, <b>Shift+T</b> — все точки<br />
         <b>N</b> — время суток · <b>G</b> — ворота<br />
         <b>P</b> — погода · <b>B</b> — штурм
       </div>
@@ -122,7 +132,7 @@
         <button id="btn-siege" type="button" title="Штурм: требушет, лучники, смола (B)">⚔ Штурм</button>
       </div>
       <div id="tour-list"></div>
-      <button id="tour-play" type="button">▶ Вся экскурсия</button>
+      <div id="tour-play-row"><button id="tour-play" type="button" title="Главные точки — для доклада (T)">▶ Для доклада</button><button id="tour-play-all" type="button" title="Все точки подряд (Shift+T)">▶ Все</button></div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>
