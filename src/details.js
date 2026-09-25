@@ -112,6 +112,14 @@ export function chicken(B, x, y, z, yaw, rnd) {
   B.add(new THREE.BoxGeometry(0.015, 0.05, 0.06), M(0, hy + 0.07, hz, 1, 1, 1), 0xc0201a);
   B.add(new THREE.ConeGeometry(0.018, 0.05, 5), M(0, hy, hz + 0.07, 1, 1, 1, Math.PI / 2), 0xe0a020);
   for (const sd of [-1, 1]) B.add(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 4), M(sd * 0.04, 0.06, 0, 1, 1, 1), 0xd09a30);
+  // крылья, хвостовые перья, бородка, глаза
+  const dk = new THREE.Color(col).multiplyScalar(0.78).getHex();
+  for (const sd of [-1, 1]) {
+    B.add(sph, M(sd * 0.1, 0.22, -0.01, 0.03, 0.08, 0.13, -0.15), dk);
+    B.add(sph, M(sd * 0.05, hy + 0.01, hz + 0.035, 0.009, 0.009, 0.009), 0x141010);
+  }
+  for (let k = 0; k < 3; k++) B.add(sph, M((k - 1) * 0.035, 0.32 + k % 2 * 0.02, -0.17, 0.02, 0.1, 0.035, -0.9 + (k - 1) * 0.15), k === 1 ? dk : col);
+  B.add(sph, M(0, hy - 0.05, hz + 0.045, 0.012, 0.022, 0.012), 0xc0201a);
 }
 
 // Плющ: веточки и листья-карточки, растущие по стене пятном от земли вверх

@@ -215,6 +215,41 @@ export function createLife3(scene, ctx, village, walls) {
     upd.push((t) => { poolMat.uniforms.uT.value = t; });
   }
 
+  // ===================== СБОР РЫЦАРЕЙ ПРИ ШТУРМЕ =====================
+  // по тревоге рыцари и стражники выходят из казармы и строятся у ворот,
+  // когда штурм кончается — возвращаются обратно
+  {
+    const bar = b('barracks'), fb = new Frame(bar);
+    const muster = [];
+    const roles = ['knight', 'knight', 'knight', 'guard', 'guard', 'guard', 'knight', 'guard'];
+    roles.forEach((role, k) => {
+      const door = fb.p(k % 2 ? 3.6 : -3.6, 0, bar.W / 2 + 1.2);
+      const mid = fb.p((k % 2 ? 3.6 : -3.6) * 0.5, 0, bar.W / 2 + 5 + (k % 4));
+      const row = Math.floor(k / 4), col = k % 4;
+      const end = new V3(-2.6 + col * 1.9, 0, 22.6 + row * 1.5); // строй во дворе перед воротами
+      const lag = k * 0.9;
+      const w = makeWalker(scene, (B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role, seed: 900 + k, item: role === 'guard' ? 'spear' : 'sword' }),
+        [door, mid, end], {
+          loop: false, speed: 1.6, stride: 1.5, s0: 0,
+          hold: (sv, dir, tot) => {
+            const on = out.siege && out.siege.active;
+            if (on) return (dir > 0 && sv >= tot - 0.05) || (dir > 0 && out.alarmT < lag); // по одному, с задержкой
+            return dir > 0 && sv <= 0.05;
+          },
+        });
+      w.mesh.userData.night = undefined;
+      movers.push(w);
+      muster.push(w);
+    });
+    out.alarmT = 0;
+    upd.push((t, dt) => {
+      const on = out.siege && out.siege.active;
+      out.alarmT = on ? out.alarmT + dt : 0;
+      // стоящие у казармы рыцари видны только во время тревоги и на пути туда-обратно
+      for (const w of muster) w.mesh.userData.night = on || w.mesh.position.distanceTo(w.home || (w.home = w.mesh.position.clone())) > 0.3 ? undefined : false;
+    });
+  }
+
   // =========================== УЧЕНИЯ СТРАЖИ ===========================
   {
     // двое бьются на мечах

@@ -130,7 +130,7 @@ export function createCameraControls(camera, dom, terrain) {
     if (keys.has('KeyS') || keys.has('ArrowDown')) want.sub(fwd);
     if (keys.has('KeyD') || keys.has('ArrowRight')) want.add(right);
     if (keys.has('KeyA') || keys.has('ArrowLeft')) want.sub(right);
-    if (keys.has('Space') || keys.has('KeyE')) want.y += 1;
+    if (keys.has('Space')) want.y += 1; // E теперь открывает двери
     if (keys.has('KeyC') || keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyQ')) want.y -= 1;
     if (want.lengthSq() > 0) want.normalize();
     const boost = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4 : 1;

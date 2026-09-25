@@ -9,7 +9,7 @@ import { riverInfo } from './terrain.js';
 import { riverZ, RIVER } from './layout.js';
 import { pbrMaterial, materialTextures, macroNoiseTexture } from './textures.js';
 import { AUTUMN, addWeathering } from './materials.js';
-import { Frame, Smoke, haystack, strawMaterial, plankDoor, buildBarrels, cart } from './courtyard.js';
+import { Frame, Smoke, haystack, strawMaterial, plankDoor, buildBarrels, cart, INTERIORS } from './courtyard.js';
 import { mulberry32, createNoise2D } from './noise.js';
 
 const V3 = THREE.Vector3;
@@ -138,7 +138,11 @@ function peasantHouse(B, terrain, x, z, yaw, L, W, rnd) {
     }
   };
   const ridge = eaveY + hw * pitch;
-  face(-hl, hw, hl, hw, f.N.clone(), floorY, eaveY, eaveY);
+  const doorX = (rnd() - 0.5) * (L - 3), DW = 0.95, DH = 1.95;
+  // фасад с дверным проёмом: слева, справа и над дверью
+  face(-hl, hw, doorX - DW / 2, hw, f.N.clone(), floorY, eaveY, eaveY);
+  face(doorX + DW / 2, hw, hl, hw, f.N.clone(), floorY, eaveY, eaveY);
+  face(doorX - DW / 2, hw, doorX + DW / 2, hw, f.N.clone(), floorY + DH, eaveY, eaveY);
   face(hl, -hw, -hl, -hw, f.N.clone().negate(), floorY, eaveY, eaveY);
   face(hl, hw, hl, -hw, f.X.clone(), floorY, eaveY, eaveY, ridge);
   face(-hl, -hw, -hl, hw, f.X.clone().negate(), floorY, eaveY, eaveY, ridge);
@@ -159,17 +163,24 @@ function peasantHouse(B, terrain, x, z, yaw, L, W, rnd) {
     { a: [-hl, -hw], b: [-hl, hw], n: f.X.clone().negate() },
   ];
   for (const w of walls) {
+    const front = w === walls[0];
     const o = 0.05;
     const P = (lx, lz, y) => f.p(lx, y, lz).addScaledVector(w.n, o);
     const [ax, az] = w.a, [bx, bz] = w.b;
     const len = Math.hypot(bx - ax, bz - az);
     beam(P(ax, az, floorY + 0.08), P(bx, bz, floorY + 0.08), 0.1);
     beam(P(ax, az, eaveY - 0.08), P(bx, bz, eaveY - 0.08), 0.1);
-    beam(P(ax, az, floorY + 1.15), P(bx, bz, floorY + 1.15), 0.07);
+    if (front) { // ригель прерывается у двери, по краям проёма — стойки и перемычка
+      beam(P(ax, az, floorY + 1.15), P(doorX - DW / 2 - 0.08, az, floorY + 1.15), 0.07);
+      beam(P(doorX + DW / 2 + 0.08, az, floorY + 1.15), P(bx, bz, floorY + 1.15), 0.07);
+      for (const sd of [-1, 1]) beam(P(doorX + sd * (DW / 2 + 0.06), az, floorY + 0.1), P(doorX + sd * (DW / 2 + 0.06), az, eaveY - 0.1), 0.07);
+      beam(P(doorX - DW / 2 - 0.1, az, floorY + DH + 0.06), P(doorX + DW / 2 + 0.1, az, floorY + DH + 0.06), 0.07);
+    } else beam(P(ax, az, floorY + 1.15), P(bx, bz, floorY + 1.15), 0.07);
     const posts = Math.max(2, Math.round(len / 1.6));
     for (let k = 0; k <= posts; k++) {
       const t = k / posts;
       const lx = ax + (bx - ax) * t, lz = az + (bz - az) * t;
+      if (front && Math.abs(lx - doorX) < DW / 2 + 0.15) continue;
       beam(P(lx, lz, floorY + 0.1), P(lx, lz, eaveY - 0.1), 0.08);
     }
     // угловые раскосы
@@ -178,8 +189,7 @@ function peasantHouse(B, terrain, x, z, yaw, L, W, rnd) {
     beam(P(bx, bz, floorY + 0.15), P(bx - (bx - ax) * t1, bz - (bz - az) * t1, floorY + 1.1), 0.06);
   }
   // дверь и окна со ставнями на фасаде
-  const doorX = (rnd() - 0.5) * (L - 3);
-  plankDoor(W8, B.metal, f.p(doorX, 0, hw + 0.04), f.N, floorY, 0.95, 1.95);
+  plankDoor(W8, B.metal, f.p(doorX, 0, hw + 0.04), f.N, floorY, DW, DH, -1);
   B.stone.box(f.p(doorX, floorY - 0.12, hw + 0.4), f.X, UP, f.N, 0.6, 0.12, 0.3); // ступень
   for (const wx of [doorX > 0 ? doorX - 2.1 : doorX + 2.1]) {
     if (Math.abs(wx) > hl - 0.6) continue;
@@ -194,6 +204,7 @@ function peasantHouse(B, terrain, x, z, yaw, L, W, rnd) {
     }
   }
   const top = thatchRoof(B.thatch, W8, f, L, W, eaveY, pitch);
+  INTERIORS.push({ id: 'house', f, L, W, floorY, eaveY, ridgeY: ridge, roof: 'gable', pitch, daub: true, doors: [{ lx: doorX, w: DW, h: DH }], seed: Math.floor(rnd() * 1000) });
   return { f, floorY, ridge: top, L, W };
 }
 
@@ -276,11 +287,23 @@ function watermill(B, scene, terrain, xRiver, rnd) {
   const hl = L / 2, hw = W / 2, pitch = 1.3;
   const ridge = eaveY + hw * pitch;
   faceQ(-hl, hw, hl, hw, f.N.clone(), eaveY);
-  faceQ(hl, -hw, -hl, -hw, f.N.clone().negate(), eaveY);
+  // задняя стена с дверным проёмом (lx = −1.5)
+  {
+    const nB = f.N.clone().negate();
+    const q = (x0, x1, y0, y1) => {
+      const p0 = f.p(x0, y0, -hw), p1 = f.p(x1, y0, -hw), p2 = f.p(x1, y1, -hw), p3 = f.p(x0, y1, -hw);
+      B.stoneMill.quad(p0, p1, p2, p3, nB, [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], [0, 0, 9, 9]);
+    };
+    q(-hl, -2.05, baseY, eaveY); q(-0.95, hl, baseY, eaveY);
+    q(-2.05, -0.95, baseY, floorY); q(-2.05, -0.95, floorY + 2.1, eaveY);
+    for (const sd of [-1, 1]) B.stoneMill.box(f.p(-1.5 + sd * 0.57, floorY + 1.05, -hw + 0.25), f.X, UP, f.N, 0.02, 1.05, 0.25);
+    B.stoneMill.box(f.p(-1.5, floorY + 2.12, -hw + 0.25), f.X, UP, f.N, 0.59, 0.02, 0.25);
+  }
   faceQ(hl, hw, hl, -hw, f.X.clone(), eaveY, ridge);
   faceQ(-hl, -hw, -hl, hw, f.X.clone().negate(), eaveY, ridge);
   thatchRoof(B.thatch, B.wood, f, L, W, eaveY, pitch);
-  plankDoor(B.wood, B.metal, f.p(-1.5, 0, -hw - 0.04), f.N.clone().negate(), floorY, 1.1, 2.1);
+  plankDoor(B.wood, B.metal, f.p(-1.5, 0, -hw - 0.04), f.N.clone().negate(), floorY, 1.1, 2.1, 1);
+  INTERIORS.push({ id: 'mill', f, L, W, floorY, eaveY, ridgeY: ridge, roof: 'gable', pitch, doors: [], backDoor: { lx: -1.5, w: 1.1, h: 2.1 } });
   // колесо
   const R = 2.7, width = 1.0;
   const wheelC = f.p(1.2, RIVER.waterLevel + R - 0.45, hw + width / 2 + 0.5);

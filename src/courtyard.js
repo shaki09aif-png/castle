@@ -4,6 +4,7 @@
 // ящики, телеги, сено, стойки с копьями, мишени; мощение двора булыжником.
 import * as THREE from 'three';
 import { addWeathering } from './materials.js';
+import { beginDoor, endDoor } from './doors.js';
 import { BUILDINGS, WELL, KEEP, GATEHOUSE, GATE_PASSAGE, insideBuilding, insideTower } from './layout.js';
 import { GeoBuilder } from './walls.js';
 import {
@@ -23,6 +24,9 @@ const UP = new V3(0, 1, 0);
 // ---------------------------------------------------------------------------
 // Размеры большого зала (нужны для интерьера)
 export const HALL = {};
+// Здания с интерьером: рамка, уровень пола, высота стен, двери (для interiors.js)
+export const INTERIORS = [];
+const leafH = (w, h) => (h - 0.866 * w) + 0.45 * 0.866 * w; // высота открывающегося полотна у door()
 
 export class Frame {
   constructor(b) {
@@ -136,7 +140,7 @@ function leanRoof(roofB, woodB, f, L, W, backY, frontY, photo, over = 0.5) {
 // Каменная коробка: стены, цоколь, угловые камни (руст), фронтоны
 // roof: 'gable' (конёк вдоль lx, фронтоны на торцах) или 'lean' (высокая задняя стена)
 // ---------------------------------------------------------------------------
-export function stoneBox(stone, f, L, W, floorY, baseY, eaveY, roofType, pitch, backY) {
+export function stoneBox(stone, f, L, W, floorY, baseY, eaveY, roofType, pitch, backY, holes = []) {
   const face = (lx0, lz0, lx1, lz1, n, yTop0, yTop1) => {
     const p0 = f.p(lx0, baseY, lz0), p1 = f.p(lx1, baseY, lz1);
     const p2 = f.p(lx1, yTop1, lz1), p3 = f.p(lx0, yTop0, lz0);
@@ -146,7 +150,29 @@ export function stoneBox(stone, f, L, W, floorY, baseY, eaveY, roofType, pitch, 
   };
   const hw = W / 2, hl = L / 2;
   const yF = eaveY, yB = roofType === 'lean' ? backY : eaveY;
-  face(-hl, hw, hl, hw, f.N.clone(), yF, yF); // фасад
+  // фасад — с проёмами под открывающиеся двери
+  if (!holes.length) face(-hl, hw, hl, hw, f.N.clone(), yF, yF);
+  else {
+    const rect = (x0, x1, y0, y1) => {
+      if (x1 - x0 < 0.005 || y1 - y0 < 0.005) return;
+      const p0 = f.p(x0, y0, hw), p1 = f.p(x1, y0, hw), p2 = f.p(x1, y1, hw), p3 = f.p(x0, y1, hw);
+      const u0 = x0 * f.X.x + hw * f.N.x + f.C.x * 0.3 + (x0 + hl), u1 = u0 + (x1 - x0);
+      stone.quad(p0, p1, p2, p3, f.N.clone(), [[u0, y0], [u1, y0], [u1, y1], [u0, y1]], [y0 - floorY, y0 - floorY, y1 - floorY, y1 - floorY]);
+    };
+    const hs = [...holes].sort((a, b) => a.lx - b.lx);
+    let x = -hl;
+    for (const h of hs) {
+      const a = h.lx - h.w / 2, b = h.lx + h.w / 2;
+      rect(x, a, baseY, yF);
+      rect(a, b, baseY, floorY);
+      rect(a, b, floorY + h.h, yF);
+      // откосы проёма: толщина стены видна, когда дверь открыта
+      for (const sd of [-1, 1]) stone.box(f.p(h.lx + sd * (h.w / 2 + 0.02), floorY + h.h / 2, hw - 0.25), f.X, UP, f.N, 0.02, h.h / 2, 0.25);
+      stone.box(f.p(h.lx, floorY + h.h + 0.02, hw - 0.25), f.X, UP, f.N, h.w / 2 + 0.04, 0.02, 0.25);
+      x = b;
+    }
+    rect(x, hl, baseY, yF);
+  }
   face(hl, -hw, -hl, -hw, f.N.clone().negate(), yB, yB); // задняя
   face(hl, hw, hl, -hw, f.X.clone(), yF, yB); // торец +
   face(-hl, -hw, -hl, hw, f.X.clone().negate(), yB, yF); // торец −
@@ -329,22 +355,32 @@ export class Smoke {
 // ---------------------------------------------------------------------------
 // Простые деревянные изделия
 // ---------------------------------------------------------------------------
-export function plankDoor(wood, metal, p, n, y0, w, h) {
+export function plankDoor(wood, metal, p, n, y0, w, h, hingeSide = 0) {
   const t = new V3().crossVectors(UP, n).normalize();
+  // hingeSide: −1 / +1 — дверь открывается (петли на этом краю), 0 — неподвижная
+  const leaf = hingeSide ? beginDoor(wood.tile, p.clone().addScaledVector(t, hingeSide * w / 2).addScaledVector(n, 0.02).setY(y0), n, w, h, -hingeSide) : null;
+  const LW = leaf ? leaf.wood : wood, LM = leaf ? leaf.metal : metal;
   const k = Math.max(3, Math.round(w / 0.28));
   for (let i = 0; i < k; i++) {
     const c = p.clone().addScaledVector(t, -w / 2 + (i + 0.5) * (w / k)).addScaledVector(n, 0.05);
-    wood.box(c.setY(y0 + h / 2), UP, t, n, h / 2, w / k / 2 - 0.006, 0.035, { grain: true });
+    LW.box(c.setY(y0 + h / 2), UP, t, n, h / 2, w / k / 2 - 0.006, 0.035, { grain: true });
   }
   for (const yy of [0.35, h - 0.35]) {
     const c = p.clone().addScaledVector(n, 0.1).setY(y0 + yy);
-    metal.box(c, t, UP, n, w / 2 - 0.05, 0.035, 0.01);
-    metal.box(c.clone().addScaledVector(t, -w / 2 + 0.12), t, UP, n, 0.14, 0.05, 0.02);
+    LM.box(c, t, UP, n, w / 2 - 0.05, 0.035, 0.01);
+    LM.box(c.clone().addScaledVector(t, (hingeSide || -1) * (w / 2 - 0.12)), t, UP, n, 0.14, 0.05, 0.02);
+    for (let j = 0; j < 4; j++) LM.box(c.clone().addScaledVector(t, -w / 2 + 0.15 + j * (w - 0.3) / 3).addScaledVector(n, 0.012), t, UP, n, 0.016, 0.016, 0.012); // заклёпки
+  }
+  if (leaf) {
+    // ручка-кольцо у свободного края
+    const rp = p.clone().addScaledVector(t, -(hingeSide) * (w / 2 - 0.15)).addScaledVector(n, 0.11).setY(y0 + h * 0.48);
+    LM.addGeometry(new THREE.TorusGeometry(0.06, 0.01, 5, 12), new THREE.Matrix4().makeBasis(t, UP, n).setPosition(rp.x, rp.y, rp.z));
+    endDoor(leaf.d);
   }
 }
 
 // Деревянный навес/сарай: столбы, обвязки, дощатые стены (фасад по желанию открыт)
-function timberShed(wood, f, L, W, floorY, backY, frontY, { openFront = true, sides = true } = {}) {
+function timberShed(wood, f, L, W, floorY, backY, frontY, { openFront = true, sides = true, holes = [] } = {}) {
   const hw = W / 2, hl = L / 2;
   const bays = Math.max(2, Math.round(L / 2.6));
   const yAt = (lz) => frontY + (backY - frontY) * ((hw - lz) / W);
@@ -370,13 +406,20 @@ function timberShed(wood, f, L, W, floorY, backY, frontY, { openFront = true, si
   // верхние обвязки
   for (const lz of [hw - 0.12, -hw + 0.12]) wood.box(f.p(0, yAt(lz) - 0.1, lz), f.X, UP, f.N, hl + 0.12, 0.1, 0.12, { grain: true });
   // дощатые стены: задняя и торцы (вертикальные доски)
-  const planks = (a0, a1, lz0, lz1, topFn) => {
+  const planks = (a0, a1, lz0, lz1, topFn, hl2 = []) => {
     const len = Math.hypot(a1 - a0, lz1 - lz0);
     const n = Math.ceil(len / 0.3);
     for (let k = 0; k < n; k++) {
       const s = (k + 0.5) / n;
       const lx = a0 + (a1 - a0) * s, lz = lz0 + (lz1 - lz0) * s;
       const top = topFn(lz) - 0.05;
+      const hole = hl2.find((h) => Math.abs(lx - h.lx) < h.w / 2 + 0.1);
+      if (hole) { // над дверным проёмом — короткая доска
+        const t2 = f.d(a1 - a0, 0, lz1 - lz0), n2 = new V3().crossVectors(UP, t2).normalize();
+        const y0 = floorY + hole.h + 0.02;
+        if (top > y0) wood.box(f.p(lx, (y0 + top) / 2, lz), UP, t2, n2, (top - y0) / 2, len / n / 2 - 0.008, 0.025, { grain: true });
+        continue;
+      }
       const tang = f.d(a1 - a0, 0, lz1 - lz0);
       const nrm = new V3().crossVectors(UP, tang).normalize();
       wood.box(f.p(lx, (floorY + top) / 2, lz), UP, tang, nrm, (top - floorY) / 2, len / n / 2 - 0.008, 0.025, { grain: true });
@@ -387,7 +430,14 @@ function timberShed(wood, f, L, W, floorY, backY, frontY, { openFront = true, si
     planks(-hl + 0.02, -hl + 0.02, -hw, hw, yAt);
     planks(hl - 0.02, hl - 0.02, -hw, hw, yAt);
   }
-  if (!openFront) planks(-hl, hl, hw - 0.02, hw - 0.02, yAt);
+  if (!openFront) {
+    planks(-hl, hl, hw - 0.02, hw - 0.02, yAt, holes);
+    // косяки и перемычка дверного проёма
+    for (const h of holes) {
+      for (const sd of [-1, 1]) wood.box(f.p(h.lx + sd * (h.w / 2 + 0.07), floorY + h.h / 2, hw - 0.02), UP, f.X, f.N, h.h / 2 + 0.05, 0.07, 0.07, { grain: true });
+      wood.box(f.p(h.lx, floorY + h.h + 0.07, hw - 0.02), f.X, UP, f.N, h.w / 2 + 0.14, 0.07, 0.08, { grain: true });
+    }
+  }
 }
 
 // Бочка: профиль вращения с обручами
@@ -465,7 +515,7 @@ export function createCourtyard(scene, terrain, walls) {
     const { lo, hi } = groundRange(terrain, f, b.L, b.W);
     const floorY = hi + 0.9, baseY = lo - 0.6;
     const eaveY = floorY + 7.2, pitch = 1.35;
-    stoneBox(stone, f, b.L, b.W, floorY, baseY, eaveY, 'gable', pitch);
+    stoneBox(stone, f, b.L, b.W, floorY, baseY, eaveY, 'gable', pitch, 0, [{ lx: 6.4, w: 1.5, h: leafH(1.5, 3.0) }]);
     const ridge = gableRoof(roof, wood, f, b.L, b.W, eaveY, pitch, photo, 0.6, 0.35);
     const hw = b.W / 2;
     Object.assign(HALL, { b, f, floorY, eaveY, pitch, ridge });
@@ -478,7 +528,7 @@ export function createCourtyard(scene, terrain, walls) {
     });
     // вход: дверь, ступени, окно-розетка над дверью
     const dx = 6.4;
-    door(stone, wood, metal, f.p(dx, 0, hw), f.N, floorY, 1.5, 3.0);
+    door(stone, wood, metal, f.p(dx, 0, hw), f.N, floorY, 1.5, 3.0, true);
     const steps = Math.ceil((floorY - (terrain.heightAt(f.p(dx, 0, hw + 2).x, f.p(dx, 0, hw + 2).z))) / 0.2);
     for (let k = 0; k < steps; k++) {
       const y = floorY - k * 0.2;
@@ -520,7 +570,8 @@ export function createCourtyard(scene, terrain, walls) {
     const { lo, hi } = groundRange(terrain, f, b.L + 4, b.W);
     const floorY = hi + 0.35, baseY = lo - 0.6;
     const eaveY = floorY + 6.2, pitch = 1.2;
-    stoneBox(stone, f, b.L, b.W, floorY, baseY, eaveY, 'gable', pitch);
+    stoneBox(stone, f, b.L, b.W, floorY, baseY, eaveY, 'gable', pitch, 0, [{ lx: -4.6, w: 1.3, h: leafH(1.3, 2.7) }]);
+    INTERIORS.push({ id: 'chapel', f, L: b.L, W: b.W, floorY, eaveY, roof: 'gable', pitch, doors: [{ lx: -4.6, w: 1.3, h: leafH(1.3, 2.7) }] });
     gableRoof(roof, wood, f, b.L, b.W, eaveY, pitch, photo, 0.5, 0.3);
     const hw = b.W / 2;
     // южный фасад: контрфорсы и витражи
@@ -538,7 +589,7 @@ export function createCourtyard(scene, terrain, walls) {
     stone.box(cp, f.X, UP, f.N, 0.12, 0.6, 0.12);
     stone.box(cp.clone().addScaledVector(UP, 0.2), f.X, UP, f.N, 0.12, 0.12, 0.42);
     // вход в южной стене у колокольни
-    door(stone, wood, metal, f.p(-4.6, 0, hw), f.N, floorY, 1.3, 2.7);
+    door(stone, wood, metal, f.p(-4.6, 0, hw), f.N, floorY, 1.3, 2.7, true);
     for (let k = 0; k < 3; k++) {
       const p = f.p(-4.6, 0, hw + 0.3 + k * 0.32);
       stone.box(new V3(p.x, floorY - 0.1 - k * 0.12 - 0.3, p.z), f.X, UP, f.N, 1.1, 0.3, 0.17);
@@ -600,10 +651,11 @@ export function createCourtyard(scene, terrain, walls) {
     const { lo, hi } = groundRange(terrain, f, b.L, b.W);
     const floorY = hi + 0.2, baseY = lo - 0.6;
     const eaveY = floorY + 4.6, pitch = 1.1;
-    stoneBox(stone, f, b.L, b.W, floorY, baseY, eaveY, 'gable', pitch);
+    stoneBox(stone, f, b.L, b.W, floorY, baseY, eaveY, 'gable', pitch, 0, [{ lx: -1.4, w: 1.2, h: leafH(1.2, 2.6) }]);
+    INTERIORS.push({ id: 'kitchen', f, L: b.L, W: b.W, floorY, eaveY, roof: 'gable', pitch, doors: [{ lx: -1.4, w: 1.2, h: leafH(1.2, 2.6) }] });
     const ridge = gableRoof(roof, wood, f, b.L, b.W, eaveY, pitch, photo);
     const hw = b.W / 2;
-    door(stone, wood, metal, f.p(-1.4, 0, hw), f.N, floorY, 1.2, 2.3);
+    door(stone, wood, metal, f.p(-1.4, 0, hw), f.N, floorY, 1.2, 2.6, true);
     doors.push(f.p(-1.4, 0, hw + 1.5));
     windowWithShutters(stone, wood, dark, metal, f.p(1.8, 0, hw), f.N, floorY + 2.0, 0.7, 0.9, 1.9);
     // большая труба на торце: очаг внутри на всю ширину
@@ -637,11 +689,13 @@ export function createCourtyard(scene, terrain, walls) {
     const { lo, hi } = groundRange(terrain, f, b.L, b.W);
     const floorY = hi + 0.2, baseY = lo - 0.6;
     const frontY = floorY + 4.2, backY = floorY + 6.4;
-    stoneBox(stone, f, b.L, b.W, floorY, baseY, frontY, 'lean', 0, backY);
+    const bd = [-3.6, 3.6].map((lx) => ({ lx, w: 1.1, h: leafH(1.1, 2.6) }));
+    stoneBox(stone, f, b.L, b.W, floorY, baseY, frontY, 'lean', 0, backY, bd);
+    INTERIORS.push({ id: 'barracks', f, L: b.L, W: b.W, floorY, eaveY: frontY, backY, roof: 'lean', doors: bd });
     leanRoof(roof, wood, f, b.L, b.W, backY, frontY, photo);
     const hw = b.W / 2;
     for (const lx of [-3.6, 3.6]) {
-      door(stone, wood, metal, f.p(lx, 0, hw), f.N, floorY, 1.1, 2.2);
+      door(stone, wood, metal, f.p(lx, 0, hw), f.N, floorY, 1.1, 2.6, true);
       doors.push(f.p(lx, 0, hw + 1.4));
     }
     for (const lx of [-5.2, -1.2, 1.2, 5.2]) windowWithShutters(stone, wood, dark, metal, f.p(lx, 0, hw), f.N, floorY + 2.4, 0.55, 0.8, 1.8);
@@ -655,10 +709,11 @@ export function createCourtyard(scene, terrain, walls) {
     const { lo, hi } = groundRange(terrain, f, b.L, b.W);
     const floorY = hi + 0.15, baseY = lo - 0.4;
     stone.box(f.p(0, (baseY + floorY) / 2, 0), f.X, UP, f.N, b.L / 2 + 0.1, (floorY - baseY) / 2, b.W / 2 + 0.1);
-    timberShed(wood, f, b.L, b.W, floorY, floorY + 5.2, floorY + 3.6, { openFront: false });
+    timberShed(wood, f, b.L, b.W, floorY, floorY + 5.2, floorY + 3.6, { openFront: false, holes: [{ lx: 0, w: 2.95, h: 2.6 }] });
     leanRoof(shingleB, wood, f, b.L, b.W, floorY + 5.2, floorY + 3.6, false);
-    // двустворчатая дверь
-    for (const sd of [-1, 1]) plankDoor(wood, metal, f.p(sd * 0.75, 0, b.W / 2), f.N, floorY, 1.45, 2.6);
+    // двустворчатая дверь (створки на петлях у краёв)
+    for (const sd of [-1, 1]) plankDoor(wood, metal, f.p(sd * 0.75, 0, b.W / 2), f.N, floorY, 1.45, 2.6, sd);
+    INTERIORS.push({ id: 'store', f, L: b.L, W: b.W, floorY, eaveY: floorY + 3.6, backY: floorY + 5.2, roof: 'lean', timber: true, doors: [{ lx: 0, w: 2.95, h: 2.6 }] });
     doors.push(f.p(0, 0, b.W / 2 + 1.6));
   }
 
@@ -779,9 +834,10 @@ export function createCourtyard(scene, terrain, walls) {
       }
     }
     wood.box(f.p(0, floorY + 0.05, 0), f.X, UP, f.N, b.L / 2, 0.08, b.W / 2, { grain: true });
-    timberShed(wood, f, b.L, b.W, floorY + 0.1, floorY + 4.6, floorY + 3.3, { openFront: false });
+    timberShed(wood, f, b.L, b.W, floorY + 0.1, floorY + 4.6, floorY + 3.3, { openFront: false, holes: [{ lx: 0, w: 1.3, h: 2.2 }] });
     leanRoof(shingleB, wood, f, b.L, b.W, floorY + 4.6, floorY + 3.3, false);
-    plankDoor(wood, metal, f.p(0, 0, b.W / 2), f.N, floorY + 0.12, 1.3, 2.2);
+    plankDoor(wood, metal, f.p(0, 0, b.W / 2), f.N, floorY + 0.12, 1.3, 2.2, -1);
+    INTERIORS.push({ id: 'granary', f, L: b.L, W: b.W, floorY: floorY + 0.13, eaveY: floorY + 3.3, backY: floorY + 4.6, roof: 'lean', timber: true, doors: [{ lx: 0, w: 1.3, h: 2.2 }] });
     // деревянные ступени
     for (let k = 0; k < 4; k++) wood.box(f.p(0, floorY - 0.1 - k * 0.22, b.W / 2 + 0.3 + k * 0.28), f.X, UP, f.N, 0.7, 0.04, 0.15, { grain: true });
     doors.push(f.p(0, 0, b.W / 2 + 1.8));

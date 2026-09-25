@@ -83,6 +83,11 @@
       @media (max-width: 900px) { #help { display: none; } }
       /* скрытый интерфейс: остаётся только маленькая кнопка-глаз */
       body.ui-hidden #help, body.ui-hidden #tour, body.ui-hidden #caption { display: none !important; }
+      #door-hint {
+        position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); display: none; pointer-events: none; z-index: 6;
+        color: #fff; font-size: 15px; padding: 6px 14px; border-radius: 16px; background: rgba(20, 16, 12, 0.6); border: 1px solid rgba(255, 217, 138, 0.4);
+      }
+      #door-hint.show { display: block; }
       #ui-toggle {
         position: fixed; right: 12px; top: 10px; z-index: 6; width: 34px; height: 34px; border-radius: 17px; cursor: pointer;
         border: 1px solid rgba(233, 220, 192, 0.3); background: rgba(20, 16, 12, 0.55); color: #f3ead6; font-size: 17px; line-height: 1;
@@ -103,7 +108,7 @@
         <b>ЛКМ</b> — вращение · <b>колесо</b> — приближение<br />
         <b>ПКМ</b> — сдвиг камеры<br />
         <b>F</b> — свободный полёт<br />
-        <b>1–0</b>, <b>← →</b> — точки экскурсии · <b>T</b> — экскурсия для доклада, <b>Shift+T</b> — все точки<br />
+        <b>E</b> — открыть дверь рядом · <b>1–0</b>, <b>← →</b> — точки экскурсии · <b>T</b> — экскурсия для доклада, <b>Shift+T</b> — все точки<br />
         <b>N</b> — время суток · <b>G</b> — ворота<br />
         <b>P</b> — погода · <b>B</b> — штурм
       </div>

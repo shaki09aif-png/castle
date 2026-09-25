@@ -967,11 +967,17 @@ function createCountryLife(scene, ctx, village) {
     for (let i = 0; i < 5; i++) {
       const w = makeWalker(scene, (B) => {
         B.curLimb = [0, 0];
-        B.add(GEO.sph, M(0, 0.32, 0, 0, 0.17, 0.16, 0.28), 0xf0ece4);
-        B.add(GEO.cyl, M(0, 0.5, 0.2, 0, 0.045, 0.3, 0.045, -0.35), 0xf0ece4);
-        B.add(GEO.sph, M(0, 0.66, 0.27, 0, 0.065, 0.06, 0.08), 0xf0ece4);
+        const grey = i % 3 === 2;
+        const wc = grey ? 0x8a8a84 : 0xf0ece4, wd = grey ? 0x6a6a64 : 0xd8d2c6;
+        B.add(GEO.sph, M(0, 0.32, 0, 0, 0.17, 0.16, 0.28), wc);
+        for (const sd of [-1, 1]) B.add(GEO.sph, M(sd * 0.13, 0.36, -0.03, 0, 0.05, 0.1, 0.24, -0.15), wd); // сложенные крылья
+        B.add(GEO.cone, M(0, 0.4, -0.3, 0, 0.08, 0.14, 0.05, -1.2), wd); // хвост
+        B.add(GEO.cyl, M(0, 0.5, 0.2, 0, 0.045, 0.3, 0.045, -0.35), wc);
+        B.add(GEO.sph, M(0, 0.66, 0.27, 0, 0.065, 0.06, 0.08), wc);
         B.add(GEO.cone, M(0, 0.65, 0.37, 0, 0.025, 0.09, 0.025, Math.PI / 2), 0xe08a20);
-        for (const sd of [-1, 1]) { B.curLimb = [sd, 0.18]; B.add(GEO.cylLo, M(sd * 0.06, 0.09, 0, 0, 0.012, 0.18, 0.012), 0xe08a20); }
+        B.add(GEO.sph, M(0, 0.66, 0.335, 0, 0.022, 0.02, 0.02), 0xe08a20); // шишка у клюва
+        for (const sd of [-1, 1]) B.add(GEO.sph, M(sd * 0.04, 0.68, 0.3, 0, 0.01, 0.01, 0.01), 0x141010);
+        for (const sd of [-1, 1]) { B.curLimb = [sd, 0.18]; B.add(GEO.cylLo, M(sd * 0.06, 0.09, 0, 0, 0.012, 0.18, 0.012), 0xe08a20); B.add(GEO.box, M(sd * 0.06, 0.008, 0.04, 0, 0.07, 0.012, 0.09), 0xe08a20); }
         B.curLimb = [0, 0];
       }, ring, { speed: 0.35, stride: 0.25, amp: 0.4 });
       movers.push({ w });
@@ -1359,6 +1365,7 @@ export function createExtras(scene, terrain, walls, village) {
     scene.add(rm);
   }
   const siege = createSiege(scene, ctx, walls, terrain, { wood: walls.woodMaterial, iron });
+  life3.siege = siege;
   const windows = createWindowLights(scene);
   // люди разбиты на группы по местам: далёкие группы не рисуются (меньше треугольников)
   const anchors = [new V3(0, 0, 0)];

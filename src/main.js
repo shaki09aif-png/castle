@@ -23,6 +23,10 @@ import { createExtras } from './extras.js';
 import { createWeather, WIND_K } from './weather.js';
 import { SMOKE_WIND } from './courtyard.js';
 import { createLabels } from './labels.js';
+import { createInteriors } from './interiors.js';
+import { createDoors } from './doors.js';
+import { pbrMaterial } from './textures.js';
+import { addWeathering } from './materials.js';
 import { SWAY_TIME } from './people.js';
 import { FOLIAGE_SUN } from './vegetation.js';
 import { SUN_DIR } from './lighting.js';
@@ -132,6 +136,10 @@ async function init() {
     excludeTrees: (x, z) => village.exclude(x, z) > 0 || campEx(x, z) > 0,
     extraTrees: details.extraTrees,
   });
+  // интерьеры построек и открывающиеся двери (E)
+  const interiors = createInteriors(scene, walls);
+  const doors = createDoors(scene, addWeathering(pbrMaterial('wood', { color: 0x8a7a68 }), 'wood'),
+    new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 }), camera);
   if (Q.lambert) toLambert(scene);
   await step('постобработка');
   const direct = { setSize() {}, render() { renderer.render(scene, camera); } };
@@ -308,6 +316,8 @@ async function init() {
     details.update(t);
     torches.update(t);
     extras.update(t, dt, camera);
+    interiors.update(camera);
+    doors.update(Math.min(dt, 0.1));
     weather.update(t, Math.min(dt, 0.1), camera);
     SWAY_TIME.value = t;
     FLAG_TIME.value = flagT;
@@ -331,7 +341,7 @@ async function init() {
 
   // доступ из консоли браузера для отладки
   window.castle = {
-    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, weather, terrain, assets, village,
+    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, weather, terrain, assets, village, doors, interiors,
     snapshot() {
       frame();
       return renderer.domElement.toDataURL('image/jpeg', 0.9);

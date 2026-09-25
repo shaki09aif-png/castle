@@ -5,6 +5,7 @@
 // полосами и петлями, окна со ставнями.
 import * as THREE from 'three';
 import { addWeathering } from './materials.js';
+import { beginDoor, endDoor } from './doors.js';
 import { TOWERS, WALL } from './layout.js';
 import { GeoBuilder } from './walls.js';
 import { pbrMaterial, assetSource } from './textures.js';
@@ -115,34 +116,46 @@ export function arrowSlit(stone, dark, p, n, y, cross) {
 // Дверь со стрельчатым верхом: доски, железные полосы, петли, кольцо-ручка,
 // рама из тёсаного камня с клинчатой аркой
 // ---------------------------------------------------------------------------
-export function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3) {
+export function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3, openable = false) {
   const t = new V3().crossVectors(UP, n).normalize();
   const hs = h - 0.866 * w; // высота пят арки
   const archY = (x) => hs + Math.sqrt(Math.max(0, w * w - (Math.abs(x) + w / 2) ** 2)) - 0.0;
   const c = new V3(p.x, baseY, p.z).addScaledVector(n, 0.07);
+  // открывающаяся дверь: прямоугольное полотно до пят арки на петлях,
+  // над ним неподвижный дощатый тимпан; иначе — цельное стрельчатое полотно
+  const lh = hs + 0.45 * (h - hs); // высота открывающегося полотна
+  const leaf = openable ? beginDoor(wood.tile, c.clone().addScaledVector(t, -w / 2).addScaledVector(n, -0.02), n, w, lh, 1) : null;
+  const LW = leaf ? leaf.wood : wood, LM = leaf ? leaf.metal : metal;
   // доски полотна
   const planks = 5;
   for (let k = 0; k < planks; k++) {
     const x = -w / 2 + (k + 0.5) * (w / planks);
     const top = Math.min(archY(x - w / planks / 2), archY(x + w / planks / 2), archY(x));
     const pc = c.clone().addScaledVector(t, x);
-    wood.box(new V3(pc.x, baseY + top / 2, pc.z), UP, t, n, top / 2, w / planks / 2 - 0.006, 0.04, { grain: true });
+    if (leaf) {
+      const lt = Math.min(lh, top);
+      LW.box(new V3(pc.x, baseY + lt / 2, pc.z), UP, t, n, lt / 2 - 0.005, w / planks / 2 - 0.006, 0.04, { grain: true });
+      if (top > lh + 0.02) wood.box(new V3(pc.x, baseY + (lh + top) / 2 + 0.01, pc.z).addScaledVector(n, -0.03), UP, t, n, (top - lh) / 2, w / planks / 2 - 0.006, 0.03, { grain: true });
+    } else {
+      wood.box(new V3(pc.x, baseY + top / 2, pc.z), UP, t, n, top / 2, w / planks / 2 - 0.006, 0.04, { grain: true });
+    }
   }
   // железные полосы с петлями и кольцо
-  for (const y of [0.35, 1.0, hs - 0.15]) {
+  for (const y of [0.35, 1.0, (leaf ? lh : hs) - 0.15]) {
     const sc = c.clone().addScaledVector(n, 0.05);
-    metal.box(new V3(sc.x, baseY + y, sc.z), t, UP, n, w / 2 - 0.04, 0.035, 0.012);
+    LM.box(new V3(sc.x, baseY + y, sc.z), t, UP, n, w / 2 - 0.04, 0.035, 0.012);
     const hinge = sc.clone().addScaledVector(t, -w / 2 + 0.02);
-    metal.box(new V3(hinge.x, baseY + y, hinge.z), UP, t, n, 0.09, 0.035, 0.03);
+    LM.box(new V3(hinge.x, baseY + y, hinge.z), UP, t, n, 0.09, 0.035, 0.03);
     for (let k = 0; k < 5; k++) {
       const nail = sc.clone().addScaledVector(t, -w / 2 + 0.12 + k * (w - 0.24) / 4).addScaledVector(n, 0.015);
-      metal.box(new V3(nail.x, baseY + y, nail.z), t, UP, n, 0.018, 0.018, 0.012);
+      LM.box(new V3(nail.x, baseY + y, nail.z), t, UP, n, 0.018, 0.018, 0.012);
     }
   }
   const ringGeo = new THREE.TorusGeometry(0.075, 0.012, 6, 14);
   const ringPos = c.clone().addScaledVector(t, w * 0.28).addScaledVector(n, 0.08);
   const m = new THREE.Matrix4().makeBasis(t, UP, n).setPosition(ringPos.x, baseY + 1.05, ringPos.z);
-  metal.addGeometry(ringGeo, m);
+  LM.addGeometry(ringGeo, m);
+  if (leaf) endDoor(leaf.d);
   // каменная рама: косяки, клинчатая стрельчатая арка (две дуги радиусом w), порог
   const fa = stone.forceA;
   stone.forceA = 1000;
@@ -166,6 +179,7 @@ export function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3) {
   }
   stone.box(new V3(fr.x, baseY - 0.05, fr.z).addScaledVector(n, 0.1), t, UP, n, w / 2 + 0.3, 0.07, 0.25);
   stone.forceA = fa;
+  return { lh, hs };
 }
 
 // Окно со ставнями: тёмный проём, каменная рама, распахнутые деревянные ставни

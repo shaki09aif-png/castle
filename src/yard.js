@@ -261,36 +261,63 @@ function pig(colorB, x, y, z, yaw, rnd) {
   const r = M(x, y, z, yaw);
   const c = rnd() < 0.3 ? 0x5a4038 : 0xdca494;
   const sn = rnd() < 0.3 ? 0x7a5a50 : 0xc88070;
-  colorB.add(new THREE.CapsuleGeometry(0.24, 0.42, 5, 12).rotateX(Math.PI / 2), L(r, 0, 0.4, 0, 1, 0.95, 1), c);
-  colorB.add(G.sph, L(r, 0, 0.42, 0.42, 0.18, 0.17, 0.17), c);
-  colorB.add(G.cyl, L(r, 0, 0.38, 0.6, 0.075, 0.07, 0.065, Math.PI / 2), sn);
+  // туловище: округлая бочка, загривок и окорока
+  colorB.add(AG.pigBody, L(r, 0, 0.42, 0, 1, 0.95, 1), c);
+  colorB.add(G.sph, L(r, 0, 0.5, 0.18, 0.22, 0.2, 0.22), c);
+  for (const sd of [-1, 1]) colorB.add(G.sph, L(r, sd * 0.1, 0.42, -0.3, 0.14, 0.2, 0.16), c);
+  // голова: конус к пятачку, щёки, уши-лопухи, глаза, ноздри
+  colorB.add(AG.pigHead, L(r, 0, 0.42, 0.47, 1, 1, 1, Math.PI / 2 - 0.15), c);
+  colorB.add(G.cyl, L(r, 0, 0.39, 0.66, 0.068, 0.03, 0.06, Math.PI / 2 - 0.15), sn);
   for (const sd of [-1, 1]) {
-    colorB.add(G.sphLo, L(r, sd * 0.1, 0.54, 0.42, 0.06, 0.02, 0.08, 0.6, 0, sd * 0.3), c); // уши
-    colorB.add(G.sphLo, L(r, sd * 0.08, 0.46, 0.55, 0.012, 0.012, 0.012), 0x1a1410); // глаза
+    colorB.add(G.sphLo, L(r, sd * 0.022, 0.39, 0.678, 0.012, 0.018, 0.006), 0x3a2020);
+    colorB.add(AG.ear, L(r, sd * 0.1, 0.54, 0.44, 1, 1, 1, 0.9, 0, sd * 0.35), c);
+    colorB.add(G.sphLo, L(r, sd * 0.075, 0.47, 0.55, 0.014, 0.014, 0.012), 0x1a1410);
   }
+  // ноги с раздвоенными копытцами
   for (const [lx, lz] of [[-0.12, 0.28], [0.12, 0.28], [-0.12, -0.28], [0.12, -0.28]]) {
-    colorB.add(G.cylLo, L(r, lx, 0.1, lz, 0.05, 0.2, 0.05), c);
-    colorB.add(G.cylLo, L(r, lx, 0.015, lz, 0.052, 0.03, 0.052), 0x3a2a22);
+    colorB.add(AG.pigLeg, L(r, lx, 0.14, lz), c);
+    for (const s2 of [-1, 1]) colorB.add(G.box, L(r, lx + s2 * 0.018, 0.015, lz + 0.01, 0.03, 0.03, 0.06), 0x3a2a22);
   }
-  colorB.add(new THREE.TorusGeometry(0.035, 0.01, 4, 8, Math.PI * 1.6), L(r, 0, 0.47, -0.5, 1, 1, 1, 0, Math.PI / 2), c);
+  colorB.add(new THREE.TorusGeometry(0.035, 0.01, 4, 8, Math.PI * 1.6), L(r, 0, 0.5, -0.5, 1, 1, 1, 0, Math.PI / 2), c);
 }
 
-// Собака (стоит или лежит)
+// Собака (стоит или лежит): грудь шире таза, шея, морда, уши, ошейник, хвост крючком
 function dog(colorB, x, y, z, yaw, lie, rnd) {
   const r = M(x, y, z, yaw);
   const c = [0x8a6a3a, 0x3a2a1a, 0xc8b89a][Math.floor(rnd() * 3)];
-  const h = lie ? 0.16 : 0.42;
-  colorB.add(G.sph, L(r, 0, h, 0, 0.14, 0.14, 0.34), c);
-  colorB.add(G.sph, L(r, 0, h + 0.14, 0.34, 0.1, 0.1, 0.12), c);
-  colorB.add(G.box, L(r, 0, h + 0.1, 0.46, 0.07, 0.07, 0.12), c);
-  for (const s of [-1, 1]) colorB.add(G.box, L(r, s * 0.06, h + 0.2, 0.3, 0.03, 0.09, 0.04), 0x2a1e14);
-  colorB.add(G.cylLo, L(r, 0, h + 0.1, -0.4, 0.025, 0.28, 0.025, lie ? 1.5 : 0.7), c);
+  const dk = new THREE.Color(c).multiplyScalar(0.7).getHex();
+  const h = lie ? 0.16 : 0.44;
+  colorB.add(G.sph, L(r, 0, h + 0.02, 0.14, 0.15, 0.16, 0.2), c); // грудь
+  colorB.add(G.sph, L(r, 0, h, -0.16, 0.12, 0.13, 0.22), c); // таз
+  colorB.add(G.cylLo, L(r, 0, h + 0.12, 0.3, 0.07, 0.2, 0.07, 0.8), c); // шея
+  const hy = h + 0.22, hz = 0.4;
+  colorB.add(G.sph, L(r, 0, hy, hz, 0.09, 0.09, 0.1), c); // голова
+  colorB.add(AG.snout, L(r, 0, hy - 0.03, hz + 0.1, 1, 1, 1, Math.PI / 2 + 0.1), c);
+  colorB.add(G.sphLo, L(r, 0, hy - 0.02, hz + 0.19, 0.02, 0.018, 0.015), 0x141010);
+  for (const s of [-1, 1]) {
+    colorB.add(G.box, L(r, s * 0.07, hy + 0.02, hz - 0.02, 0.025, 0.1, 0.06, 0.2, s * 0.5), dk); // висячие уши
+    colorB.add(G.sphLo, L(r, s * 0.045, hy + 0.03, hz + 0.08, 0.014, 0.014, 0.01), 0x141010);
+  }
+  colorB.add(new THREE.TorusGeometry(0.075, 0.012, 4, 12), L(r, 0, h + 0.14, 0.3, 1, 1, 1, Math.PI / 2 - 0.8), 0x6a2a1a); // ошейник
+  colorB.add(new THREE.TorusGeometry(0.12, 0.018, 4, 10, Math.PI * 0.9), L(r, 0, h + 0.14, -0.36, 1, 1, 1, 0, Math.PI / 2), c, 2, y + h + 0.1); // хвост
   if (lie) {
     for (const s of [-1, 1]) colorB.add(G.cylLo, L(r, s * 0.08, 0.05, 0.35, 0.03, 0.26, 0.03, Math.PI / 2), c);
+    for (const s of [-1, 1]) colorB.add(G.sph, L(r, s * 0.1, 0.06, -0.2, 0.06, 0.05, 0.12), c);
   } else {
-    for (const [lx, lz] of [[-0.08, 0.22], [0.08, 0.22], [-0.08, -0.22], [0.08, -0.22]]) colorB.add(G.cylLo, L(r, lx, 0.15, lz, 0.03, 0.32, 0.03), c);
+    for (const [lx, lz, hind] of [[-0.07, 0.18, 0], [0.07, 0.18, 0], [-0.07, -0.2, 1], [0.07, -0.2, 1]]) {
+      colorB.add(G.cylLo, L(r, lx, 0.32, lz, 0.035, 0.22, 0.035, hind ? -0.25 : 0), c);
+      colorB.add(G.cylLo, L(r, lx, 0.12, lz + (hind ? -0.04 : 0), 0.025, 0.22, 0.025, hind ? 0.2 : 0), c);
+      colorB.add(G.sphLo, L(r, lx, 0.02, lz + 0.025 + (hind ? -0.05 : 0), 0.03, 0.02, 0.045), dk);
+    }
   }
 }
+const AG = {
+  pigBody: new THREE.CapsuleGeometry(0.25, 0.44, 6, 14).rotateX(Math.PI / 2),
+  pigHead: new THREE.CylinderGeometry(0.075, 0.16, 0.26, 12),
+  pigLeg: new THREE.CylinderGeometry(0.055, 0.04, 0.26, 7),
+  ear: (() => { const g = new THREE.SphereGeometry(0.07, 7, 5); g.scale(1, 0.25, 1.3); return g; })(),
+  snout: new THREE.CylinderGeometry(0.035, 0.06, 0.14, 8),
+};
 
 // ---------------------------------------------------------------------------
 export function addYardLife(ctx) {
