@@ -275,7 +275,6 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
   const panel = document.getElementById('tour');
   const list = document.getElementById('tour-list');
   const playBtn = document.getElementById('tour-play');
-  const playAllBtn = document.getElementById('tour-play-all');
   const caption = document.getElementById('caption');
   const capTitle = document.getElementById('caption-title');
   const capText = document.getElementById('caption-text');
@@ -302,17 +301,13 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
     g.head.innerHTML = `${gname}<em>${g.n}</em>`;
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = s.main ? 'main' : '';
-    el.title = s.main ? 'Главная точка — входит в экскурсию для доклада' : '';
     el.innerHTML = `<span>${i + 1}</span>${s.title}`;
     el.addEventListener('click', () => { stopAuto(); go(i); });
     g.box.appendChild(el);
     return el;
   });
   openGroup(stops[0].group);
-  const mainOrder = stops.map((s, i) => (s.main ? i : -1)).filter((i) => i >= 0);
-  const allOrder = stops.map((_, i) => i);
-  let order = mainOrder;
+  const order = stops.map((_, i) => i);
 
   let flight = null; // текущий перелёт
   let current = -1;
@@ -343,23 +338,18 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
   }
 
   // автоэкскурсия: коротко (главные точки, для доклада) или полностью
-  const LABEL_SHORT = `▶ Для доклада (${mainOrder.length})`, LABEL_ALL = `▶ Все (${stops.length})`;
-  function startAuto(full = false) {
+  // автоэкскурсия по всем точкам подряд
+  function startAuto() {
     auto = true;
-    order = full ? allOrder : mainOrder;
-    playBtn.textContent = full ? LABEL_SHORT : '■ Стоп';
-    playAllBtn.textContent = full ? '■ Стоп' : LABEL_ALL;
+    playBtn.textContent = '■ Остановить';
     const pos = order.indexOf(current);
     go(order[pos < 0 || pos >= order.length - 1 ? 0 : pos + 1]);
   }
   function stopAuto() {
     auto = false;
-    playBtn.textContent = LABEL_SHORT;
-    playAllBtn.textContent = LABEL_ALL;
+    playBtn.textContent = '▶ Экскурсия';
   }
-  stopAuto();
-  playBtn.addEventListener('click', () => (auto && order === mainOrder ? stopAuto() : startAuto(false)));
-  playAllBtn.addEventListener('click', () => (auto && order === allOrder ? stopAuto() : startAuto(true)));
+  playBtn.addEventListener('click', () => (auto ? stopAuto() : startAuto()));
   const leaveCurrent = () => { cam.limit = null; flight = null; cam.orbit.enabled = true; if (current >= 0 && stops[current].onLeave) stops[current].onLeave(); current = -1; };
   document.getElementById('caption-close').addEventListener('click', () => { caption.classList.remove('show'); stopAuto(); leaveCurrent(); });
   document.getElementById('tour-toggle').addEventListener('click', () => panel.classList.toggle('collapsed'));
@@ -377,7 +367,7 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
       stopAuto();
       go((Math.max(current, 0) + d + stops.length) % stops.length);
     } else if (e.code === 'KeyT') {
-      auto ? stopAuto() : startAuto(e.shiftKey);
+      auto ? stopAuto() : startAuto();
     } else if (e.code === 'Escape') {
       leaveCurrent();
       caption.classList.remove('show');
