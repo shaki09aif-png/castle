@@ -8,7 +8,7 @@ import {
   DITCH, SPUR, riverZ, riverHalfWidth, RIVER, WORLD, insideTower, GATEHOUSE, GATE_PASSAGE, MOAT,
 } from './layout.js';
 import { textureArrays, macroNoiseTexture, pbrMaterial } from './textures.js';
-import { triplanarMaterial, TRIPLANAR_GLSL } from './materials.js';
+import { triplanarMaterial, TRIPLANAR_GLSL, AUTUMN } from './materials.js';
 import { Q } from './quality.js';
 
 const nPlain = createNoise2D(101);
@@ -587,6 +587,7 @@ function makeTerrainMaterial() {
   };
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
+    shader.uniforms.uAutumn = AUTUMN;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -610,6 +611,7 @@ function makeTerrainMaterial() {
         uniform sampler2DArray tArrC, tArrN, tArrO;
         uniform sampler2D tMacro;
         uniform vec4 tileInv;
+        uniform float uAutumn;
         varying vec4 vSplat;
         varying vec3 vWPos;
         varying vec3 vWNrm;
@@ -658,6 +660,9 @@ function makeTerrainMaterial() {
           float farK = smoothstep(420.0, 900.0, length(vWPos.xz));
           float forest = smoothstep(0.46, 0.56, texture2D(tMacro, vWPos.xz * 0.0009 + 0.2).b) * farK;
           c0 = mix(c0, vec3(0.07, 0.1, 0.045) * (0.8 + 0.5 * macro2.r), forest);
+          // осень: трава буреет, пятна опавшей листвы
+          vec3 autG = mix(c0 * vec3(1.15, 0.95, 0.55), vec3(0.5, 0.26, 0.08) * (0.7 + 0.5 * macro.r), smoothstep(0.6, 0.72, macro2.g) * 0.8);
+          c0 = mix(c0, autG, uAutumn * 0.75);
 
           // смешивание по «высоте»: камни и кочки проступают сквозь соседний слой
           vec4 hgt = vec4(o0.r, o1.r * 0.8 + 0.2, o2.r, o3.r);

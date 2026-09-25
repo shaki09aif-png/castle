@@ -138,11 +138,25 @@ function buildStops(terrain, village, extras) {
       tgt: V(0, 0, 0).copy(extras.camp.at(3, 2)).setY(extras.camp.gh(extras.camp.at(3, 2).x, extras.camp.at(3, 2).z) + 3),
       pos: V(0, 0, 0).copy(extras.camp.at(42, 20)).setY(extras.camp.gh(extras.camp.at(42, 20).x, extras.camp.at(42, 20).z) + 17),
     }] : []),
+    ...(extras.tourney ? [{
+      title: 'Рыцарский турнир',
+      text: 'На турнирах рыцари упражнялись и показывали силу: двое всадников с копьями мчались навстречу вдоль барьера и старались выбить друг друга из седла. Зрители сидели на трибунах, знатные дамы вручали награды.',
+      tgt: extras.tourney.clone().setY(terrain.heightAt(extras.tourney.x, extras.tourney.z) + 1.5),
+      pos: extras.tourney.clone().add(V(-6, 0, -34)).setY(terrain.heightAt(extras.tourney.x - 6, extras.tourney.z - 34) + 11),
+    }] : []),
     ...(extras.siege ? [{
       title: 'Под стенами при штурме',
       text: 'Нажмите «Штурм» (B): требушет бросает камни в стену, со стен отвечают лучники, из машикулей над воротами льют кипящую смолу. Толстые стены из камня выдерживали много таких ударов.',
       tgt: extras.siege.target.clone().setY(extras.siege.target.y + 2),
       pos: extras.siege.target.clone().addScaledVector(extras.siege.toCamp, 38).add(V(12, 0, 0)).setY(extras.siege.target.y + 10),
+    }] : []),
+    ...(extras.ruinsCtl ? [{
+      title: 'Замок сегодня',
+      text: 'Так выглядят многие замки через семьсот лет: крыши и деревянные постройки сгорели или сгнили, камень растащили на стройки, стены заросли мхом. Но толстые каменные стены и башни стоят до сих пор.',
+      tgt: V(0, HILL_TOP + 4, 4),
+      pos: V(92, HILL_TOP + 42, 118),
+      onEnter: () => extras.ruinsCtl.enter(),
+      onLeave: () => extras.ruinsCtl.leave(),
     }] : []),
   ].map((s) => {
     // камера не должна оказаться под землёй
@@ -180,7 +194,9 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
 
   function go(i) {
     if (cam.mode === 'fly') cam.setMode('orbit');
+    if (current >= 0 && current !== i && stops[current].onLeave) stops[current].onLeave();
     current = i;
+    if (stops[i].onEnter) stops[i].onEnter();
     const s = stops[i];
     const p0 = camera.position.clone();
     const t0 = cam.orbit.target.clone();
@@ -207,7 +223,8 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
     playBtn.textContent = '▶ Вся экскурсия';
   }
   playBtn.addEventListener('click', () => (auto ? stopAuto() : startAuto()));
-  document.getElementById('caption-close').addEventListener('click', () => { caption.classList.remove('show'); stopAuto(); });
+  const leaveCurrent = () => { if (current >= 0 && stops[current].onLeave) stops[current].onLeave(); };
+  document.getElementById('caption-close').addEventListener('click', () => { caption.classList.remove('show'); stopAuto(); leaveCurrent(); });
   document.getElementById('tour-toggle').addEventListener('click', () => panel.classList.toggle('collapsed'));
   // любое действие мышью на сцене прерывает автоэкскурсию
   document.querySelector('canvas')?.addEventListener('pointerdown', () => { if (auto && !flight) stopAuto(); });
@@ -225,6 +242,7 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
     } else if (e.code === 'KeyT') {
       auto ? stopAuto() : startAuto();
     } else if (e.code === 'Escape') {
+      leaveCurrent();
       caption.classList.remove('show');
       stopAuto();
     }

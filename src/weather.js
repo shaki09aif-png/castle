@@ -2,6 +2,11 @@
 // камеры (движение считает шейдер), после дождя на мостовой остаются лужи,
 // снег постепенно ложится на крыши и землю, ров и река замерзают.
 import * as THREE from 'three';
+import { AUTUMN } from './materials.js';
+
+// Сила ветра по погоде: флаги, дым и деревья колышутся быстрее в непогоду
+export const WIND_K = { value: 1 };
+const WIND_BY = { clear: 1, rain: 2.3, fog: 0.4, snow: 1.6, autumn: 1.7 };
 
 const BOX = new THREE.Vector3(70, 45, 70);
 
@@ -96,7 +101,7 @@ export function createWeather(scene, lighting, { paveMask, heightAt, renderer })
     }
   });
 
-  const ORDER = ['clear', 'rain', 'fog', 'snow'];
+  const ORDER = ['clear', 'rain', 'fog', 'snow', 'autumn'];
   let mode = 'clear';
   let wet = 0, snowAmt = 0, rainA = 0, snowA = 0;
   function setMode(m) {
@@ -115,6 +120,8 @@ export function createWeather(scene, lighting, { paveMask, heightAt, renderer })
       wet = mode === 'rain' ? Math.min(1, wet + dt / 12) : Math.max(0, wet - dt / 45);
       snowAmt = mode === 'snow' ? Math.min(1, snowAmt + dt / 15) : Math.max(0, snowAmt - dt / 10);
       lighting.setSurface(wet * (1 - snowAmt), snowAmt);
+      AUTUMN.value += ((mode === 'autumn' ? 1 : 0) - AUTUMN.value) * Math.min(1, dt * 0.4);
+      WIND_K.value += ((WIND_BY[mode] || 1) - WIND_K.value) * Math.min(1, dt * 0.5);
       for (const [p, a] of [[rain, rainA], [snow, snowA]]) {
         p.obj.visible = a > 0.02;
         p.uniforms.uAlpha.value = a;

@@ -36,9 +36,9 @@ export function createCameraControls(camera, dom, terrain) {
   const speedEl = document.getElementById('speed');
   const clickEl = document.getElementById('click-to-fly');
   let helpHidden = false;
-  try { helpHidden = localStorage.getItem('castle-help-hidden') === '1'; } catch (e) { /* нет хранилища */ }
+  try { helpHidden = localStorage.getItem('castle-ui-hidden') === '1'; } catch (e) { /* нет хранилища */ }
   function refreshUI() {
-    if (help) help.classList.toggle('hidden', helpHidden);
+    document.body.classList.toggle('ui-hidden', helpHidden); // H или кнопка-глаз прячет весь интерфейс
     if (modeEl) modeEl.textContent = mode === 'fly' ? 'Режим: свободный полёт' : 'Режим: орбита';
     if (help) help.dataset.mode = mode;
     if (speedEl) speedEl.textContent = mode === 'fly' ? `Скорость: ${speed < 10 ? speed.toFixed(1) : Math.round(speed)} м/с` : '';
@@ -81,7 +81,7 @@ export function createCameraControls(camera, dom, terrain) {
     if (c === 'KeyF' && !e.repeat) { setMode(mode === 'fly' ? 'orbit' : 'fly'); return; }
     if (c === 'KeyH' && !e.repeat) {
       helpHidden = !helpHidden;
-      try { localStorage.setItem('castle-help-hidden', helpHidden ? '1' : '0'); } catch (err) { /* ignore */ }
+      try { localStorage.setItem('castle-ui-hidden', helpHidden ? '1' : '0'); } catch (err) { /* ignore */ }
       refreshUI();
       return;
     }
@@ -139,6 +139,12 @@ export function createCameraControls(camera, dom, terrain) {
     keepAboveGround();
   }
 
+  const uiBtn = document.getElementById('ui-toggle');
+  if (uiBtn) uiBtn.addEventListener('click', () => {
+    helpHidden = !helpHidden;
+    try { localStorage.setItem('castle-ui-hidden', helpHidden ? '1' : '0'); } catch (err) { /* ignore */ }
+    refreshUI();
+  });
   refreshUI();
   return {
     orbit, fly, update,

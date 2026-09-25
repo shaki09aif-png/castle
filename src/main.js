@@ -20,7 +20,9 @@ import { REFLECT } from './water.js';
 import { createCameraControls } from './camera.js';
 import { createTour } from './tour.js';
 import { createExtras } from './extras.js';
-import { createWeather } from './weather.js';
+import { createWeather, WIND_K } from './weather.js';
+import { SMOKE_WIND } from './courtyard.js';
+import { createLabels } from './labels.js';
 import { SWAY_TIME } from './people.js';
 import { FOLIAGE_SUN } from './vegetation.js';
 import { SUN_DIR } from './lighting.js';
@@ -122,7 +124,7 @@ async function init() {
   const extras = createExtras(scene, terrain, walls, village);
   toLayer1(mark);
   // в осадном лагере не растут деревья и трава
-  const campEx = (x, z) => ((extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30) || (extras.pasture && Math.hypot(x - extras.pasture.x, z - extras.pasture.z) < 14) ? 1 : 0);
+  const campEx = (x, z) => ((extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30) || (extras.pasture && Math.hypot(x - extras.pasture.x, z - extras.pasture.z) < 30) || (extras.tourney && Math.hypot(x - extras.tourney.x, z - extras.tourney.z) < 50) ? 1 : 0);
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain, {
     exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z), campEx(x, z))),
@@ -136,7 +138,70 @@ async function init() {
 
   const cam = createCameraControls(camera, renderer.domElement, terrain);
   const controls = cam.orbit; // для отладки и скриншотов
+  extras.setGate(gate);
+
+  // ---- «Замок сегодня»: руины без крыш, дерева и людей, стены во мху ----
+  {
+    const CASTLE = new Set(['walls', 'towers', 'keep', 'gate', 'courtyard']);
+    const HIDE = new Set(['gate-oak', 'details', 'extras', 'extras-glow', 'people', 'walker', 'stained-glass', 'torch-iron', 'torch-wood', 'window-lights', 'paving', 'straw']);
+    const KEEP = new Set(['terrain', 'sky', 'rain', 'snow', 'tree', 'rocks', 'grass', 'road', 'river', 'moat', 'ice', 'fields', 'village', 'retaining-walls', 'ruin-rubble', 'birds']);
+    const isStone = (o) => [].concat(o.material).some((m) => m.customProgramCacheKey && /wall-stone/.test(m.customProgramCacheKey()));
+    const tmp = new THREE.Vector3(), im = new THREE.Matrix4();
+    const nearCastle = (o) => {
+      if (o.isSprite) tmp.copy(o.position);
+      else if (o.isInstancedMesh) { if (o.count < 1) return false; o.getMatrixAt(0, im); tmp.setFromMatrixPosition(im); }
+      else { if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); tmp.copy(o.geometry.boundingSphere.center).applyMatrix4(o.matrixWorld); }
+      return Math.hypot(tmp.x, tmp.z) < 80 && tmp.y > 55;
+    };
+    const hideList = [];
+    let rubble = null;
+    scene.updateMatrixWorld(true);
+    scene.traverse((o) => {
+      if (!(o.isMesh || o.isSprite || o.isPoints)) return;
+      if (o.name === 'ruin-rubble') { rubble = o; return; }
+      let name = o.name, q = o;
+      while (!name && q.parent && q.parent !== scene) { q = q.parent; name = q.name; }
+      if (KEEP.has(name)) return;
+      if (CASTLE.has(name)) { if (!isStone(o)) hideList.push(o); return; }
+      if (HIDE.has(name)) { hideList.push(o); return; }
+      if (!name && nearCastle(o)) hideList.push(o);
+    });
+    let saved = null;
+    extras.ruinsCtl = {
+      enter() {
+        if (saved) return;
+        saved = hideList.map((o) => o.visible);
+        for (const o of hideList) o.visible = false;
+        if (rubble) rubble.visible = true;
+        extras.ruinsOn = true;
+        lighting.setRuin(1);
+        if (renderer.shadowMap.enabled) renderer.shadowMap.needsUpdate = true;
+      },
+      leave() {
+        if (!saved) return;
+        hideList.forEach((o, i) => { o.visible = saved[i]; });
+        saved = null;
+        if (rubble) rubble.visible = false;
+        extras.ruinsOn = false;
+        lighting.setRuin(0);
+        if (renderer.shadowMap.enabled) renderer.shadowMap.needsUpdate = true;
+      },
+      get active() { return !!saved; },
+    };
+  }
   const tour = createTour(camera, cam, terrain, village, extras);
+  const labels = createLabels(camera, { village, extras, terrain });
+  // вода на слабом качестве отражает небо (своя маленькая карта окружения)
+  if (!Q.envLight && lighting.envTex) {
+    scene.traverse((o) => {
+      if ((o.name === 'river' || o.name === 'moat') && o.material && o.material.isMeshPhysicalMaterial) {
+        o.material.envMap = lighting.envTex;
+        o.material.envMapIntensity = 0.85;
+        o.material.needsUpdate = true;
+      }
+    });
+  }
+  let windT = 0, flagT = 0;
 
   // ---- время суток: всё, что зависит от темноты ----
   const glassMeshes = [], waters = [];
@@ -153,7 +218,7 @@ async function init() {
   });
   const weather = createWeather(scene, lighting, { paveMask: court.paveMask, heightAt: terrain.heightAt, renderer });
   const weatherBtn = document.getElementById('btn-weather'), siegeBtn = document.getElementById('btn-siege');
-  const WEATHER_LABEL = { clear: '☁ Ясно', rain: '🌧 Дождь', fog: '🌫 Туман', snow: '❄ Снег' };
+  const WEATHER_LABEL = { clear: '☁ Ясно', rain: '🌧 Дождь', fog: '🌫 Туман', snow: '❄ Снег', autumn: '🍂 Осень' };
   const cycleWeather = () => { weather.next(); if (weatherBtn) weatherBtn.textContent = WEATHER_LABEL[weather.mode]; };
   const toggleSiege = () => { if (!extras.siege) return; const on = extras.siege.toggle(); if (siegeBtn) siegeBtn.textContent = on ? '⚔ Остановить штурм' : '⚔ Штурм'; };
   if (weatherBtn) weatherBtn.addEventListener('click', cycleWeather);
@@ -228,7 +293,10 @@ async function init() {
     if (!tour.update(Math.min(dt, 0.1))) cam.update(dt);
     lighting.update(t, camera, shadowFocus(), Math.min(dt, 0.1));
     river.update(t);
-    vegetation.update(t, camera);
+    windT += dt * WIND_K.value;
+    flagT += dt * (0.6 + 0.4 * WIND_K.value);
+    SMOKE_WIND.k = WIND_K.value;
+    vegetation.update(windT, camera);
     walls.update(t);
     towers.update(t);
     gate.update(t, Math.min(dt, 0.1));
@@ -238,10 +306,11 @@ async function init() {
     village.update(t);
     details.update(t);
     torches.update(t);
-    extras.update(t, dt);
+    extras.update(t, dt, camera);
     weather.update(t, Math.min(dt, 0.1), camera);
     SWAY_TIME.value = t;
-    FLAG_TIME.value = t;
+    FLAG_TIME.value = flagT;
+    labels.update();
     post.render(dt);
 
     frames++;

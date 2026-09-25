@@ -290,6 +290,9 @@ function smokeTexture() {
   return toTexture(c, { repeat: false });
 }
 
+// ветер для дыма (меняется с погодой): множитель сноса
+export const SMOKE_WIND = { k: 1 };
+
 export class Smoke {
   constructor(scene, pos, { count = 22, life = 9, rise = 1.3, size = 1.2, grow = 5, color = 0x8a8680, alpha = 0.5 } = {}) {
     this.pos = pos.clone();
@@ -310,8 +313,9 @@ export class Smoke {
       const u = (t / this.life + it.off) % 1;
       const age = u * this.life;
       // ветер с юго-запада, как у флюгеров, лёгкое завихрение
-      const wx = 0.55 * age + Math.sin(age * 0.9 + it.spin) * 0.3;
-      const wz = -0.35 * age + Math.cos(age * 0.7 + it.spin) * 0.3;
+      const wk = SMOKE_WIND.k;
+      const wx = 0.55 * age * wk + Math.sin(age * 0.9 + it.spin) * 0.3;
+      const wz = -0.35 * age * wk + Math.cos(age * 0.7 + it.spin) * 0.3;
       it.s.position.set(this.pos.x + wx, this.pos.y + this.rise * age - 0.03 * age * age, this.pos.z + wz);
       const sc = this.size + this.grow * u;
       it.s.scale.set(sc, sc, 1);

@@ -5,6 +5,9 @@ import { Q } from './quality.js';
 
 // GLSL: трипланарная выборка цвета, ORM и нормали (смешивание нормалей «whiteout»).
 // Текстура проецируется по трём мировым осям — нет растяжения на отвесных гранях.
+// Осень: 0 — лето, 1 — золотая осень (общий uniform для травы, листвы, рельефа, полей)
+export const AUTUMN = { value: 0 };
+
 export const TRIPLANAR_GLSL = (Q.cheapShading ? '#define CHEAP_SHADING\n' : '') + /* glsl */ `
   vec3 triBlend(vec3 n) {
     #ifdef CHEAP_SHADING

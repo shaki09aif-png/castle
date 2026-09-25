@@ -8,6 +8,7 @@ import { GeoBuilder } from './walls.js';
 import { riverInfo } from './terrain.js';
 import { riverZ, RIVER } from './layout.js';
 import { pbrMaterial, materialTextures, macroNoiseTexture } from './textures.js';
+import { AUTUMN } from './materials.js';
 import { Frame, Smoke, haystack, strawMaterial, plankDoor, buildBarrels, cart } from './courtyard.js';
 import { mulberry32, createNoise2D } from './noise.js';
 
@@ -393,6 +394,7 @@ function buildFields(scene, terrain, mask) {
   const angs = FIELD_BLOCKS.map((b) => b.ang);
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.tDirt = { value: dirt.map };
+    sh.uniforms.uAutumn = AUTUMN;
     sh.uniforms.tGrass = { value: grass.map };
     sh.uniforms.tMacro = { value: macroNoiseTexture() };
     sh.uniforms.angs = { value: angs };
@@ -407,6 +409,7 @@ function buildFields(scene, terrain, mask) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D tDirt, tGrass, tMacro;
+        uniform float uAutumn;
         uniform float angs[${angs.length}];
         varying vec4 vField;
         varying vec3 vFW;
@@ -418,6 +421,7 @@ function buildFields(scene, terrain, mask) {
         float bi = floor(vField.z + 0.5);
         float h = fhash(strip + bi * 17.0);
         float type = h < 0.28 ? 0.0 : h < 0.52 ? 1.0 : h < 0.82 ? 2.0 : 3.0;
+        if (uAutumn > 0.5 && type > 0.5) type = h < 0.6 ? 0.0 : 2.0; // осенью урожай убран: пашня и стерня
         float inStrip = fract(vField.x / stripW);
         vec3 soil = texture2D(tDirt, vFW.xz * 0.35).rgb * vec3(0.95, 0.76, 0.55);
         vec3 gr = texture2D(tGrass, vFW.xz * 0.45).rgb;
@@ -563,6 +567,7 @@ export function createVillage(scene, terrain, walls) {
     houses: places.map((p) => p.h),
     bridge: br,
     mill: mill.center,
+    fieldMask,
     millWheel: { c: mill.wheel, r: mill.wheelR, chute: mill.chute, f: mill.f },
     update(t) {
       for (const u of updaters) u(t);

@@ -6,6 +6,7 @@ import { plateauRadius, GATE_DIR, GATE_RADIUS, DITCH, insideTower, GATEHOUSE, GA
 import { shelfDistance, riverInfo } from './terrain.js';
 import { pbrMaterial, foliageTexture, macroNoiseTexture } from './textures.js';
 import { SUN_DIR } from './lighting.js';
+import { AUTUMN } from './materials.js';
 import { Q } from './quality.js';
 
 const WIND = { uTime: { value: 0 } };
@@ -118,6 +119,7 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
+    shader.uniforms.uAutumn = AUTUMN;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -172,14 +174,15 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
         transformed += vec3(wxz.x, gd.r - 0.05, wxz.y);`
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vTint;\nvarying float vH;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vTint;\nvarying float vH;\nuniform float uAutumn;')
       .replace(
         '#include <normal_fragment_begin>',
         'float faceDirection = 1.0; vec3 normal = normalize(vNormal); vec3 nonPerturbedNormal = normal;'
       )
       .replace(
         '#include <map_fragment>',
-        `diffuseColor.rgb = vTint * mix(0.7, 1.3, vH);`
+        `diffuseColor.rgb = vTint * mix(0.7, 1.3, vH);
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.25, 1.0, 0.5), uAutumn * 0.8); // осенняя подсохшая трава`
       )
       .replace(
         '#include <aomap_fragment>',
@@ -374,7 +377,7 @@ function buildSpecies(name, variant) {
 // направление «просвета» листвы; длина вектора — сила эффекта (ночью почти 0)
 export const FOLIAGE_SUN = SUN_DIR.clone();
 
-function foliageMaterial(tex) {
+function foliageMaterial(tex, evergreen = false) {
   const mat = new THREE.MeshStandardMaterial({
     map: tex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, metalness: 0,
   });
@@ -382,6 +385,7 @@ function foliageMaterial(tex) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = WIND.uTime;
     shader.uniforms.uSun = { value: sun };
+    shader.uniforms.uAutumn = AUTUMN;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying float vLeafH;\nvarying vec3 vLeafW;')
       .replace(
@@ -408,7 +412,7 @@ function foliageMaterial(tex) {
         #endif`
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uSun;\nvarying float vLeafH;\nvarying vec3 vLeafW;')
+      .replace('#include <common>', '#include <common>\nuniform vec3 uSun;\nuniform float uAutumn;\nvarying float vLeafH;\nvarying vec3 vLeafW;')
       .replace(
         '#include <normal_fragment_begin>',
         'float faceDirection = 1.0; vec3 normal = normalize(vNormal); vec3 nonPerturbedNormal = normal;'
@@ -416,6 +420,13 @@ function foliageMaterial(tex) {
       .replace(
         '#include <aomap_fragment>',
         `#include <aomap_fragment>
+        ${evergreen ? '' : `// осенью каждое дерево желтеет или краснеет по-своему
+        {
+          float hh = fract(sin(dot(floor(vLeafW.xz / 5.0), vec2(12.9898, 78.233))) * 43758.5);
+          vec3 autC = hh < 0.4 ? vec3(0.9, 0.62, 0.12) : hh < 0.75 ? vec3(0.85, 0.36, 0.08) : vec3(0.62, 0.14, 0.06);
+          float lum = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+          diffuseColor.rgb = mix(diffuseColor.rgb, autC * (0.45 + lum * 1.8), uAutumn * 0.85);
+        }`}
         // внутренняя часть кроны темнее, на просвет — тёплое свечение листвы
         vec3 vd = normalize(vLeafW - cameraPosition);
         float back = pow(max(dot(vd, uSun), 0.0), 3.0);
@@ -423,7 +434,7 @@ function foliageMaterial(tex) {
         reflectedLight.indirectDiffuse *= 0.75;`
       );
   };
-  mat.customProgramCacheKey = () => 'foliage';
+  mat.customProgramCacheKey = () => 'foliage' + (evergreen ? '-e' : '');
   return mat;
 }
 
@@ -497,7 +508,7 @@ function createTrees(scene, terrain, excludeTrees, extraTrees = []) {
   for (const [name, list] of Object.entries(placed)) {
     if (!list.length) continue;
     const sp = SPECIES[name];
-    const leafMat = foliageMaterial(foliageTexture(sp.leaf, sp.leafHue));
+    const leafMat = foliageMaterial(foliageTexture(sp.leaf, sp.leafHue), name === 'pine');
     // 3 варианта формы на породу, у каждого ближний и дальний уровни детализации
     for (let v = 0; v < 3; v++) {
       const inst = list.filter((t) => t.v === v);
@@ -508,6 +519,7 @@ function createTrees(scene, terrain, excludeTrees, extraTrees = []) {
         im.count = 0;
         im.castShadow = cast;
         if (!cast) im.layers.set(2); // дальние деревья не отражаются в воде
+        im.name = 'tree';
         im.receiveShadow = true;
         im.frustumCulled = false;
         im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(inst.length * 3), 3);

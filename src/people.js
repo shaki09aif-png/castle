@@ -142,16 +142,22 @@ const ROLES = {
   peasant: { tunic: [0x7d6a4a, 0x6a5a3a, 0x8a7a5a, 0x5e6040], legs: 0x5a4a38, head: 'hood', item: 'hoe' },
   child: { tunic: [0x8a6a3a, 0x5a6a3a], legs: 0x4a4038, head: 'hair', scale: 0.62 },
   foe: { tunic: [0x2e4a26, 0x5a5a1e], legs: 0x3a3430, head: 'helm', item: 'spear', shield: true },
+  reaper: { tunic: [0xd8ccb0, 0x8a7a5a, 0x6a5a3a], legs: 0x5a4a38, head: 'hood', item: 'scythe' },
+  minstrel: { tunic: [0x8a2a6a, 0x2a6a4a], legs: 0xc8a040, head: 'hair', item: 'lute' },
   merchant: { tunic: [0x2e5a4a, 0x7a3a1a, 0x5a4a7a, 0x8a6a2a], legs: 0x3a3028, head: 'hood', apron: 0xd8ccb0, item: null },
   townswoman: { tunic: [0x7a2a3a, 0x3d5a7a, 0x6a5a2a, 0x4a6a4a], legs: 0x3a3028, head: 'wimple', dress: true, item: null },
 };
 
-export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand' }) {
+export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand', item: itemArg }) {
   const R = ROLES[role];
+  const IT = itemArg !== undefined ? itemArg : R.item; // предмет в руках (можно задать явно)
+  // сидя (за столом) и верхом: фигура опускается, ноги согнуты
+  const sit = pose === 'sit', ride = pose === 'ride';
+  const drop = sit || ride ? 0.43 : 0;
   const rnd = mulberry32(seed * 97 + 13);
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const s = (R.scale || 1) * (0.93 + rnd() * 0.12);
-  const root = new THREE.Matrix4().compose(new V3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), yaw), new V3(s, s, s));
+  const root = new THREE.Matrix4().compose(new V3(x, y - drop * (R.scale || 1), z), new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), yaw), new V3(s, s, s));
   const rot = (rx = 0, ry = 0, rz = 0) => new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz));
   const M = (px, py, pz, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) =>
     root.clone().multiply(new THREE.Matrix4().compose(new V3(px, py, pz), rot(rx, ry, rz), new V3(sx, sy, sz)));
@@ -168,10 +174,13 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   const lean = pose === 'work' ? 0.35 : 0;
   for (const sd of [-1, 1]) {
     const step = pose === 'walk' ? sd * 0.3 : 0;
-    const kneeBend = pose === 'walk' ? Math.max(0, -step) * 0.9 + 0.05 : pose === 'work' ? 0.25 : 0.03;
-    B.curLimb = [sd, 0.9 * s]; // нога: качается вокруг бедра
-    const hipA = step - (pose === 'work' ? 0.2 : 0);
-    const hip = M(sd * 0.095, 0.9, 0, hipA, 0, sd * 0.025);
+    let kneeBend = pose === 'walk' ? Math.max(0, -step) * 0.9 + 0.05 : pose === 'work' ? 0.25 : 0.03;
+    B.curLimb = sit || ride ? [0, 0] : [sd, 0.9 * s]; // нога: качается вокруг бедра
+    let hipA = step - (pose === 'work' ? 0.2 : 0);
+    let spread = sd * 0.025;
+    if (sit) { hipA = -1.5; kneeBend = 1.45; spread = sd * 0.06; }
+    if (ride) { hipA = -0.75; kneeBend = 1.0; spread = sd * 0.62; }
+    const hip = M(sd * 0.095, 0.9, 0, hipA, 0, spread);
     B.add(G.thigh, hip, legs, 0, sw);
     const knee = C(hip, 0, -0.45, 0, kneeBend);
     B.add(G.knee, knee, legs, 0, sw);
@@ -257,12 +266,18 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     work: [[-0.6, 0.2, 0.7], [-0.5, -0.2, 0.7]],
     hammer: [[-0.6, 0.25, 1.4], [0.1, -0.1, 0.3]],
     bucket: [[0.05, 0.1, 0.1], [0.08, -0.14, 0.12]],
-  }[R.item === 'spear' ? 'spear' : R.item === 'bow' ? 'bow' : pose === 'work' || R.item === 'hoe' ? 'work' : R.item === 'hammer' ? 'hammer' : R.item === 'bucket' ? 'bucket' : 'stand'];
+    feast: [[-0.8, 0.14, 0.95], [-0.62, -0.16, 0.75]],
+    reins: [[-0.45, 0.12, 1.2], [-0.45, -0.12, 1.2]],
+    lance: [[-0.2, 0.12, 1.4], [-0.45, -0.12, 1.2]],
+    lute: [[-0.55, 0.25, 1.5], [-0.35, -0.3, 1.25]],
+    tray: [[-0.35, 0.3, 1.75], [-0.35, -0.3, 1.75]],
+    scythe: [[-0.7, 0.25, 0.9], [-0.35, -0.2, 1.1]],
+  }[IT === 'lance' ? 'lance' : IT === 'lute' ? 'lute' : IT === 'tray' ? 'tray' : IT === 'scythe' ? 'scythe' : ride ? 'reins' : sit ? 'feast' : IT === 'spear' ? 'spear' : IT === 'bow' ? 'bow' : pose === 'work' || IT === 'hoe' ? 'work' : IT === 'hammer' ? 'hammer' : IT === 'bucket' ? 'bucket' : 'stand'];
   const sleeve = R.surcoat && !R.sword ? R.surcoat : R.mail ? 0x8a8e94 : tunic;
   const hands = [];
   [1, -1].forEach((sd, i) => {
     const [fx, sz, eb] = armPose[i];
-    B.curLimb = [-sd * 0.6, 1.4 * s]; // рука — в противофазе с ногой
+    B.curLimb = ride || sit || ['tray', 'lute', 'lance'].includes(IT) ? [0, 0] : [-sd * 0.6, 1.4 * s]; // рука — в противофазе с ногой
     const sh = M(sd * 0.225, 1.4, lean * 0.1, fx + lean * 0.3, 0, sd * Math.abs(sz));
     B.add(G.shoulder, sh, sleeve, 0.6, sw);
     B.add(G.upperArm, sh, sleeve, 0.6, sw);
@@ -278,7 +293,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
 
   // ---- предметы ----
   const up = new V3(0, 1, 0);
-  if (R.item === 'spear') {
+  if (IT === 'spear') {
     const base = hands[0].clone().add(new V3(0, -1.05 * s, 0));
     B.add(G.shaft, new THREE.Matrix4().compose(base, new THREE.Quaternion(), new V3(1, 2.5 * s, 1)), 0x5a3e24, 0.3, sw);
     B.add(G.tip, new THREE.Matrix4().compose(base.clone().add(new V3(0, 2.5 * s + 0.12, 0)), new THREE.Quaternion(), new V3(1, 1, 1)), 0x9a9ea4, 0.3, sw);
@@ -288,23 +303,52 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(shieldShape, M(-0.05, 1.12, -0.2, 0.08, Math.PI, 0), col, 0.4, sw);
     B.add(new THREE.BoxGeometry(0.06, 0.62, 0.012), M(-0.05, 1.05, -0.245, 0.08, Math.PI, 0), 0xe8e0c8, 0.4, sw);
   }
-  if (R.item === 'bow') {
+  if (IT === 'bow') {
     const bow = new THREE.TorusGeometry(0.62, 0.014, 5, 20, Math.PI * 0.9);
     B.add(bow, M(0.15, 1.42, 0.62, 0, Math.PI / 2, Math.PI / 2 - Math.PI * 0.45), 0x6a4a2a, 0.3, sw);
     B.add(new THREE.CylinderGeometry(0.07, 0.06, 0.45, 8), M(0.12, 1.25, -0.16, 0.25), 0x5a3a1e, 0.3, sw); // колчан
   }
-  if (R.item === 'hammer') {
+  if (IT === 'hammer') {
     const h = hands[0];
     B.add(G.shaft, new THREE.Matrix4().compose(h.clone().add(new V3(0, -0.08, 0)), new THREE.Quaternion(), new V3(1, 0.4, 1)), 0x5a3e24, 0.3, sw);
     B.add(new THREE.BoxGeometry(0.16, 0.07, 0.07), new THREE.Matrix4().compose(h.clone().add(new V3(0, 0.3, 0)), new THREE.Quaternion().setFromAxisAngle(up, yaw), new V3(1, 1, 1)), 0x3a3a3e, 0.3, sw);
   }
-  if (R.item === 'hoe') {
+  if (IT === 'hoe') {
     const h = hands[0];
     const tilt = new THREE.Quaternion().setFromAxisAngle(new V3(Math.cos(yaw), 0, -Math.sin(yaw)), 0.6);
     const base = h.clone().add(new V3(Math.sin(yaw), 0, Math.cos(yaw)).multiplyScalar(-0.8)).add(new V3(0, -0.9, 0));
     B.add(G.shaft, new THREE.Matrix4().compose(base, tilt, new V3(1, 1.7, 1)), 0x6a4a2a, 0.3, sw);
   }
-  if (R.item === 'bucket') B.add(G.bucket, new THREE.Matrix4().compose(hands[1].clone().add(new V3(0, -0.16, 0)), new THREE.Quaternion(), new V3(1, 1, 1)), 0x6a4a2a, 0.3, sw);
+  if (IT === 'lance') { // турнирное копьё вперёд, с расширением у руки
+    const base = hands[0];
+    const dir = new V3(Math.sin(yaw), 0.05, Math.cos(yaw)).normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(up, dir);
+    B.add(new THREE.CylinderGeometry(0.025, 0.05, 3.6, 7).translate(0, 1.5, 0), new THREE.Matrix4().compose(base, q, new V3(1, 1, 1)), 0xe8e0c8, 0.3, sw);
+    B.add(new THREE.ConeGeometry(0.09, 0.28, 8).rotateX(Math.PI), new THREE.Matrix4().compose(base.clone().addScaledVector(dir, 0.1), q, new V3(1, 1, 1)), 0x9a2a2a, 0.3, sw);
+  }
+  if (IT === 'lute') { // лютня: пузатый корпус и гриф
+    const c = hands[0].clone().lerp(hands[1], 0.5).add(new V3(0, -0.05, 0));
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.4, yaw, 0.9));
+    B.add(new THREE.SphereGeometry(0.16, 10, 8).scale(1, 1.25, 0.5), new THREE.Matrix4().compose(c, q, new V3(1, 1, 1)), 0x8a5a2a, 0.3, sw);
+    B.add(new THREE.BoxGeometry(0.05, 0.4, 0.03).translate(0, 0.35, 0), new THREE.Matrix4().compose(c, q, new V3(1, 1, 1)), 0x4a2e18, 0.3, sw);
+  }
+  if (IT === 'tray') { // поднос с блюдом над головой
+    const c = hands[0].clone().lerp(hands[1], 0.5).add(new V3(0, 0.05, 0));
+    B.add(new THREE.CylinderGeometry(0.28, 0.28, 0.03, 14), new THREE.Matrix4().compose(c, new THREE.Quaternion(), new V3(1, 1, 1)), 0x8a8a8a, 0.3, sw);
+    B.add(new THREE.SphereGeometry(0.16, 10, 6).scale(1, 0.55, 0.8), new THREE.Matrix4().compose(c.clone().add(new V3(0, 0.08, 0)), new THREE.Quaternion(), new V3(1, 1, 1)), 0x8a4a22, 0.3, sw);
+  }
+  if (IT === 'scythe') { // коса: длинное косовище и изогнутое лезвие у земли
+    const h = hands[0];
+    const fwd = new V3(Math.sin(yaw), 0, Math.cos(yaw)), side = new V3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const bottom = h.clone().addScaledVector(fwd, 0.7).addScaledVector(side, -0.3).setY(y + 0.12);
+    const top = h.clone().addScaledVector(fwd, -0.2).add(new V3(0, 0.35, 0));
+    const d = top.clone().sub(bottom), len = d.length();
+    B.add(G.shaft, new THREE.Matrix4().compose(bottom, new THREE.Quaternion().setFromUnitVectors(up, d.normalize()), new V3(1, len, 1)), 0x6a4a2a, 0.3, sw);
+    const blade = new THREE.TorusGeometry(0.55, 0.018, 3, 12, Math.PI * 0.55);
+    blade.scale(1, 1, 3);
+    B.add(blade, new THREE.Matrix4().compose(bottom.clone().add(new V3(0, 0.03, 0)), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, yaw + 2.2)), new V3(1, 1, 1)), 0xb0b4ba, 0.3, sw);
+  }
+  if (IT === 'bucket') B.add(G.bucket, new THREE.Matrix4().compose(hands[1].clone().add(new V3(0, -0.16, 0)), new THREE.Quaternion(), new V3(1, 1, 1)), 0x6a4a2a, 0.3, sw);
   if (R.sword) {
     B.add(new THREE.BoxGeometry(0.05, 0.95, 0.015), M(-0.22, 0.55, 0.05, 0, 0, 0.12), 0xb0b4ba, 0.2, sw);
     B.add(new THREE.BoxGeometry(0.22, 0.03, 0.03), M(-0.2, 1.03, 0.05, 0, 0, 0.12), 0x6a5a3a, 0.2, sw);
@@ -331,5 +375,5 @@ export function createPeople(scene, list) {
   mesh.castShadow = mesh.receiveShadow = true;
   mesh.name = 'people';
   scene.add(mesh);
-  return { update(t) { uTime.value = t; } };
+  return { mesh, update(t) { uTime.value = t; } };
 }

@@ -71,12 +71,19 @@ function installFogChunks() {
   // Погода на поверхностях: снег ложится на горизонтальные грани, после дождя
   // земля темнее. Сила эффектов передаётся через цвет «служебного» окружающего
   // света (ничтожно слабого), чтобы не перекомпилировать шейдеры.
-  vec3 castleWeather( vec3 col, vec3 nView, vec3 amb ) {
-    float snowK = amb.b * 1000.0, wet = amb.g * 1000.0;
-    if ( snowK + wet < 0.002 ) return col;
+  vec3 castleWeather( vec3 col, vec3 nView, vec3 amb, vec3 wp ) {
+    float snowK = amb.b * 1000.0, wet = amb.g * 1000.0, ruin = amb.r * 1000.0;
+    if ( snowK + wet + ruin < 0.002 ) return col;
     vec3 wn = normalize( ( vec4( nView, 0.0 ) * viewMatrix ).xyz );
     float up = wn.y;
     float lum = dot( col, vec3( 0.3, 0.59, 0.11 ) );
+    // «замок сегодня»: камень темнее, на стенах пятна мха и лишайника
+    if ( ruin > 0.001 ) {
+      float pat = sin( wp.x * 1.3 + wp.y * 0.7 ) * sin( wp.z * 1.1 - wp.y * 1.9 ) + sin( wp.y * 0.45 + wp.x * 0.2 ) * 0.6;
+      float vert = 1.0 - smoothstep( 0.5, 0.9, abs( up ) );
+      col = mix( col, col * vec3( 0.55, 0.62, 0.42 ) + vec3( 0.02, 0.04, 0.0 ), ruin * vert * smoothstep( -0.1, 0.7, pat ) * 0.75 );
+      col *= 1.0 - ruin * 0.1;
+    }
     col *= 1.0 - wet * 0.3 * smoothstep( 0.3, 0.9, up );
     float cover = smoothstep( 0.3, 0.75, up ) * snowK;
     vec3 snowC = vec3( 0.9, 0.93, 1.0 ) * clamp( 0.3 + lum * 1.35, 0.12, 1.05 );
@@ -87,7 +94,7 @@ function installFogChunks() {
   THREE.ShaderChunk.fog_fragment = `
 #ifdef USE_FOG
   #if defined( STANDARD ) || defined( LAMBERT )
-    gl_FragColor.rgb = castleWeather( gl_FragColor.rgb, normal, ambientLightColor );
+    gl_FragColor.rgb = castleWeather( gl_FragColor.rgb, normal, ambientLightColor, vFogWorldPos );
   #endif
   gl_FragColor.rgb = castleFog( gl_FragColor.rgb, vFogWorldPos );
 #endif`;
@@ -282,6 +289,7 @@ export function createLighting(scene, renderer, assets) {
     scene.environment = pmrem.fromScene(envScene, 0.02, 1, 2000).texture;
   }
   scene.environmentIntensity = 1.0;
+  const envTex = scene.environment; // пригодится для отражений воды на слабом качестве
   pmrem.dispose();
   // На слабых видеокартах окружающий свет от HDRI (несколько выборок кубической
   // карты на каждый пиксель) заменяется дешёвым полусферическим светом.
@@ -380,10 +388,12 @@ export function createLighting(scene, renderer, assets) {
     rain: { sun: 0.22, hemi: 0.75, fog: 2.6, grey: 0.65, cover: 0.97, cl: 0.5 },
     fog: { sun: 0.4, hemi: 0.95, fog: 7.5, grey: 0.75, cover: 0.75, cl: 0.85 },
     snow: { sun: 0.4, hemi: 1.05, fog: 3.2, grey: 0.55, cover: 0.92, cl: 0.9 },
+    autumn: { sun: 0.85, hemi: 0.95, fog: 1.6, grey: 0.2, cover: 0.68, cl: 0.95 },
   };
   const wcur = { ...WEATHER.clear };
   let wfrom = null, wto = WEATHER.clear, wk = 1;
-  const surf = new THREE.AmbientLight(new THREE.Color(0, 0, 0), 1); // служебный: влажность и снег для шейдеров
+  const surf = new THREE.AmbientLight(new THREE.Color(0, 0, 0), 1); // служебный: влажность, снег и «руины» для шейдеров
+  const surfState = { wet: 0, snow: 0, ruin: 0 };
   scene.add(surf);
   const greyFog = C(0.5, 0.53, 0.56);
   const fogBase = scene.fog.density;
@@ -443,7 +453,9 @@ export function createLighting(scene, renderer, assets) {
       wk = 0;
     },
     // влажность и снег на поверхностях (0..1) — для шейдеров
-    setSurface(wet, snow) { surf.color.setRGB(0, wet * 0.001, snow * 0.001); },
+    setSurface(wet, snow) { surfState.wet = wet; surfState.snow = snow; surf.color.setRGB(surfState.ruin * 0.001, wet * 0.001, snow * 0.001); },
+    setRuin(r) { surfState.ruin = r; surf.color.setRGB(r * 0.001, surfState.wet * 0.001, surfState.snow * 0.001); },
+    envTex,
     update(t, camera, focus, dt = 0.016) {
       let dirty = false;
       if (k < 1) {

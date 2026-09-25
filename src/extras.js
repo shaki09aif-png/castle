@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GeoBuilder } from './walls.js';
 import { ColorBuilder, person, createPeople, SWAY_TIME, TAIL_GLSL, addTailSway } from './people.js';
 import { horse } from './yard.js';
-import { HALL, Frame, strawMaterial } from './courtyard.js';
+import { HALL, Frame, strawMaterial, Smoke, cart, haystack } from './courtyard.js';
 import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth, GATEHOUSE, GATE_PASSAGE, BARBICAN, RIVER } from './layout.js';
 import { WINDOWS } from './towers.js';
 import { mulberry32 } from './noise.js';
@@ -24,6 +24,7 @@ const GEO = {
   cylLo: new THREE.CylinderGeometry(1, 1, 1, 6),
   cone: new THREE.ConeGeometry(1, 1, 10),
   sph: new THREE.SphereGeometry(1, 10, 7),
+  bush: new THREE.SphereGeometry(1, 6, 4),
   flame: new THREE.ConeGeometry(1, 1, 7),
 };
 
@@ -64,7 +65,8 @@ function walkerMaterial() {
   return { mat, uPhase, uAmp };
 }
 
-function makeWalker(scene, build, path, { speed = 1.1, loop = true, stride = 1.5, amp = 0.45, y = null } = {}) {
+const WALKERS = []; // все ходящие — вдали от камеры не рисуются
+function makeWalker(scene, build, path, { speed = 1.1, loop = true, stride = 1.5, amp = 0.45, y = null, s0 = null, hold = null } = {}) {
   const B = new ColorBuilder();
   build(B);
   const { mat, uPhase, uAmp } = walkerMaterial();
@@ -73,17 +75,19 @@ function makeWalker(scene, build, path, { speed = 1.1, loop = true, stride = 1.5
   mesh.receiveShadow = true;
   mesh.name = 'walker';
   scene.add(mesh);
+  WALKERS.push(mesh);
   // длины участков пути
   const pts = loop ? [...path, path[0]] : path;
   const seg = [];
   let total = 0;
   for (let i = 0; i < pts.length - 1; i++) { const l = pts[i].distanceTo(pts[i + 1]); seg.push(l); total += l; }
-  let s = Math.random() * total, dir = 1;
+  let s = s0 !== null ? s0 : Math.random() * total, dir = 1;
   const pos = new V3();
   return {
     mesh,
     update(dt, heightAt) {
-      s += dt * speed * dir;
+      const waiting = hold && hold(s, dir, total);
+      if (!waiting) s += dt * speed * dir;
       if (loop) s = ((s % total) + total) % total;
       else if (s > total) { s = total; dir = -1; } else if (s < 0) { s = 0; dir = 1; }
       let d = s, i = 0;
@@ -97,12 +101,12 @@ function makeWalker(scene, build, path, { speed = 1.1, loop = true, stride = 1.5
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
       mesh.rotation.y += diff * Math.min(1, dt * 6); // плавный разворот на углах
-      uPhase.value += dt * speed / stride * Math.PI * 2;
+      if (!waiting) uPhase.value += dt * speed / stride * Math.PI * 2;
     },
   };
 }
 
-function createWalkers(scene, terrain, walls) {
+function createWalkers(scene, terrain, walls, ctx = {}) {
   const out = [];
   const P = (x, z) => new V3(x, 0, z);
   const pp = (role, seed) => (B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role, seed, pose: 'stand' });
@@ -142,7 +146,15 @@ function createWalkers(scene, terrain, walls) {
       person(B, { x: -0.55, y: 0, z: 1.1, yaw: 0, role: 'servant', seed: 307 });
     }, [a, b, c, d], { speed: 1.0, stride: 1.6, amp: 0.35 }));
   }
-  // гонка «y: true» — высота берётся из пути (для боевого хода)
+  // слуги с блюдами ходят по проходу между столами в зале
+  if (ctx.hallAisle) {
+    const { f, floorY, x0, x1 } = ctx.hallAisle;
+    const a = f.p(x0, floorY + 0.04, -0.2), b = f.p(x1, floorY + 0.04, 0.2);
+    for (const [seed, off] of [[311, 0], [312, 1]]) {
+      const w = makeWalker(scene, (B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role: 'servant', seed, item: 'tray' }), off ? [b, a] : [a, b], { loop: false, speed: 0.9, y: true });
+      out.push(w);
+    }
+  }
   return {
     update(dt) {
       for (const w of out) w.update(dt, terrain.heightAt);
@@ -327,6 +339,7 @@ function hallInterior(ctx) {
   }
   for (let k = 0; k < 5; k++) wood.addGeometry(new THREE.CylinderGeometry(0.07, 0.08, 0.9, 6), M(hc.x, floorY + 0.12, hc.z, k * 0.63, 1, 1, 1, Math.PI / 2 - 0.15));
   fire(glowB, hc.x, floorY + 0.15, hc.z, 1, rnd);
+  if (ctx.scene) ctx.smokes.push(new Smoke(ctx.scene, new V3(hc.x, floorY + 1.2, hc.z), { count: 10, alpha: 0.18, size: 0.6, grow: 2.5, rise: 1.1, life: 6, color: 0x8a8680 }));
   // гобелены на стенах между окнами
   const tap = [[-4.8, 0x6a1a2a, 0xd6a632], [-1.6, 0x1a3a5a, 0xe8d8a8], [1.6, 0x2a4a2a, 0xd6a632], [4.8, 0x5a2a5a, 0xe8d8a8]];
   for (const [lx, c1, c2] of tap) {
@@ -363,13 +376,29 @@ function hallInterior(ctx) {
     const d = f.X.clone().multiplyScalar(dxL).addScaledVector(f.N, dzL);
     people.push({ x: p.x, y: floorY + 0.04 + (lx < -hl + 3.2 ? 0.4 : 0), z: p.z, yaw: Math.atan2(d.x, d.z), role, pose });
   };
-  pp(dx - 0.05, 0, 1, 0, 'noble');
-  pp(dx - 0.05, -1.3, 1, 0.2, 'townswoman');
-  pp(dx + 0.1, 1.3, 1, -0.2, 'knight');
-  for (const [lx, lz, dz] of [[-3, -3.1, 1], [-0.6, -3.1, 1], [1.8, -3.1, 1], [-1.8, 3.1, -1], [0.8, 3.1, -1], [3.2, 3.1, -1]]) pp(lx, lz, 0, dz, rnd() < 0.5 ? 'knight' : 'noble');
-  pp(-2.5, 0, -1, 0, 'servant', 'walk');
-  pp(4.2, -0.6, -1, 0.1, 'servant');
-  pp(5.2, 1.2, -1, -0.6, 'merchant'); // менестрель
+  // пир: сеньор с семьёй за высоким столом, рыцари и гости сидят на лавках
+  const seat = (lx, lz, dxL, dzL, role, y) => {
+    const p = f.p(lx, 0, lz);
+    const d = f.X.clone().multiplyScalar(dxL).addScaledVector(f.N, dzL);
+    people.push({ x: p.x, y, z: p.z, yaw: Math.atan2(d.x, d.z), role, pose: 'sit' });
+  };
+  const chairY = floorY + 0.4 + 0.25;
+  seat(dx - 0.3, 0, 1, 0, 'noble', chairY);
+  seat(dx - 0.3, -1.3, 1, 0, 'townswoman', chairY);
+  seat(dx - 0.3, 1.3, 1, 0, 'knight', chairY);
+  const benchY = floorY + 0.04;
+  for (const tz of [-2.2, 2.2]) {
+    for (const s of [-1, 1]) {
+      for (let lx = -hl + 4.8; lx < hl - 3.2; lx += 1.45) {
+        if (rnd() < 0.25) continue;
+        const roles = ['knight', 'noble', 'knight', 'townswoman', 'guard', 'merchant'];
+        seat(lx + (rnd() - 0.5) * 0.3, tz + s * 0.85, 0, -s, roles[Math.floor(rnd() * roles.length)], benchY);
+      }
+    }
+  }
+  pp(5.0, 1.0, -1, -0.6, 'minstrel'); // менестрель с лютней у очага
+  pp(-hl + 3.6, -3.4, 1, 0.3, 'servant'); // виночерпий
+  ctx.hallAisle = { f, floorY, x0: -hl + 3.6, x1: hl - 2.2 };
 }
 
 // ===========================================================================
@@ -809,12 +838,12 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
 // ЖИЗНЬ ВОКРУГ: лодка с рыбаком, гуси у воды, коровы на пастбище, брызги
 // у мельничного колеса, огни в окнах ночью
 // ===========================================================================
-function cow(B, x, y, z, yaw, rnd) {
+function cow(B, x, y, z, yaw, rnd, color = null) {
   const r = M(x, y, z, yaw);
   const L = (px, py, pz, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0) =>
     r.clone().multiply(new THREE.Matrix4().compose(new V3(px, py, pz), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, 0, rz)), new V3(sx, sy, sz)));
-  const spotted = rnd() < 0.5;
-  const base = spotted ? 0xe8e2d8 : [0x6a4028, 0x8a5a34, 0x4a3020][Math.floor(rnd() * 3)];
+  const spotted = color === null && rnd() < 0.5;
+  const base = color !== null ? color : spotted ? 0xe8e2d8 : [0x6a4028, 0x8a5a34, 0x4a3020][Math.floor(rnd() * 3)];
   B.add(new THREE.CapsuleGeometry(0.42, 1.0, 5, 12).rotateX(Math.PI / 2), L(0, 1.05, 0, 1, 1.05, 1), base);
   if (spotted) for (let k = 0; k < 5; k++) B.add(GEO.sph, L((rnd() - 0.5) * 0.7, 1.1 + (rnd() - 0.3) * 0.5, (rnd() - 0.5) * 1.3, 0.25, 0.22, 0.3), 0x1e1a18);
   const graze = rnd() < 0.6;
@@ -827,9 +856,11 @@ function cow(B, x, y, z, yaw, rnd) {
     B.add(GEO.box, L(sd * 0.2, hy + 0.08, hz - 0.1, 0.14, 0.05, 0.08), base);
   }
   for (const [lx, lz] of [[-0.22, 0.55], [0.22, 0.55], [-0.22, -0.6], [0.22, -0.6]]) {
+    B.curLimb = [(lx < 0) === (lz > 0) ? 0.7 : -0.7, 0.72]; // для ходьбы (волы в упряжке)
     B.add(GEO.cylLo, L(lx, 0.36, lz, 0.075, 0.72, 0.075), base);
     B.add(GEO.cylLo, L(lx, 0.04, lz, 0.08, 0.08, 0.08), 0x2a2420);
   }
+  B.curLimb = [0, 0];
   B.add(GEO.sph, L(0, 0.6, -0.35, 0.2, 0.14, 0.2), 0xd8a0a0); // вымя
   const tailRoot = y + 1.3;
   B.add(GEO.cylLo, L(0, 0.95, -0.98, 0.03, 0.7, 0.03), base, 2, tailRoot);
@@ -960,6 +991,259 @@ function createWindowLights(scene) {
 }
 
 // ===========================================================================
+// ВОКРУГ ЗАМКА: рыцарский турнир, отряд всадников на дороге, работы в поле,
+// валуны и кусты у дороги, развалины для «замка сегодня»
+// ===========================================================================
+function findFlat(terrain, village, { cx, cz, spread, needR, avoid = [], minCastle = 150 }, rnd) {
+  for (let k = 0; k < 4000; k++) {
+    const sp = spread * (0.4 + k / 4000);
+    const x = cx + (rnd() - 0.5) * sp * 2, z = cz + (rnd() - 0.5) * sp * 2;
+    if (Math.hypot(x, z) < minCastle) continue;
+    if (avoid.some((a) => Math.hypot(x - a.x, z - a.z) < a.r + needR)) continue;
+    let ok = true, lo = Infinity, hi = -Infinity;
+    for (let j = 0; j < 16 && ok; j++) {
+      const a = (j / 16) * Math.PI * 2;
+      for (const r of [needR * 0.5, needR]) {
+        const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+        const h = terrain.heightAt(px, pz);
+        lo = Math.min(lo, h); hi = Math.max(hi, h);
+        if (village.exclude(px, pz) || Math.abs(pz - riverZ(px)) < riverHalfWidth(px) + 8) ok = false;
+        const rd = terrain.roadNearest(px, pz);
+        if (rd && rd.d < 6) ok = false;
+      }
+    }
+    if (ok && hi - lo < needR * 0.12) return new V3(x, 0, z);
+  }
+  return null;
+}
+
+function riderBuild(B, { horseCol, role, seed, item, caparison, rnd }) {
+  horse(B, 0, 0, 0, 0, horseCol, rnd);
+  if (caparison) { // попона до земли — турнирный наряд коня
+    B.add(new THREE.CylinderGeometry(0.46, 0.5, 0.9, 16, 1, true).rotateX(Math.PI / 2).scale(1, 1.15, 1.25), M(0, 1.05, 0), caparison);
+  }
+  person(B, { x: 0, y: 1.28, z: 0.02, yaw: 0, role, seed, pose: 'ride', item });
+}
+
+function createLife2(scene, ctx, village, walls) {
+  const { terrain, wood, stone, colorB, straw, people, rnd } = ctx;
+  const gh = terrain.heightAt;
+  const movers = [];
+  const out = { update() {}, setGate() {} };
+  if (!village) return out;
+  const br = village.bridge;
+  const avoid = [];
+  if (ctx.pasture) avoid.push({ x: ctx.pasture.x, z: ctx.pasture.z, r: 20 });
+  if (ctx.campSite) avoid.push({ x: ctx.campSite.x, z: ctx.campSite.z, r: 40 });
+
+  // ---------------- рыцарский турнир ----------------
+  const T = findFlat(terrain, village, { cx: br.b.x + 60, cz: br.b.z + 40, spread: 220, needR: 34, avoid }, rnd);
+  if (T) {
+    ctx.tourney = T;
+    const U = new V3(1, 0, 0.35).normalize(), Vn = new V3(-U.z, 0, U.x);
+    const at = (u, v) => T.clone().addScaledVector(U, u).addScaledVector(Vn, v);
+    const yawU = Math.atan2(U.x, U.z);
+    // барьер между всадниками: столбы и полосатая перекладина
+    for (let u = -26; u <= 26; u += 2.6) {
+      const p = at(u, 0), g = gh(p.x, p.z);
+      wood.box(p.clone().setY(g + 0.7), UP, U, Vn, 0.7, 0.07, 0.07, { grain: true });
+      if (u < 26) {
+        const c = at(u + 1.3, 0);
+        colorB.add(GEO.box, M(c.x, gh(c.x, c.z) + 1.35, c.z, yawU, 0.09, 0.14, 2.6), Math.round((u + 26) / 2.6) % 2 ? 0x1d3f8a : 0xe8e0c8);
+      }
+    }
+    // ограда ристалища
+    for (const v of [-11, 11]) for (let u = -32; u <= 32; u += 3.2) {
+      const p = at(u, v), g = gh(p.x, p.z);
+      wood.box(p.clone().setY(g + 0.55), UP, U, Vn, 0.55, 0.06, 0.06, { grain: true });
+      if (u < 32) { const c = at(u + 1.6, v); wood.box(c.clone().setY(gh(c.x, c.z) + 0.95), U, UP, Vn, 1.62, 0.04, 0.04, { grain: true }); }
+    }
+    // трибуна со зрителями и навесом
+    const stand = (v0, face) => {
+      for (let tier = 0; tier < 3; tier++) {
+        const v = v0 + face * tier * 0.9;
+        for (let u = -10; u <= 10; u += 2) {
+          const p = at(u, v), g = gh(p.x, p.z);
+          wood.box(p.clone().setY(g + 0.3 + tier * 0.55), U, UP, Vn, 1.02, 0.05, 0.42, { grain: true });
+          wood.box(p.clone().setY(g + (0.3 + tier * 0.55) / 2), UP, U, Vn, (0.3 + tier * 0.55) / 2, 0.06, 0.06, { grain: true });
+          const roles = ['noble', 'townswoman', 'peasant', 'townswoman', 'merchant', 'child', 'knight'];
+          if (rnd() < 0.75) {
+            const q = p.clone().addScaledVector(U, (rnd() - 0.5) * 1.2);
+            people.push({ x: q.x, y: g + tier * 0.55 + 0.35, z: q.z, yaw: Math.atan2(-Vn.x * face, -Vn.z * face), role: roles[Math.floor(rnd() * roles.length)], pose: 'sit' });
+          }
+        }
+      }
+      // навес над трибуной
+      for (let k = 0; k < 11; k++) {
+        const c = at(-10 + k * 2, v0 + face * 1.2);
+        colorB.add(GEO.box, M(c.x, gh(c.x, c.z) + 3.6, c.z, yawU, 3.4, 0.04, 2.02, 0, face * 0.15), k % 2 ? 0x7a1c1c : 0xd6a632);
+      }
+      for (const u of [-10, 10]) for (const dv of [0, 2.4]) {
+        const p = at(u, v0 + face * dv), g = gh(p.x, p.z);
+        wood.box(p.clone().setY(g + 1.8), UP, U, Vn, 1.8, 0.06, 0.06, { grain: true });
+      }
+    };
+    stand(13, 1);
+    // зрители вдоль другой стороны и знамёна
+    for (let u = -24; u <= 24; u += 2.2) {
+      if (rnd() < 0.4) continue;
+      const p = at(u + (rnd() - 0.5), -12.4 - rnd() * 1.2);
+      const roles = ['peasant', 'townswoman', 'child', 'servant', 'guard'];
+      people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: Math.atan2(Vn.x, Vn.z), role: roles[Math.floor(rnd() * roles.length)] });
+    }
+    for (const u of [-30, -15, 15, 30]) {
+      const p = at(u, -11.6), g = gh(p.x, p.z);
+      wood.addGeometry(new THREE.CylinderGeometry(0.05, 0.05, 5, 5), M(p.x, g + 2.5, p.z));
+      colorB.add(GEO.box, M(p.x + U.x * 0.5, g + 4.4, p.z + U.z * 0.5, yawU + Math.PI / 2, 0.9, 1.3, 0.02), u < 0 ? 0x1d3f8a : 0x7a1c1c);
+    }
+    // шатры рыцарей на концах поля
+    for (const [u, c] of [[-38, 0x1d3f8a], [38, 0x7a1c1c]]) {
+      const p = at(u, 4), g = gh(p.x, p.z);
+      for (let k = 0; k < 10; k++) {
+        const col = k % 2 ? c : 0xe8e0c8;
+        colorB.add(new THREE.CylinderGeometry(2.4, 2.4, 2, 2, 1, true, (k / 10) * Math.PI * 2, Math.PI / 5 + 0.01), M(p.x, g + 1, p.z), col);
+        colorB.add(new THREE.ConeGeometry(2.7, 1.8, 2, 1, true, (k / 10) * Math.PI * 2, Math.PI / 5 + 0.01), M(p.x, g + 2.9, p.z), col);
+      }
+      people.push({ x: p.x + Vn.x * 3.2, y: gh(p.x + Vn.x * 3.2, p.z + Vn.z * 3.2), z: p.z + Vn.z * 3.2, yaw: yawU + (u < 0 ? 0 : Math.PI), role: 'servant' });
+    }
+    // герольд у барьера
+    { const p = at(0, -3.2); people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: Math.atan2(-Vn.x, -Vn.z), role: 'noble' }); }
+    // два рыцаря скачут навстречу друг другу вдоль барьера
+    const lane = (v, from, to) => {
+      const pts = [];
+      for (let k = 0; k <= 8; k++) { const p = at(from + (to - from) * (k / 8), v); pts.push(new V3(p.x, gh(p.x, p.z), p.z)); }
+      return pts;
+    };
+    const jr = mulberry32(900);
+    movers.push(makeWalker(scene, (B) => riderBuild(B, { horseCol: 0xe8e0d0, role: 'knight', seed: 501, item: 'lance', caparison: 0x1d3f8a, rnd: jr }), lane(-1.6, -28, 28), { loop: false, speed: 6.5, stride: 2.6, amp: 0.7, s0: 0 }));
+    movers.push(makeWalker(scene, (B) => riderBuild(B, { horseCol: 0x2a1e16, role: 'foe', seed: 502, item: 'lance', caparison: 0x7a1c1c, rnd: jr }), lane(1.6, 28, -28), { loop: false, speed: 6.5, stride: 2.6, amp: 0.7, s0: 0 }));
+  }
+
+  // ---------------- отряд всадников на дороге к замку ----------------
+  let gateRef = null;
+  {
+    const road = terrain.road;
+    const pts = [];
+    for (let i = road.length - 1; i >= 0; i -= 3) pts.push(new V3(road[i].x, road[i].h + 0.05, road[i].z));
+    const total = pts.reduce((a, p, i) => (i ? a + p.distanceTo(pts[i - 1]) : 0), 0);
+    const riders = [
+      { role: 'guard', item: 'spear', col: 0x5a3a1e },
+      { role: 'knight', item: undefined, col: 0xe8e0d0, cap: 0x1d3f8a },
+      { role: 'noble', item: undefined, col: 0x2a1e16 },
+      { role: 'guard', item: 'spear', col: 0x6a4424 },
+    ];
+    const rr = mulberry32(777);
+    riders.forEach((r, i) => {
+      const lag = i * 4.5;
+      movers.push(makeWalker(scene, (B) => riderBuild(B, { horseCol: r.col, role: r.role, seed: 520 + i, item: r.item, caparison: r.cap, rnd: rr }), pts, {
+        loop: false, speed: 1.7, stride: 1.7, amp: 0.4, y: true, s0: Math.max(0, total * 0.35 - lag),
+        // если ворота закрыты — отряд ждёт перед мостом через ров
+        hold: (s, dir, tot) => !!(gateRef && gateRef.closed && dir > 0 && s > tot - 14 - lag),
+      }));
+    });
+  }
+
+  // ---------------- работы в поле ----------------
+  const fm = village.fieldMask;
+  if (fm) {
+    const spots = [];
+    for (let k = 0; k < 4000 && spots.length < 3; k++) {
+      const x = br.b.x + (rnd() - 0.5) * 260, z = br.b.z + (rnd() - 0.5) * 260;
+      const m = fm(x, z);
+      if (!m || m.edge < 1) continue;
+      if (spots.some((q) => Math.hypot(q.x - x, q.z - z) < 40)) continue;
+      spots.push(new V3(x, 0, z));
+    }
+    spots.forEach((c, si) => {
+      if (si < 2) {
+        // косари и снопы-суслоны
+        for (let k = 0; k < 4; k++) {
+          const x = c.x + (k - 1.5) * 2.4, z = c.z + (rnd() - 0.5) * 2;
+          people.push({ x, y: gh(x, z), z, yaw: 0.3 + (rnd() - 0.5) * 0.3, role: k === 3 ? 'woman' : 'reaper', pose: k === 3 ? 'work' : 'stand' });
+        }
+        for (let k = 0; k < 10; k++) {
+          const x = c.x + (rnd() - 0.5) * 16, z = c.z - 4 - rnd() * 10;
+          for (let j = 0; j < 4; j++) {
+            const a = (j / 4) * Math.PI * 2;
+            straw.addGeometry(new THREE.CylinderGeometry(0.12, 0.2, 1.0, 6), M(x + Math.cos(a) * 0.18, gh(x, z) + 0.45, z + Math.sin(a) * 0.18, 0, 1, 1, 1, Math.sin(a) * 0.25, -Math.cos(a) * 0.25));
+          }
+        }
+        // воз со снопами и волы
+        if (si === 0) {
+          const p = new V3(c.x + 8, 0, c.z + 3);
+          const top = cart(wood, ctx.metal, terrain, p.x, p.z, 0.4, rnd);
+          haystack(straw, terrain, top.clone().setY(top.y + 0.05), 0.9, rnd, true);
+          const X2 = new V3(Math.cos(0.4), 0, Math.sin(0.4));
+          for (const sd of [-0.55, 0.55]) {
+            const o = p.clone().addScaledVector(X2, 3.9).add(new V3(-X2.z * sd, 0, X2.x * sd));
+            cow(colorB, o.x, gh(o.x, o.z), o.z, Math.atan2(X2.x, X2.z), rnd, 0x7a5030);
+          }
+        }
+      } else {
+        // пахарь с волами ходит взад-вперёд по полосе
+        const a = new V3(c.x - 14, 0, c.z), b = new V3(c.x + 14, 0, c.z);
+        movers.push(makeWalker(scene, (B) => {
+          for (const sd of [-0.55, 0.55]) cow(B, sd, 0, 2.2, 0, rnd, 0x6a4028);
+          B.add(GEO.box, M(0, 1.25, 2.9, 0, 1.6, 0.1, 0.12), 0x5a3a1e); // ярмо
+          B.add(GEO.box, M(0, 0.7, 0.9, 0, 0.08, 0.08, 2.4, -0.25), 0x5a3a1e); // дышло
+          B.add(GEO.box, M(0, 0.35, -0.2, 0, 0.12, 0.6, 0.12, 0.5), 0x5a3a1e); // соха
+          B.add(GEO.cone, M(0, 0.08, 0.05, 0, 0.06, 0.3, 0.06, Math.PI / 2 + 0.4), 0x6a6a70);
+          person(B, { x: 0, y: 0, z: -1.2, yaw: 0, role: 'peasant', seed: 540 });
+        }, [a, b], { loop: false, speed: 0.7, stride: 1.0, amp: 0.35 }));
+      }
+    });
+  }
+
+  // ---------------- валуны и кусты вдоль дороги ----------------
+  {
+    const road = terrain.road;
+    for (let i = 12; i < road.length; i += 4) {
+      const q = road[i], nq = road[Math.min(road.length - 1, i + 1)];
+      if (q.bridge) continue;
+      const dx = nq.x - q.x, dz = nq.z - q.z, l = Math.hypot(dx, dz) || 1;
+      for (const sd of [-1, 1]) {
+        if (rnd() < 0.45) continue;
+        const off = 4.2 + rnd() * 2.5;
+        const x = q.x - (dz / l) * off * sd, z = q.z + (dx / l) * off * sd;
+        if (village.exclude(x, z)) continue;
+        if (rnd() < 0.5) {
+          const r = 0.25 + rnd() * 0.45;
+          stone.addGeometry(new THREE.DodecahedronGeometry(r, 0), M(x, gh(x, z) + r * 0.5, z, rnd() * 6, 1, 0.7, 1.1));
+        } else {
+          const green = [0x3a5a24, 0x2e4a1e, 0x4a6a2a][Math.floor(rnd() * 3)];
+          for (let k = 0; k < 3; k++) colorB.add(GEO.bush, M(x + (rnd() - 0.5) * 0.8, gh(x, z) + 0.35, z + (rnd() - 0.5) * 0.8, 0, 0.55 + rnd() * 0.3, 0.45, 0.55 + rnd() * 0.3), green);
+        }
+      }
+    }
+  }
+
+  // ---------------- развалины: груды камней (видны только в «замке сегодня») ----------------
+  {
+    const rb = new GeoBuilder(ctx.stoneTile);
+    const Pw = walls.points, Nw = walls.segNrm;
+    for (let i = 1; i < Pw.length - 2; i += 2) {
+      const c = Pw[i].clone().lerp(Pw[i + 1], 0.3 + rnd() * 0.4);
+      for (const side of [-1, 1]) {
+        const base = c.clone().addScaledVector(Nw[i], side * (2.2 + rnd()));
+        for (let k = 0; k < 14; k++) {
+          const p = base.clone().add(new V3((rnd() - 0.5) * 3.5, 0, (rnd() - 0.5) * 3.5));
+          const r = 0.25 + rnd() * 0.5;
+          rb.addGeometry(new THREE.DodecahedronGeometry(r, 0), M(p.x, gh(p.x, p.z) + r * 0.4 + rnd() * 0.4, p.z, rnd() * 6, 1, 0.75, 1.2));
+        }
+      }
+    }
+    ctx.ruinRubble = rb;
+  }
+
+  return {
+    setGate(g) { gateRef = g; },
+    update(t, dt) {
+      for (const m of movers) m.update(dt, gh);
+    },
+  };
+}
+
+// ===========================================================================
 export function createExtras(scene, terrain, walls, village) {
   const rnd = mulberry32(5151);
   const wood = new GeoBuilder(walls.woodMaterial.userData.tileMeters);
@@ -968,10 +1252,13 @@ export function createExtras(scene, terrain, walls, village) {
   const colorB = new ColorBuilder(), glowB = new ColorBuilder();
   const people = [];
   const armWood = new GeoBuilder(walls.woodMaterial.userData.tileMeters), armMetal = new GeoBuilder(1);
-  const ctx = { terrain, wood, stone, metal, straw, colorB, glowB, people, rnd, armWood, armMetal };
+  const ctx = { terrain, wood, stone, metal, straw, colorB, glowB, people, rnd, armWood, armMetal, scene, smokes: [] };
   hallInterior(ctx);
   const camp = siegeCamp(ctx, village);
+  if (camp) ctx.campSite = { x: camp.x, z: camp.z };
   const country = createCountryLife(scene, ctx, village); // коровы — в общую сетку, поэтому до сборки
+  ctx.stoneTile = walls.stoneMaterial.userData.tileMeters;
+  const life2 = createLife2(scene, ctx, village, walls);
   const iron = new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 });
   const colorMat = addTailSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
   // огонь, свечи, пламя костров — светятся сами (без источников света)
@@ -987,24 +1274,56 @@ export function createExtras(scene, terrain, walls, village) {
     m.name = name;
     scene.add(m);
   }
+  if (ctx.ruinRubble && ctx.ruinRubble.pos.length) {
+    const rm = new THREE.Mesh(ctx.ruinRubble.build(), walls.stoneMaterial);
+    rm.name = 'ruin-rubble';
+    rm.castShadow = rm.receiveShadow = true;
+    rm.visible = false;
+    scene.add(rm);
+  }
   const siege = createSiege(scene, ctx, walls, terrain, { wood: walls.woodMaterial, iron });
   const windows = createWindowLights(scene);
-  const peopleUpd = createPeople(scene, people);
-  const walkers = createWalkers(scene, terrain, walls);
+  // люди разбиты на группы по местам: далёкие группы не рисуются (меньше треугольников)
+  const anchors = [new V3(0, 0, 0)];
+  if (camp) anchors.push(new V3(camp.x, 0, camp.z));
+  if (ctx.tourney) anchors.push(ctx.tourney.clone());
+  if (ctx.pasture) anchors.push(ctx.pasture.clone());
+  const groups = anchors.map(() => []), other = [];
+  for (const pp of people) {
+    let bi = -1, bd = 1e9;
+    anchors.forEach((a, i) => { const d = Math.hypot(pp.x - a.x, pp.z - a.z); if (d < bd) { bd = d; bi = i; } });
+    (bd < 90 ? groups[bi] : other).push(pp);
+  }
+  const peopleGroups = [];
+  groups.forEach((g, i) => { if (g.length) peopleGroups.push({ c: anchors[i], upd: createPeople(scene, g) }); });
+  if (other.length) peopleGroups.push({ c: null, upd: createPeople(scene, other) });
+  const ctxRuins = { on: false };
+  const peopleUpd = { update(t) { for (const g of peopleGroups) g.upd.update(t); } };
+  const walkers = createWalkers(scene, terrain, walls, ctx);
   const birds = createBirds(scene);
   return {
     camp,
     birds,
     siege,
-    update(t, dt) {
+    update(t, dt, camera) {
       dt = Math.min(dt, 0.1);
+      if (camera) {
+        const cp = camera.position;
+        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < 320 && !(ctxRuins.on);
+        for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < 380 && !(ctxRuins.on);
+      }
       peopleUpd.update(t);
       walkers.update(dt);
       birds.update(t);
       if (siege) siege.update(dt);
       country.update(t, dt);
+      for (const sm of ctx.smokes) sm.update(t);
+      if (life2) life2.update(t, dt);
     },
     setNight(k) { birds.mesh.visible = k < 0.5; windows.set(k); },
     get pasture() { return ctx.pasture; },
+    set ruinsOn(v) { ctxRuins.on = v; },
+    get tourney() { return ctx.tourney; },
+    setGate(g) { life2.setGate(g); },
   };
 }
