@@ -122,9 +122,10 @@ async function init() {
   const torches = createTorches(scene, terrain, walls);
   await step('интерьер зала, осадный лагерь, птицы');
   const extras = createExtras(scene, terrain, walls, village);
+  if (extras.places.well) extras.places.well.water = scene.getObjectByName('well-water');
   toLayer1(mark);
   // в осадном лагере не растут деревья и трава
-  const campEx = (x, z) => ((extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30) || (extras.pasture && Math.hypot(x - extras.pasture.x, z - extras.pasture.z) < 30) || (extras.tourney && Math.hypot(x - extras.tourney.x, z - extras.tourney.z) < 50) ? 1 : 0);
+  const campEx = (x, z) => ((extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30) || (extras.pasture && Math.hypot(x - extras.pasture.x, z - extras.pasture.z) < 30) || (extras.tourney && Math.hypot(x - extras.tourney.x, z - extras.tourney.z) < 50) || extras.areas.some((q) => Math.hypot(x - q.x, z - q.z) < q.r) ? 1 : 0);
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain, {
     exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z), campEx(x, z))),
@@ -330,7 +331,7 @@ async function init() {
 
   // доступ из консоли браузера для отладки
   window.castle = {
-    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, weather, terrain, assets,
+    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, weather, terrain, assets, village,
     snapshot() {
       frame();
       return renderer.domElement.toDataURL('image/jpeg', 0.9);

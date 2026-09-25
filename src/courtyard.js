@@ -799,6 +799,7 @@ export function createCourtyard(scene, terrain, walls) {
     const water = new THREE.Mesh(new THREE.CircleGeometry(W0.r - 0.34, 24), new THREE.MeshStandardMaterial({ color: 0x0b1210, roughness: 0.03, metalness: 0.2 }));
     water.rotation.x = -Math.PI / 2;
     water.position.set(W0.x, top - 1.3, W0.z);
+    water.name = 'well-water';
     scene.add(water);
     // стойки, ворот с верёвкой и рукоятью
     const X = new V3(1, 0, 0), Z = new V3(0, 0, 1);

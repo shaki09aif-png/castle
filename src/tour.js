@@ -74,6 +74,32 @@ function buildStops(terrain, village, extras) {
       tgt: V(WELL.x - 4, HILL_TOP + 2, WELL.z - 2),
       pos: V(WELL.x + 22, HILL_TOP + 14, WELL.z + 24),
     },
+    ...(extras.places && extras.places.training ? [{
+      title: 'Учения стражи',
+      text: 'Стражники упражнялись каждый день: бились на мечах и стреляли из лука по соломенным мишеням. Опытный лучник выпускал до десяти стрел в минуту. Оружие хранили в стойках у казармы.',
+      ...extras.places.training,
+    }] : []),
+    ...(extras.places && extras.places.falconer ? [{
+      title: 'Сокольничий на стене',
+      text: 'Соколиная охота была любимой забавой знати. Птицу годами приучали возвращаться на кожаную перчатку хозяина. Хорошего охотничьего сокола ценили очень дорого — их дарили королям.',
+      ...extras.places.falconer,
+    }] : []),
+    ...(extras.places && extras.places.well ? (() => {
+      const w = extras.places.well, t = w.top;
+      return [{
+        title: 'Колодец',
+        text: 'Колодец — самое важное место при осаде: без воды замок не продержался бы и недели. Шахту пробивали в скале на десятки метров вниз, до воды. Ведро поднимали воротом. Сейчас мы спустимся внутрь.',
+        tgt: V(WELL.x, t - 0.4, WELL.z),
+        pos: V(WELL.x + 4.2, t + 2.4, WELL.z + 4.2),
+        then: [
+          { pos: V(WELL.x + 0.3, t + 0.45, WELL.z + 0.35), tgt: V(WELL.x - 0.1, t - 8, WELL.z - 0.1), dur: 2.2 },
+          { pos: V(WELL.x + 0.3, t - 14, WELL.z + 0.3), tgt: V(WELL.x - 0.2, t - 26, WELL.z - 0.15), dur: 7, under: true },
+        ],
+        limit: w.limit,
+        onEnter: () => { w.grp.visible = true; if (w.water) w.water.visible = false; },
+        onLeave: () => { w.grp.visible = false; if (w.water) w.water.visible = true; },
+      }];
+    })() : []),
     {
       title: 'Рынок у ворот',
       text: 'В ярмарочные дни во двор пускали торговцев: хлеб, горшки, ткани, овощи, рыба. С каждого прилавка сеньор брал пошлину — это был важный доход замка.',
@@ -114,18 +140,58 @@ function buildStops(terrain, village, extras) {
       text: 'В каждом замке была своя часовня. Её алтарь обращён на восток. Колокол созывал на службу и поднимал тревогу.',
       ...facing(chapel, 17, 6, 7),
     },
+    ...(extras.places && extras.places.garden ? [{
+      title: 'Сад и кладбище',
+      text: 'У часовни хоронили обитателей замка — под простыми каменными и деревянными крестами. Рядом разбивали сад: грядки с лекарственными травами, яблони и груши, ульи. Мёд был главной сладостью Средневековья.',
+      ...extras.places.garden,
+    }] : []),
     {
       title: 'Донжон',
       text: 'Донжон — главная башня и последний рубеж обороны. Вход сделан на втором этаже: лестницу можно убрать или сломать. В нижнем этаже хранили припасы, выше жил сеньор.',
       tgt: V(KEEP.x, kg + 15, KEEP.z),
       pos: V(KEEP.x + 44, kg + 20, KEEP.z + 38),
     },
+    ...(extras.places && extras.places.dungeon ? [{
+      title: 'Темница под донжоном',
+      text: 'В подвале донжона хранили припасы, а часть отводили под темницу: узников держали за решёткой на соломе, иногда на цепи. Английское слово dungeon — «подземная тюрьма» — произошло как раз от французского «донжон».',
+      tgt: extras.places.dungeon.tgt, pos: extras.places.dungeon.pos, under: true,
+      limit: extras.places.dungeon.limit,
+      onEnter: () => { extras.places.dungeon.grp.visible = true; },
+      onLeave: () => { extras.places.dungeon.grp.visible = false; },
+    }] : []),
     {
       title: 'Деревня и мельница',
       text: 'Крестьяне жили у подножия в домах с соломенными крышами и работали на полях, поделённых на полосы. Водяная мельница принадлежала сеньору, и за помол платили ему.',
       tgt: V(mill.x, terrain.heightAt(mill.x, mill.z) + 3, mill.z),
       pos: V(mill.x + 38, terrain.heightAt(mill.x, mill.z) + 24, mill.z + 36),
     },
+    ...(extras.places && extras.places.washers ? [{
+      title: 'Прачки у реки',
+      text: 'Бельё стирали в реке: замачивали, тёрли, отбивали деревянными вальками на мостках и сушили на верёвках и кустах. Вместо мыла часто брали щёлок — воду, настоянную на золе.',
+      tgt: extras.places.washers.tgt, pos: extras.places.washers.pos,
+    }] : []),
+    ...(extras.places && extras.places.tunnel ? (() => {
+      const T = extras.places.tunnel;
+      return [{
+        title: 'Потайной ход',
+        text: 'По преданиям, из многих замков к реке вёл потайной ход. Через него тайно посылали гонца, носили воду или уходили при осаде. Вход снаружи прятали среди камней и кустов. Сейчас мы войдём внутрь.',
+        ...T.outside,
+        then: [{ ...T.inside, dur: 3.5, under: true }],
+        limit: T.limit,
+        onEnter: () => { T.grp.visible = true; },
+        onLeave: () => { T.grp.visible = false; },
+      }];
+    })() : []),
+    ...(extras.places && extras.places.vineyard ? [{
+      title: 'Виноградник',
+      text: 'На солнечных склонах разводили виноград. Вино было нужно для церковной службы и для стола сеньора. Осенью урожай собирали в корзины и везли давить в больших чанах.',
+      tgt: extras.places.vineyard.tgt, pos: extras.places.vineyard.pos,
+    }] : []),
+    ...(extras.places && extras.places.quarry ? [{
+      title: 'Каменоломня',
+      text: 'Камень для стен добывали поблизости — возить его издалека было слишком дорого. Каменотёсы откалывали блоки кирками и клиньями, обтёсывали их, тяжёлые камни поднимали деревянным краном и везли на волах.',
+      tgt: extras.places.quarry.tgt, pos: extras.places.quarry.pos,
+    }] : []),
     ...(extras.pasture ? [{
       title: 'Пастбище',
       text: 'Коровы давали молоко, сыр и масло, быков запрягали в плуг. Скот пасли на общем лугу у деревни, за ним присматривал пастух. По реке рыбаки ходили на лодках — рыба была главной едой в постные дни.',
@@ -161,7 +227,7 @@ function buildStops(terrain, village, extras) {
   ].map((s) => {
     // камера не должна оказаться под землёй
     const g = terrain.heightAt(s.pos.x, s.pos.z) + 1.5;
-    if (s.pos.y < g) s.pos.y = g;
+    if (s.pos.y < g && !s.under) s.pos.y = g;
     return s;
   });
 }
@@ -194,6 +260,7 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
 
   function go(i) {
     if (cam.mode === 'fly') cam.setMode('orbit');
+    cam.limit = null;
     if (current >= 0 && current !== i && stops[current].onLeave) stops[current].onLeave();
     current = i;
     if (stops[i].onEnter) stops[i].onEnter();
@@ -204,7 +271,7 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
     // дуга вверх, чтобы не пролетать сквозь стены и холм
     const mid = p0.clone().lerp(s.pos, 0.5);
     mid.y = Math.max(p0.y, s.pos.y) + Math.min(90, dist * 0.35);
-    flight = { p0, t0, mid, s, t: 0, dur: Math.min(4.5, Math.max(1.6, dist / 70)) };
+    flight = { p0, t0, mid, s, dest: s, seg: 0, t: 0, dur: Math.min(4.5, Math.max(1.6, dist / 70)) };
     cam.orbit.enabled = false;
     buttons.forEach((b, k) => b.classList.toggle('active', k === i));
     capNum.textContent = `${i + 1} / ${stops.length}`;
@@ -223,7 +290,7 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
     playBtn.textContent = '▶ Вся экскурсия';
   }
   playBtn.addEventListener('click', () => (auto ? stopAuto() : startAuto()));
-  const leaveCurrent = () => { if (current >= 0 && stops[current].onLeave) stops[current].onLeave(); };
+  const leaveCurrent = () => { cam.limit = null; flight = null; cam.orbit.enabled = true; if (current >= 0 && stops[current].onLeave) stops[current].onLeave(); current = -1; };
   document.getElementById('caption-close').addEventListener('click', () => { caption.classList.remove('show'); stopAuto(); leaveCurrent(); });
   document.getElementById('tour-toggle').addEventListener('click', () => panel.classList.toggle('collapsed'));
   // любое действие мышью на сцене прерывает автоэкскурсию
@@ -255,14 +322,22 @@ export function createTour(camera, cam, terrain, village, extras = {}) {
       f.t = Math.min(1, f.t + dt / f.dur);
       const k = ease(f.t);
       // квадратичная кривая Безье через приподнятую середину
-      a.copy(f.p0).lerp(f.mid, k);
-      b.copy(f.mid).lerp(f.s.pos, k);
-      camera.position.copy(a.lerp(b, k));
+      if (f.mid) {
+        a.copy(f.p0).lerp(f.mid, k);
+        b.copy(f.mid).lerp(f.dest.pos, k);
+        camera.position.copy(a.lerp(b, k));
+      } else camera.position.copy(f.p0).lerp(f.dest.pos, k); // спуск/вход — по прямой
       const g = terrain.heightAt(camera.position.x, camera.position.z) + 1.5;
-      if (camera.position.y < g) camera.position.y = g;
-      cam.orbit.target.copy(f.t0).lerp(f.s.tgt, ease(Math.min(1, f.t * 1.25)));
+      if (camera.position.y < g && !f.dest.under && !(f.mid && f.t > 0.6 && f.dest.under)) camera.position.y = g;
+      cam.orbit.target.copy(f.t0).lerp(f.dest.tgt, f.mid ? ease(Math.min(1, f.t * 1.25)) : k);
       camera.lookAt(cam.orbit.target);
       if (f.t >= 1) {
+        const next = f.s.then && f.s.then[f.seg];
+        if (next) {
+          flight = { p0: camera.position.clone(), t0: cam.orbit.target.clone(), mid: null, s: f.s, dest: next, seg: f.seg + 1, t: 0, dur: next.dur || 2 };
+          return true;
+        }
+        if (f.s.limit) cam.limit = f.s.limit;
         flight = null;
         cam.orbit.enabled = true;
         cam.orbit.update();

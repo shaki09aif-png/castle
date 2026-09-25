@@ -272,12 +272,19 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     lute: [[-0.55, 0.25, 1.5], [-0.35, -0.3, 1.25]],
     tray: [[-0.35, 0.3, 1.75], [-0.35, -0.3, 1.75]],
     scythe: [[-0.7, 0.25, 0.9], [-0.35, -0.2, 1.1]],
-  }[IT === 'lance' ? 'lance' : IT === 'lute' ? 'lute' : IT === 'tray' ? 'tray' : IT === 'scythe' ? 'scythe' : ride ? 'reins' : sit ? 'feast' : IT === 'spear' ? 'spear' : IT === 'bow' ? 'bow' : pose === 'work' || IT === 'hoe' ? 'work' : IT === 'hammer' ? 'hammer' : IT === 'bucket' ? 'bucket' : 'stand'];
+    torch: [[-0.75, 0.2, 1.1], [0.08, -0.1, 0.18]],
+    sword: [[-1.0, 0.15, 0.55], [-0.5, -0.35, 1.3]],
+    falcon: [[0.08, 0.1, 0.18], [-0.5, -0.15, 1.45]],
+    basket: [[-0.25, 0.3, 1.2], [-0.25, -0.3, 1.2]],
+  }[IT === 'torch' ? 'torch' : IT === 'sword' || IT === 'woodsword' ? 'sword' : IT === 'falcon' ? 'falcon' : IT === 'basket' && pose !== 'work' ? 'basket' : IT === 'pick' ? 'hammer' : IT === 'lance' ? 'lance' : IT === 'lute' ? 'lute' : IT === 'tray' ? 'tray' : IT === 'scythe' ? 'scythe' : ride ? 'reins' : sit ? 'feast' : IT === 'spear' ? 'spear' : IT === 'bow' ? 'bow' : pose === 'work' || IT === 'hoe' ? 'work' : IT === 'hammer' ? 'hammer' : IT === 'bucket' ? 'bucket' : 'stand'];
   const sleeve = R.surcoat && !R.sword ? R.surcoat : R.mail ? 0x8a8e94 : tunic;
   const hands = [];
+  let armLimb = [0, 0];
   [1, -1].forEach((sd, i) => {
     const [fx, sz, eb] = armPose[i];
-    B.curLimb = ride || sit || ['tray', 'lute', 'lance'].includes(IT) ? [0, 0] : [-sd * 0.6, 1.4 * s]; // рука — в противофазе с ногой
+    const fixed = ride || sit || ['tray', 'lute', 'lance', 'basket'].includes(IT) || (i === 0 && IT === 'torch') || (i === 1 && IT === 'falcon');
+    B.curLimb = fixed ? [0, 0] : [-sd * 0.6, 1.4 * s];
+    if (i === 0) armLimb = B.curLimb; // рука — в противофазе с ногой
     const sh = M(sd * 0.225, 1.4, lean * 0.1, fx + lean * 0.3, 0, sd * Math.abs(sz));
     B.add(G.shoulder, sh, sleeve, 0.6, sw);
     B.add(G.upperArm, sh, sleeve, 0.6, sw);
@@ -349,11 +356,42 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(blade, new THREE.Matrix4().compose(bottom.clone().add(new V3(0, 0.03, 0)), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, yaw + 2.2)), new V3(1, 1, 1)), 0xb0b4ba, 0.3, sw);
   }
   if (IT === 'bucket') B.add(G.bucket, new THREE.Matrix4().compose(hands[1].clone().add(new V3(0, -0.16, 0)), new THREE.Quaternion(), new V3(1, 1, 1)), 0x6a4a2a, 0.3, sw);
+  if (IT === 'torch') { // факел поднят в правой руке
+    const h = hands[0];
+    B.add(G.shaft, new THREE.Matrix4().compose(h.clone().add(new V3(0, -0.18, 0)), new THREE.Quaternion(), new V3(1.6, 0.62, 1.6)), 0x4a3220, 0.3, sw);
+    B.add(new THREE.CylinderGeometry(0.045, 0.035, 0.12, 7), new THREE.Matrix4().compose(h.clone().add(new V3(0, 0.44, 0)), new THREE.Quaternion(), new V3(1, 1, 1)), 0x2a1a10, 0.3, sw);
+  }
+  if (IT === 'sword' || IT === 'woodsword') { // меч вперёд-вверх; качается вместе с рукой
+    B.curLimb = armLimb;
+    const h = hands[0];
+    const wood = IT === 'woodsword';
+    const dir = new V3(Math.sin(yaw) * 0.8, 0.6, Math.cos(yaw) * 0.8).normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(up, dir);
+    const L = wood ? 0.55 : 0.85;
+    B.add(new THREE.BoxGeometry(0.045, L, 0.012).translate(0, L / 2 + 0.06, 0), new THREE.Matrix4().compose(h, q, new V3(1, 1, 1)), wood ? 0x8a6a40 : 0xc0c4ca, 0.2, sw);
+    B.add(new THREE.BoxGeometry(wood ? 0.14 : 0.2, 0.03, 0.035).translate(0, 0.05, 0), new THREE.Matrix4().compose(h, q, new V3(1, 1, 1)), wood ? 0x6a4a28 : 0x6a5a3a, 0.2, sw);
+    B.curLimb = [0, 0];
+  }
+  if (IT === 'falcon') { // сокол на кожаной перчатке левой руки
+    const h = hands[1];
+    B.add(new THREE.SphereGeometry(0.075, 8, 6).scale(1, 1, 1.2), new THREE.Matrix4().compose(h, new THREE.Quaternion(), new V3(1, 1, 1)), 0x6a4a2a, 0.3, sw);
+  }
+  if (IT === 'basket') { // корзина: в руках или на земле у работника
+    const c = pose === 'work' ? new V3().setFromMatrixPosition(root).add(new V3(Math.sin(yaw) * 0.55 + Math.cos(yaw) * 0.35, 0.14, Math.cos(yaw) * 0.55 - Math.sin(yaw) * 0.35)) : hands[0].clone().lerp(hands[1], 0.5).add(new V3(0, -0.08, 0));
+    B.add(new THREE.CylinderGeometry(0.2, 0.15, 0.26, 10, 1, true), new THREE.Matrix4().compose(c, new THREE.Quaternion(), new V3(1, 1, 1)), 0x9a7a44, 0.3, sw);
+    B.add(new THREE.CylinderGeometry(0.19, 0.19, 0.02, 10), new THREE.Matrix4().compose(c.clone().add(new V3(0, 0.08, 0)), new THREE.Quaternion(), new V3(1, 1, 1)), 0x4a1a3a, 0.3, sw);
+  }
+  if (IT === 'pick') { // кирка
+    const h = hands[0];
+    B.add(G.shaft, new THREE.Matrix4().compose(h.clone().add(new V3(0, -0.2, 0)), new THREE.Quaternion(), new V3(1.3, 0.8, 1.3)), 0x5a3e24, 0.3, sw);
+    B.add(new THREE.BoxGeometry(0.5, 0.045, 0.045), new THREE.Matrix4().compose(h.clone().add(new V3(0, 0.56, 0)), new THREE.Quaternion().setFromAxisAngle(up, yaw + Math.PI / 2), new V3(1, 1, 1)), 0x55585c, 0.3, sw);
+  }
   if (R.sword) {
     B.add(new THREE.BoxGeometry(0.05, 0.95, 0.015), M(-0.22, 0.55, 0.05, 0, 0, 0.12), 0xb0b4ba, 0.2, sw);
     B.add(new THREE.BoxGeometry(0.22, 0.03, 0.03), M(-0.2, 1.03, 0.05, 0, 0, 0.12), 0x6a5a3a, 0.2, sw);
     B.add(new THREE.SphereGeometry(0.03, 6, 4), M(-0.18, 1.2, 0.05), 0xc8a040, 0.2, sw);
   }
+  return { hands, root };
 }
 
 export function createPeople(scene, list) {

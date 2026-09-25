@@ -9,6 +9,7 @@ import { HALL, Frame, strawMaterial, Smoke, cart, haystack } from './courtyard.j
 import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth, GATEHOUSE, GATE_PASSAGE, BARBICAN, RIVER } from './layout.js';
 import { WINDOWS } from './towers.js';
 import { mulberry32 } from './noise.js';
+import { createLife3 } from './life3.js';
 
 const V3 = THREE.Vector3;
 const UP = new V3(0, 1, 0);
@@ -1259,6 +1260,7 @@ export function createExtras(scene, terrain, walls, village) {
   const country = createCountryLife(scene, ctx, village); // коровы — в общую сетку, поэтому до сборки
   ctx.stoneTile = walls.stoneMaterial.userData.tileMeters;
   const life2 = createLife2(scene, ctx, village, walls);
+  const life3 = createLife3(scene, ctx, village, walls);
   const iron = new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 });
   const colorMat = addTailSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
   // огонь, свечи, пламя костров — светятся сами (без источников света)
@@ -1288,6 +1290,7 @@ export function createExtras(scene, terrain, walls, village) {
   if (camp) anchors.push(new V3(camp.x, 0, camp.z));
   if (ctx.tourney) anchors.push(ctx.tourney.clone());
   if (ctx.pasture) anchors.push(ctx.pasture.clone());
+  for (const k of ['washers', 'vineyard', 'quarry']) if (life3.places[k]) anchors.push(life3.places[k].c.clone());
   const groups = anchors.map(() => []), other = [];
   for (const pp of people) {
     let bi = -1, bd = 1e9;
@@ -1309,7 +1312,7 @@ export function createExtras(scene, terrain, walls, village) {
       dt = Math.min(dt, 0.1);
       if (camera) {
         const cp = camera.position;
-        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < 320 && !(ctxRuins.on);
+        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < 320 && !(ctxRuins.on) && m.userData.night !== false;
         for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < 380 && !(ctxRuins.on);
       }
       peopleUpd.update(t);
@@ -1319,11 +1322,16 @@ export function createExtras(scene, terrain, walls, village) {
       country.update(t, dt);
       for (const sm of ctx.smokes) sm.update(t);
       if (life2) life2.update(t, dt);
+      life3.update(t, dt);
     },
-    setNight(k) { birds.mesh.visible = k < 0.5; windows.set(k); },
+    setNight(k) { birds.mesh.visible = k < 0.5; windows.set(k); life3.setNight(k); },
+    places: life3.places,
+    areas: life3.areas,
     get pasture() { return ctx.pasture; },
     set ruinsOn(v) { ctxRuins.on = v; },
     get tourney() { return ctx.tourney; },
     setGate(g) { life2.setGate(g); },
   };
 }
+
+export { M, GEO, makeWalker, walkerMaterial, WALKERS, fire, cow, findFlat };

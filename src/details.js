@@ -99,7 +99,7 @@ function pavilion(scene, wood, terrain, { x, z, r, c }, iron) {
 }
 
 // Курица: тело, хвост, голова, гребешок, клюв, лапки
-function chicken(B, x, y, z, yaw, rnd) {
+export function chicken(B, x, y, z, yaw, rnd) {
   const col = [0xf2ede0, 0x8a5a2a, 0x5a3a1c, 0xd8c7a0][Math.floor(rnd() * 4)];
   const root = new THREE.Matrix4().compose(new V3(x, y, z), new THREE.Quaternion().setFromAxisAngle(UP, yaw), new V3(1, 1, 1));
   const M = (px, py, pz, sx, sy, sz, rx = 0) => root.clone().multiply(new THREE.Matrix4().compose(new V3(px, py, pz), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, 0, 0)), new V3(sx, sy, sz)));

@@ -100,6 +100,8 @@ export function createCameraControls(camera, dom, terrain) {
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), want = new THREE.Vector3();
 
   function keepAboveGround() {
+    // в подземельях (темница, колодец, потайной ход) камеру держит своя граница
+    if (api.limit) { api.limit(camera, orbit.target); return; }
     const g = terrain.heightAt(camera.position.x, camera.position.z) + 1.2;
     if (camera.position.y < g) camera.position.y = g;
     // не улетать за пределы мира
@@ -116,7 +118,7 @@ export function createCameraControls(camera, dom, terrain) {
       const r = Math.hypot(t.x, t.z);
       if (r > 700) { t.x *= 700 / r; t.z *= 700 / r; }
       const tg = terrain.heightAt(t.x, t.z) + 0.3;
-      if (t.y < tg) t.y = tg;
+      if (t.y < tg && !api.limit) t.y = tg;
       keepAboveGround();
       return;
     }
@@ -146,9 +148,11 @@ export function createCameraControls(camera, dom, terrain) {
     refreshUI();
   });
   refreshUI();
-  return {
+  const api = {
     orbit, fly, update,
     get mode() { return mode; },
     setMode,
+    limit: null,
   };
+  return api;
 }
