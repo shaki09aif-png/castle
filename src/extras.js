@@ -605,7 +605,7 @@ class Puffs {
       it.v.multiplyScalar(1 - dt * 0.8);
       const sc = it.size + it.grow * u;
       it.s.scale.set(sc, sc, 1);
-      it.s.material.opacity = it.a * Math.sin(Math.PI * Math.min(1, u * 2.5)) * (1 - u);
+      it.s.material.opacity = it.a * Math.min(1, u * 6) * Math.pow(1 - u, 1.3); // быстро появляется, медленно тает
     }
   }
 }
@@ -680,8 +680,8 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
   const platY = walls.walkAt(G.node.x, G.node.z) + G.extra;
   const pitchTop = new V3(G.x + 0.9, platY - 0.2, P.frontZ + (G.corbelOut || 0.6) * 0.6);
   const pitchBottom = P.thresholdY + 0.05;
-  const pitchMat = new THREE.MeshBasicMaterial({ color: 0x3a1c08, fog: true });
-  const pitch = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, 1, 8).translate(0, -0.5, 0), pitchMat);
+  const pitchMat = new THREE.MeshBasicMaterial({ color: 0x160c05, fog: true });
+  const pitch = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.26, 1, 8).translate(0, -0.5, 0), pitchMat);
   pitch.position.copy(pitchTop);
   pitch.visible = false;
   scene.add(pitch);
@@ -690,7 +690,7 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
   let active = false, clock = 0, flight = null, arrowClock = 0, pitchClock = 0;
   function launch() {
     const p0 = T.pivot.clone().addScaledVector(armDirAt(RELEASE), T.armLen);
-    const dur = 4.2;
+    const dur = 5.6; // выше дуга полёта
     const aim = target.clone().add(new V3((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 3));
     const v = aim.clone().sub(p0).divideScalar(dur).add(new V3(0, 0.5 * G_ACC * dur, 0));
     flight = { p0, v, t: 0, dur, aim };
@@ -889,15 +889,19 @@ function createCountryLife(scene, ctx, village) {
   // --- коровы на пастбище у деревни ---
   {
     let center = null;
-    for (let k = 0; k < 600 && !center; k++) {
-      const x = br.b.x + (rnd() - 0.5) * 160, z = br.b.z + 20 + rnd() * 90;
+    // ровный луг недалеко от моста, не на полях и не у домов (ищем всё шире)
+    for (let k = 0; k < 3000 && !center; k++) {
+      const spread = 120 + k * 0.12;
+      const x = br.b.x + (rnd() - 0.5) * spread * 2, z = br.b.z + (rnd() - 0.5) * spread * 2;
       const g = terrain.groundAt(x, z);
-      if (village.exclude(x, z) || g.slope > 0.12 || g.river < 10 || g.road > 0.01) continue;
+      if (village.exclude(x, z) || g.slope > 0.2 || g.road > 0.01) continue;
+      if (Math.abs(z - riverZ(x)) < riverHalfWidth(x) + 10) continue;
+      if (Math.hypot(x, z) < 150) continue; // не на склоне замкового холма
       let ok = true;
       for (let j = 0; j < 8 && ok; j++) {
         const a = (j / 8) * Math.PI * 2;
-        const px = x + Math.cos(a) * 10, pz = z + Math.sin(a) * 10;
-        if (village.exclude(px, pz) || terrain.groundAt(px, pz).slope > 0.15) ok = false;
+        const px = x + Math.cos(a) * 9, pz = z + Math.sin(a) * 9;
+        if (village.exclude(px, pz) || terrain.groundAt(px, pz).slope > 0.25 || Math.abs(pz - riverZ(px)) < riverHalfWidth(px) + 6) ok = false;
       }
       if (ok) center = new V3(x, 0, z);
     }

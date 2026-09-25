@@ -122,7 +122,7 @@ async function init() {
   const extras = createExtras(scene, terrain, walls, village);
   toLayer1(mark);
   // в осадном лагере не растут деревья и трава
-  const campEx = (x, z) => (extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30 ? 1 : 0);
+  const campEx = (x, z) => ((extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30) || (extras.pasture && Math.hypot(x - extras.pasture.x, z - extras.pasture.z) < 14) ? 1 : 0);
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain, {
     exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z), campEx(x, z))),

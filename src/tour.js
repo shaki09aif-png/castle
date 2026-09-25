@@ -126,6 +126,12 @@ function buildStops(terrain, village, extras) {
       tgt: V(mill.x, terrain.heightAt(mill.x, mill.z) + 3, mill.z),
       pos: V(mill.x + 38, terrain.heightAt(mill.x, mill.z) + 24, mill.z + 36),
     },
+    ...(extras.pasture ? [{
+      title: 'Пастбище',
+      text: 'Коровы давали молоко, сыр и масло, быков запрягали в плуг. Скот пасли на общем лугу у деревни, за ним присматривал пастух. По реке рыбаки ходили на лодках — рыба была главной едой в постные дни.',
+      tgt: extras.pasture.clone().setY(terrain.heightAt(extras.pasture.x, extras.pasture.z) + 1),
+      pos: extras.pasture.clone().add(V(22, 0, 16)).setY(terrain.heightAt(extras.pasture.x + 22, extras.pasture.z + 16) + 9),
+    }] : []),
     ...(extras.camp ? [{
       title: 'Осадный лагерь',
       text: 'Замок редко брали штурмом — чаще осаждали. Враг ставил лагерь, строил требушет, метавший камни на сотни шагов, таран под навесом и лестницы, а сам лагерь прикрывал частоколом. Осада могла длиться месяцами.',
