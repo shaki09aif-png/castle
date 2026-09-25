@@ -8,7 +8,7 @@ import { GeoBuilder } from './walls.js';
 import { riverInfo } from './terrain.js';
 import { riverZ, RIVER } from './layout.js';
 import { pbrMaterial, materialTextures, macroNoiseTexture } from './textures.js';
-import { AUTUMN } from './materials.js';
+import { AUTUMN, addWeathering } from './materials.js';
 import { Frame, Smoke, haystack, strawMaterial, plankDoor, buildBarrels, cart } from './courtyard.js';
 import { mulberry32, createNoise2D } from './noise.js';
 
@@ -88,6 +88,18 @@ function thatchRoof(thatch, wood, f, L, W, eaveY, pitch, over = 0.7, overEnd = 0
     wood.quad(a0, a1, b1, b0, dn, [[x0, 0], [x1, 0], [x1, slen], [x0, slen]]);
     // торец соломы у свеса — видна толщина
     thatch.quad(a0, a1, lift(a1), lift(a0), f.d(0, -H - drop, s * run), [[x0, 0], [x1, 0], [x1, 0.3], [x0, 0.3]]);
+    // лохматый край: у свеса торчат и свисают пучки соломы
+    {
+      const down = a0.clone().sub(b0).normalize();
+      const side = f.X.clone();
+      const nn = new V3().crossVectors(down, side).normalize();
+      for (let x = x0 + 0.08; x < x1; x += 0.2) {
+        const h = Math.abs(Math.sin(x * 12.9898 + s * 4.1) * 43758.5) % 1;
+        const len = 0.12 + h * 0.16;
+        const c = f.p(x, eaveY - drop, s * run).addScaledVector(n, T * (0.3 + h * 0.4)).addScaledVector(down, len * 0.6);
+        thatch.box(c, down, side, nn, len, 0.1 + h * 0.04, 0.05 + h * 0.04, { grain: true });
+      }
+    }
     // края у фронтонов
     for (const e of [x0, x1]) {
       const sgn = e > 0 ? 1 : -1;
@@ -541,7 +553,7 @@ export function createVillage(scene, terrain, walls) {
 
   // сборка сеток
   const daubMat = pbrMaterial('daub');
-  const thatchMat = pbrMaterial('thatch');
+  const thatchMat = addWeathering(pbrMaterial('thatch'), 'thatch');
   const soilMat = new THREE.MeshStandardMaterial({ color: 0x3b2a1c, roughness: 1 });
   const plantMat = new THREE.MeshStandardMaterial({ color: 0x3d6b22, roughness: 0.8 });
   const ironMat = new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 });

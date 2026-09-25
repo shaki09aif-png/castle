@@ -2,6 +2,7 @@
 // решётка (герса), дубовые ворота с железными полосами, машикули над входом,
 // вода во рву и барбакан — укреплённый двор перед рвом.
 import * as THREE from 'three';
+import { addWeathering } from './materials.js';
 import { Water } from 'three/addons/objects/Water.js';
 import { GATEHOUSE, GATE_PASSAGE, BARBICAN, MOAT, DITCH, GATE_RADIUS } from './layout.js';
 import { guardReflection } from './water.js';
@@ -98,7 +99,7 @@ export function createGate(scene, terrain, walls) {
   const ctx = makeTowerContext(scene, terrain, walls);
   const { stone, wood, dark, metal } = ctx;
   const oak = new GeoBuilder(walls.woodMaterial.userData.tileMeters); // тёмный дуб: ворота, решётка, мост
-  const oakMat = pbrMaterial('wood', { color: 0x6e5a46 });
+  const oakMat = addWeathering(pbrMaterial('wood', { color: 0x6e5a46 }), 'wood');
   const rnd = mulberry32(4040);
   const G = GATEHOUSE, P = GATE_PASSAGE;
   const cx = G.x;

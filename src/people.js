@@ -34,7 +34,7 @@ export function addTailSway(mat) {
 }
 
 export class ColorBuilder {
-  constructor() { this.pos = []; this.nrm = []; this.col = []; this.aux = []; this.idx = []; this.limb = []; this.curLimb = [0, 0]; }
+  constructor() { this.pos = []; this.nrm = []; this.col = []; this.aux = []; this.idx = []; this.limb = []; this.curLimb = [0, 0]; this.piv = []; this.curPiv = [0, 0]; }
   add(geo, m, color, sway = 0, seed = 0) {
     const g = geo.index ? geo : geo;
     const p = g.getAttribute('position'), n = g.getAttribute('normal');
@@ -50,6 +50,7 @@ export class ColorBuilder {
       this.col.push(c.r, c.g, c.b);
       this.aux.push(sway, seed);
       this.limb.push(this.curLimb[0], this.curLimb[1]); // для ходьбы: сторона/знак качания и высота шарнира
+      this.piv.push(this.curPiv[0], this.curPiv[1]); // шея фигуры (x, z) — ось поворота головы
     }
     if (g.index) for (let i = 0; i < g.index.count; i++) this.idx.push(base + g.index.getX(i));
     else for (let i = 0; i < p.count; i++) this.idx.push(base + i);
@@ -61,10 +62,35 @@ export class ColorBuilder {
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
     g.setAttribute('aSway', new THREE.Float32BufferAttribute(this.aux, 2));
     if (this.limb.some((v) => v !== 0)) g.setAttribute('aLimb', new THREE.Float32BufferAttribute(this.limb, 2));
+    if (this.piv.some((v) => v !== 0)) g.setAttribute('aPivot', new THREE.Float32BufferAttribute(this.piv, 2));
     g.setIndex(this.idx);
     g.computeBoundingSphere();
     return g;
   }
+}
+
+// простое слияние нескольких геометрий в одну (без индексов)
+function mergeSmall(list) {
+  const pos = [], nrm = [];
+  for (const g0 of list) {
+    const g = g0.index ? g0.toNonIndexed() : g0;
+    pos.push(...g.getAttribute('position').array);
+    nrm.push(...g.getAttribute('normal').array);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  return g;
+}
+// кисть: ладонь, согнутые пальцы (одним блоком со «шлицами») и большой палец —
+// всего три коробки, чтобы сотни людей не утяжеляли сцену
+function handGeometry() {
+  const palm = new THREE.BoxGeometry(0.07, 0.075, 0.03).translate(0, -0.012, 0);
+  const fing = new THREE.BoxGeometry(0.066, 0.05, 0.026).translate(0, -0.025, 0);
+  fing.rotateX(0.6); fing.translate(0, -0.048, 0.006);
+  const th = new THREE.BoxGeometry(0.018, 0.048, 0.02).translate(0, -0.022, 0);
+  th.rotateZ(-0.65); th.rotateX(0.35); th.translate(0.032, -0.008, 0.012);
+  return mergeSmall([palm, fing, th]);
 }
 
 // общие заготовки геометрии (фигура ~1,7 м; начало координат — между ступнями)
@@ -78,11 +104,12 @@ const G = {
   joint: new THREE.SphereGeometry(0.05, 8, 6),
   shoulder: new THREE.SphereGeometry(0.075, 10, 8),
   cuff: new THREE.CylinderGeometry(0.047, 0.047, 0.04, 10),
-  hand: (() => { const g = new THREE.SphereGeometry(1, 8, 6); g.scale(0.04, 0.06, 0.028); return g; })(),
+  hand: handGeometry(),
   head: (() => { const g = new THREE.SphereGeometry(0.1, 16, 12); g.scale(0.95, 1.12, 1.02); return g; })(),
   jaw: (() => { const g = new THREE.SphereGeometry(0.075, 12, 8, 0, Math.PI * 2, Math.PI * 0.45, Math.PI * 0.55); g.scale(1, 0.9, 1.1); return g; })(),
   nose: (() => { const g = new THREE.ConeGeometry(0.018, 0.05, 6); g.rotateX(Math.PI / 2 + 0.5); return g; })(),
-  eye: new THREE.SphereGeometry(0.011, 6, 4),
+  eye: new THREE.SphereGeometry(0.0085, 6, 4),
+  eyeWhite: (() => { const g = new THREE.SphereGeometry(0.016, 6, 4); g.scale(1, 0.62, 0.5); return g; })(),
   brow: new THREE.BoxGeometry(0.035, 0.008, 0.01),
   ear: (() => { const g = new THREE.SphereGeometry(1, 6, 5); g.scale(0.012, 0.028, 0.02); return g; })(),
   beard: (() => { const g = new THREE.SphereGeometry(0.085, 12, 8, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.4); g.scale(0.95, 1.2, 1.05); return g; })(),
@@ -112,7 +139,17 @@ function tunicGeo(len = 1, flare = 1) {
     [0.235 * flare, 0.55 + (1 - len) * 0.25], [0.215 * (0.5 + flare * 0.5), 0.72], [0.195, 0.9], [0.182, 0.99], [0.19, 1.1],
     [0.212, 1.24], [0.228, 1.34], [0.215, 1.41], [0.16, 1.46], [0.07, 1.495], [0.04, 1.5],
   ].map(([r, y]) => new THREE.Vector2(r, y));
-  const g = new THREE.LatheGeometry(pts, 18);
+  const g = new THREE.LatheGeometry(pts, 22);
+  // складки ткани: мягкие вертикальные волны, сильнее к подолу, у пояса почти нет
+  const p = g.getAttribute('position');
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const a = Math.atan2(z, x);
+    const k = Math.max(0, Math.min(1, (0.98 - y) / 0.4)) * 0.05 + Math.max(0, Math.min(1, (y - 1.12) / 0.2)) * 0.012;
+    const f = 1 + k * (Math.sin(a * 9) * 0.8 + Math.sin(a * 5 + 1.3) * 0.4);
+    p.setXYZ(i, x * f, y, z * f);
+  }
+  g.computeVertexNormals();
   g.scale(1, 1, 0.7);
   return g;
 }
@@ -158,6 +195,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const s = (R.scale || 1) * (0.93 + rnd() * 0.12);
   const root = new THREE.Matrix4().compose(new V3(x, y - drop * (R.scale || 1), z), new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), yaw), new V3(s, s, s));
+  { const nk = new V3(0, 1.5, 0).applyMatrix4(root); B.curPiv = [nk.x, nk.z]; }
   const rot = (rx = 0, ry = 0, rz = 0) => new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz));
   const M = (px, py, pz, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) =>
     root.clone().multiply(new THREE.Matrix4().compose(new V3(px, py, pz), rot(rx, ry, rz), new V3(sx, sy, sz)));
@@ -218,7 +256,8 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   B.add(G.jaw, C(headM, 0, -0.025, 0.015), skin, 1, sw);
   B.add(G.nose, C(headM, 0, -0.005, 0.108), shade(skin, 0.93), 1, sw);
   for (const sd of [-1, 1]) {
-    B.add(G.eye, C(headM, sd * 0.034, 0.022, 0.092), 0x1a1410, 1, sw);
+    B.add(G.eyeWhite, C(headM, sd * 0.034, 0.022, 0.088), 0xe8e2d8, 1, sw);
+    B.add(G.eye, C(headM, sd * 0.034, 0.022, 0.095), 0x1a1410, 1, sw);
     B.add(G.brow, C(headM, sd * 0.034, 0.042, 0.096, 0, 0, sd * -0.12), shade(hair, 0.8), 1, sw);
     B.add(G.ear, C(headM, sd * 0.096, 0.005, -0.005), shade(skin, 0.95), 1, sw);
   }
@@ -391,6 +430,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(new THREE.BoxGeometry(0.22, 0.03, 0.03), M(-0.2, 1.03, 0.05, 0, 0, 0.12), 0x6a5a3a, 0.2, sw);
     B.add(new THREE.SphereGeometry(0.03, 6, 4), M(-0.18, 1.2, 0.05), 0xc8a040, 0.2, sw);
   }
+  B.curPiv = [0, 0];
   return { hands, root };
 }
 
@@ -402,8 +442,24 @@ export function createPeople(scene, list) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = uTime;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aSway;\nuniform float uTime;')
+      .replace('#include <common>', '#include <common>\nattribute vec2 aSway;\nattribute vec2 aPivot;\nuniform float uTime;\nfloat gHeadA;')
+      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+        // иногда человек оглядывается: голова поворачивается вокруг шеи
+        {
+          float hp = aSway.y * 1.7;
+          float lk = sin(uTime * 0.23 + hp * 2.3) + 0.5 * sin(uTime * 0.51 + hp * 5.1);
+          gHeadA = 0.55 * sign(lk) * smoothstep(0.45, 0.95, abs(lk)) * step(0.3, fract(hp * 0.37));
+          if (aSway.x > 0.95 && aSway.x < 1.05) {
+            float c = cos(gHeadA), s = sin(gHeadA);
+            objectNormal.xz = mat2(c, -s, s, c) * objectNormal.xz;
+          }
+        }`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
+        if (aSway.x > 0.95 && aSway.x < 1.05) {
+          float c = cos(gHeadA), s = sin(gHeadA);
+          vec2 q = transformed.xz - aPivot;
+          transformed.xz = aPivot + mat2(c, -s, s, c) * q;
+        }
         // дыхание и лёгкое переминание: каждая фигура в своей фазе
         float ph = aSway.y * 1.7;
         transformed.y += sin(uTime * 1.6 + ph) * 0.006 * aSway.x;

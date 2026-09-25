@@ -35,13 +35,15 @@ const GEO = {
 function walkerMaterial() {
   const uPhase = { value: 0 };
   const uAmp = { value: 0.45 };
+  const uHuman = { value: 0 };
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uPhase = uPhase;
     sh.uniforms.uAmp = uAmp;
     sh.uniforms.uSwayTime = SWAY_TIME;
+    sh.uniforms.uHuman = uHuman;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aLimb;\nattribute vec2 aSway;\nuniform float uPhase;\nuniform float uAmp;\nuniform float uSwayTime;')
+      .replace('#include <common>', '#include <common>\nattribute vec2 aLimb;\nattribute vec2 aSway;\nuniform float uPhase;\nuniform float uAmp;\nuniform float uSwayTime;\nuniform float uHuman;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         ${TAIL_GLSL}
         // колено: нога, уходящая назад, сгибается (для ног |aLimb.x| >= 0.7)
@@ -60,19 +62,45 @@ function walkerMaterial() {
           vec3 p = transformed; p.y -= aLimb.y;
           transformed = vec3(p.x, p.y * c - p.z * s + aLimb.y, p.y * s + p.z * c);
         }
-        transformed.y += abs(cos(uPhase)) * 0.025 * uAmp;`);
+        transformed.y += abs(cos(uPhase)) * 0.025 * uAmp;
+        float ak = uAmp / 0.45;
+        if (uHuman > 0.5) {
+          // плечи поворачиваются навстречу шагу, корпус переносит вес с ноги на ногу
+          float tw = sin(uPhase) * 0.09 * ak * smoothstep(0.9 * uHuman, 1.35 * uHuman, transformed.y) * step(abs(aLimb.x), 0.65);
+          float c = cos(tw), s = sin(tw);
+          transformed.xz = mat2(c, -s, s, c) * transformed.xz;
+          transformed.x += sin(uPhase) * 0.022 * ak * smoothstep(0.2 * uHuman, 0.9 * uHuman, transformed.y);
+          transformed.z += 0.03 * ak * smoothstep(0.9 * uHuman, 1.6 * uHuman, transformed.y); // лёгкий наклон вперёд
+        }
+        if (aSway.x > 2.5 && aSway.x < 3.5) {
+          // лошадь кивает головой в такт шагу (шарнир у основания шеи)
+          float na = sin(uPhase * 2.0 + 0.6) * 0.07 * ak;
+          float c = cos(na), s = sin(na);
+          vec2 q = vec2(transformed.y - aSway.y, transformed.z - 0.6);
+          transformed.y = aSway.y + q.x * c - q.y * s;
+          transformed.z = 0.6 + q.x * s + q.y * c;
+        }`);
   };
   mat.customProgramCacheKey = () => 'walker';
-  return { mat, uPhase, uAmp };
+  return { mat, uPhase, uAmp, uHuman };
 }
 
 const WALKERS = []; // все ходящие — вдали от камеры не рисуются
 function makeWalker(scene, build, path, { speed = 1.1, loop = true, stride = 1.5, amp = 0.45, y = null, s0 = null, hold = null } = {}) {
   const B = new ColorBuilder();
   build(B);
-  const { mat, uPhase, uAmp } = walkerMaterial();
+  const { mat, uPhase, uAmp, uHuman } = walkerMaterial();
+  const geo = B.build();
+  geo.computeBoundingBox();
+  const bs = geo.boundingBox.getSize(new V3());
+  // пешеход: размах ног подбирается под длину шага, чтобы ступни не скользили по земле
+  if (bs.y > 0.9 && bs.y < 2.3 && Math.max(bs.x, bs.z) < 1.3 && geo.getAttribute('aLimb')) {
+    const sc = Math.min(1, bs.y / 1.78);
+    uHuman.value = sc;
+    amp = Math.asin(Math.min(0.8, stride / (4 * 0.9 * sc)));
+  }
   uAmp.value = amp;
-  const mesh = new THREE.Mesh(B.build(), mat);
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.name = 'walker';
   scene.add(mesh);
@@ -178,15 +206,16 @@ function createBirds(scene) {
   for (const fl of flocks) {
     for (let k = 0; k < fl.n; k++) {
       const phase = rnd() * Math.PI * 2, rad = fl.r * (0.6 + rnd() * 0.6), hOff = (rnd() - 0.5) * 8, spd = (0.18 + rnd() * 0.1) * (rnd() < 0.5 ? 1 : -1);
-      // тело (2 вершины: клюв и хвост) + два крыла (по вершине на конце)
-      const verts = [[0, 0, 0.25, 0], [0, 0, -0.2, 0], [-0.55, 0, 0, -1], [0.55, 0, 0, 1]];
+      // тело (клюв, хвост, веер хвоста) и крылья из двух частей: у тела и концевая
+      const verts = [[0, 0, 0.25, 0], [0, 0, -0.16, 0], [-0.09, 0, -0.3, 0], [0.09, 0, -0.3, 0],
+        [-0.28, 0, 0.03, -0.45], [-0.62, 0, -0.1, -1], [0.28, 0, 0.03, 0.45], [0.62, 0, -0.1, 1]];
       for (const [x, y, z, w] of verts) {
         pos.push(x, y, z);
         aBird.push(fl.c.x, fl.c.y + hOff, fl.c.z, rad);
         aWing.push(w, phase, spd, 0);
       }
-      idx.push(v, v + 2, v + 1, v, v + 1, v + 3);
-      v += 4;
+      idx.push(v, v + 4, v + 1, v + 4, v + 5, v + 1, v, v + 1, v + 6, v + 6, v + 1, v + 7, v + 1, v + 2, v + 3);
+      v += 8;
     }
   }
   const g = new THREE.BufferGeometry();
@@ -206,8 +235,14 @@ function createBirds(scene) {
         vec3 ctr = aBird.xyz + vec3(cos(ang) * aBird.w, sin(ang * 2.0 + aWing.y) * 2.5, sin(ang) * aBird.w);
         vec3 fwd = normalize(vec3(-sin(ang), 0.0, cos(ang)) * sign(aWing.z));
         vec3 rgt = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
-        float flap = sin(uTime * 9.0 + aWing.y * 13.0) * 0.45;
-        vec3 transformed = ctr + rgt * position.x + fwd * position.z + vec3(0.0, abs(aWing.x) * flap, 0.0);
+        // серия взмахов сменяется парением; концы крыльев отстают от внутренней части
+        float glide = smoothstep(-0.2, 0.4, sin(uTime * 0.45 + aWing.y * 3.0));
+        float fa = abs(aWing.x);
+        float flap = sin(uTime * 9.0 + aWing.y * 13.0 - fa * 0.9) * 0.5 * fa * glide + fa * 0.08 * (1.0 - glide);
+        // крен внутрь круга
+        vec3 up = normalize(vec3(0.0, 1.0, 0.0) - rgt * 0.35 * sign(aWing.z));
+        vec3 rg2 = normalize(cross(fwd, up));
+        vec3 transformed = ctr + rg2 * position.x + fwd * position.z + up * flap;
         transformed *= 1.0;`);
   };
   mat.customProgramCacheKey = () => 'birds';
@@ -845,28 +880,52 @@ function cow(B, x, y, z, yaw, rnd, color = null) {
     r.clone().multiply(new THREE.Matrix4().compose(new V3(px, py, pz), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, 0, rz)), new V3(sx, sy, sz)));
   const spotted = color === null && rnd() < 0.5;
   const base = color !== null ? color : spotted ? 0xe8e2d8 : [0x6a4028, 0x8a5a34, 0x4a3020][Math.floor(rnd() * 3)];
-  B.add(new THREE.CapsuleGeometry(0.42, 1.0, 5, 12).rotateX(Math.PI / 2), L(0, 1.05, 0, 1, 1.05, 1), base);
-  if (spotted) for (let k = 0; k < 5; k++) B.add(GEO.sph, L((rnd() - 0.5) * 0.7, 1.1 + (rnd() - 0.3) * 0.5, (rnd() - 0.5) * 1.3, 0.25, 0.22, 0.3), 0x1e1a18);
+  const dark = new THREE.Color(base).multiplyScalar(0.72).getHex();
+  // туловище с холкой, маклоками и отвислым брюхом
+  B.add(COWG.body, L(0, 1.05, 0, 1, 1.05, 1), base);
+  B.add(GEO.sph, L(0, 1.32, 0.45, 0.3, 0.16, 0.34), base); // холка
+  for (const sd of [-1, 1]) B.add(GEO.sph, L(sd * 0.2, 1.3, -0.62, 0.12, 0.1, 0.12), base); // маклоки
+  B.add(GEO.sph, L(0, 0.86, 0.05, 0.36, 0.2, 0.6), base); // брюхо
+  if (spotted) for (let k = 0; k < 6; k++) B.add(GEO.sph, L((rnd() - 0.5) * 0.72, 1.1 + (rnd() - 0.3) * 0.45, (rnd() - 0.5) * 1.3, 0.25, 0.2, 0.3), 0x1e1a18);
   const graze = rnd() < 0.6;
-  const hy = graze ? 0.45 : 1.15, hz = graze ? 1.05 : 1.0;
-  B.add(new THREE.CylinderGeometry(0.2, 0.3, 0.6, 10), L(0, (hy + 1.2) / 2, 0.8, 1, 1, 1, graze ? 1.0 : 0.5), base);
-  B.add(GEO.box, L(0, hy, hz, 0.3, 0.32, 0.5, graze ? 0.7 : 0.1), base);
-  B.add(GEO.box, L(0, hy - (graze ? 0.12 : 0.05), hz + (graze ? 0.2 : 0.26), 0.26, 0.2, 0.16, graze ? 0.7 : 0.1), 0xc89a8a);
+  const hy = graze ? 0.45 : 1.15, hz = graze ? 1.05 : 1.0, tilt = graze ? 0.75 : 0.15;
+  // шея с подгрудком
+  B.add(new THREE.CylinderGeometry(0.2, 0.3, 0.62, 12), L(0, (hy + 1.2) / 2, 0.8, 1, 1, 1, graze ? 1.0 : 0.5), base);
+  B.add(GEO.sph, L(0, (hy + 1.0) / 2 - 0.08, 0.86, 0.08, 0.22, 0.2, graze ? 0.9 : 0.4), base);
+  // голова: широкий лоб, сужение к морде, влажный нос, глаза, уши, рога
+  B.add(COWG.skull, L(0, hy + 0.04, hz - 0.06, 1, 1, 1, tilt), base);
+  B.add(COWG.snout, L(0, hy - (graze ? 0.14 : 0.04), hz + (graze ? 0.16 : 0.2), 1, 1, 1, tilt + Math.PI / 2 - 0.2), base);
+  B.add(GEO.sph, L(0, hy - (graze ? 0.26 : 0.08), hz + (graze ? 0.25 : 0.36), 0.13, 0.09, 0.08, tilt), 0xc89a8a);
   for (const sd of [-1, 1]) {
-    B.add(GEO.cone, L(sd * 0.16, hy + 0.2, hz - 0.12, 0.035, 0.18, 0.035, 0, sd * -0.9), 0xe0d8c0);
-    B.add(GEO.box, L(sd * 0.2, hy + 0.08, hz - 0.1, 0.14, 0.05, 0.08), base);
+    B.add(GEO.sph, L(sd * 0.05, hy - (graze ? 0.26 : 0.07), hz + (graze ? 0.31 : 0.43), 0.025, 0.02, 0.012, tilt), 0x2a1a18); // ноздри
+    B.add(GEO.sph, L(sd * 0.14, hy + 0.1, hz + 0.04, 0.028, 0.03, 0.02), 0x14100e); // глаза
+    B.add(GEO.cone, L(sd * 0.16, hy + 0.22, hz - 0.12, 0.03, 0.2, 0.03, 0, sd * -1.0), 0xe0d8c0);
+    B.add(GEO.cone, L(sd * 0.25, hy + 0.3, hz - 0.12, 0.015, 0.07, 0.015, 0, sd * 0.3), 0x3a3028);
+    B.add(COWG.ear, L(sd * 0.23, hy + 0.1, hz - 0.1, 1, 1, 1, 0, sd * -1.25), base);
   }
+  // ноги: бедро, скакательный/запястный сустав, голень, раздвоенное копыто
   for (const [lx, lz] of [[-0.22, 0.55], [0.22, 0.55], [-0.22, -0.6], [0.22, -0.6]]) {
     B.curLimb = [(lx < 0) === (lz > 0) ? 0.7 : -0.7, 0.72]; // для ходьбы (волы в упряжке)
-    B.add(GEO.cylLo, L(lx, 0.36, lz, 0.075, 0.72, 0.075), base);
-    B.add(GEO.cylLo, L(lx, 0.04, lz, 0.08, 0.08, 0.08), 0x2a2420);
+    const hind = lz < 0;
+    B.add(COWG.upper, L(lx, 0.72, lz + (hind ? -0.03 : 0), 1, 1, 1, hind ? -0.12 : 0.05), base);
+    B.add(GEO.sph, L(lx, 0.42, lz, 0.075, 0.07, 0.08), base);
+    B.add(COWG.lower, L(lx, 0.42, lz, 1, 1, 1), base);
+    for (const s2 of [-1, 1]) B.add(GEO.box, L(lx + s2 * 0.028, 0.04, lz + 0.015, 0.045, 0.08, 0.1), 0x2a2420);
   }
   B.curLimb = [0, 0];
-  B.add(GEO.sph, L(0, 0.6, -0.35, 0.2, 0.14, 0.2), 0xd8a0a0); // вымя
+  B.add(GEO.sph, L(0, 0.64, -0.35, 0.2, 0.14, 0.2), 0xd8a0a0); // вымя
   const tailRoot = y + 1.3;
   B.add(GEO.cylLo, L(0, 0.95, -0.98, 0.03, 0.7, 0.03), base, 2, tailRoot);
-  B.add(GEO.sph, L(0, 0.58, -0.98, 0.06, 0.12, 0.06), 0x1e1a18, 2, tailRoot);
+  B.add(GEO.sph, L(0, 0.58, -0.98, 0.06, 0.12, 0.06), dark === base ? 0x1e1a18 : 0x1e1a18, 2, tailRoot);
 }
+const COWG = {
+  body: new THREE.CapsuleGeometry(0.42, 1.0, 6, 16).rotateX(Math.PI / 2),
+  skull: (() => { const g = new THREE.SphereGeometry(0.17, 12, 9); g.scale(1.05, 1, 1.25); return g; })(),
+  snout: new THREE.CylinderGeometry(0.1, 0.15, 0.3, 12),
+  ear: (() => { const g = new THREE.SphereGeometry(0.08, 8, 5); g.scale(1, 0.4, 0.6); return g; })(),
+  upper: new THREE.CylinderGeometry(0.1, 0.075, 0.6, 10).translate(0, -0.0, 0),
+  lower: new THREE.CylinderGeometry(0.06, 0.05, 0.38, 8).translate(0, -0.19, 0),
+};
 
 function createCountryLife(scene, ctx, village) {
   const { terrain, colorB, rnd } = ctx;
@@ -1265,6 +1324,22 @@ export function createExtras(scene, terrain, walls, village) {
   const colorMat = addTailSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
   // огонь, свечи, пламя костров — светятся сами (без источников света)
   const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
+  // пламя костров и свечей колышется и мерцает
+  glowMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uT = SWAY_TIME;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uT;\nvarying float vFlick;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        float fph = position.x * 3.1 + position.z * 2.3;
+        transformed.x += sin(uT * 11.0 + fph + position.y * 9.0) * 0.025;
+        transformed.z += cos(uT * 9.0 + fph * 1.3 + position.y * 7.0) * 0.02;
+        transformed.y += sin(uT * 7.0 + fph) * 0.02;
+        vFlick = 0.82 + 0.12 * sin(uT * 13.0 + fph) + 0.08 * sin(uT * 29.0 + fph * 2.0);`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vFlick;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= vFlick;');
+  };
+  glowMat.customProgramCacheKey = () => 'glow-flick';
   for (const [bld, mat, name] of [
     [wood, walls.woodMaterial, 'extras'], [stone, walls.stoneMaterial, 'extras'], [metal, iron, 'extras'],
     [straw, strawMaterial(), 'extras'], [colorB, colorMat, 'extras'], [glowB, glowMat, 'extras-glow'],
@@ -1322,7 +1397,7 @@ export function createExtras(scene, terrain, walls, village) {
       country.update(t, dt);
       for (const sm of ctx.smokes) sm.update(t);
       if (life2) life2.update(t, dt);
-      life3.update(t, dt);
+      life3.update(t, dt, camera);
     },
     setNight(k) { birds.mesh.visible = k < 0.5; windows.set(k); life3.setNight(k); },
     places: life3.places,

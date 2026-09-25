@@ -3,6 +3,7 @@
 // с горном и наковальней, казармы, склад и амбар; мелочи двора — бочки,
 // ящики, телеги, сено, стойки с копьями, мишени; мощение двора булыжником.
 import * as THREE from 'three';
+import { addWeathering } from './materials.js';
 import { BUILDINGS, WELL, KEEP, GATEHOUSE, GATE_PASSAGE, insideBuilding, insideTower } from './layout.js';
 import { GeoBuilder } from './walls.js';
 import {
@@ -864,7 +865,7 @@ export function createCourtyard(scene, terrain, walls) {
 
   // ======================= СБОРКА =======================
   const vanes = finishTowerContext(ctx, 'courtyard');
-  const shingleMat = pbrMaterial('shingle');
+  const shingleMat = addWeathering(pbrMaterial('shingle'), 'roof');
   const strawMat = strawMaterial();
   for (const [bld, mat, name] of [[shingleB, shingleMat, 'shingles'], [strawB, strawMat, 'straw']]) {
     const m = new THREE.Mesh(bld.build(), mat);
@@ -1131,6 +1132,13 @@ function buildPaving(scene, terrain, paths, plazas) {
         float pa = vColor.a;
         float stoneH = texture2D(aoMap, vAoMapUv).r;
         diffuseColor.a *= smoothstep(0.25, 0.75, pa + (stoneH - 0.6) * 0.8);
+        // выпуклые булыжники: середина камня светлее, в щелях грязь, у краёв мостовой — травинки
+        float gap = 1.0 - smoothstep(0.35, 0.7, stoneH);
+        float hh = fract(sin(dot(floor(vAoMapUv * 7.0), vec2(12.9898, 78.233))) * 43758.5);
+        diffuseColor.rgb *= 0.9 + 0.22 * smoothstep(0.55, 0.9, stoneH);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.12, 0.08), gap * 0.55);
+        float grassP = gap * (1.0 - smoothstep(0.55, 0.95, pa)) * step(0.45, hh);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.1, 0.17, 0.04), grassP * 0.8);
       #endif`
     );
   };

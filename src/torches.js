@@ -22,8 +22,9 @@ const flameVS = /* glsl */ `
     vec3 p = position;
     // язык пламени покачивается, кончик сильнее
     float k = uv.y * uv.y;
-    p.x += sin(uTime * 7.0 + aSeed * 10.0) * 0.05 * k;
-    p.z += cos(uTime * 5.3 + aSeed * 7.0) * 0.04 * k;
+    p.x += (sin(uTime * 7.0 + aSeed * 10.0) * 0.05 + sin(uTime * 17.0 + aSeed * 3.0) * 0.02) * k;
+    p.z += (cos(uTime * 5.3 + aSeed * 7.0) * 0.04 + cos(uTime * 13.0 + aSeed * 5.0) * 0.015) * k;
+    p.y *= 0.9 + 0.18 * sin(uTime * 9.0 + aSeed * 20.0);
     gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(p, 1.0);
   }
 `;
@@ -69,10 +70,11 @@ const glowVS = /* glsl */ `
   attribute float aSeed;
   varying vec2 vUv;
   varying float vSeed;
+  uniform float uScale;
   void main() {
     vUv = uv;
     vSeed = aSeed;
-    gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position * uScale, 1.0);
   }
 `;
 
@@ -172,9 +174,9 @@ export function createTorches(scene, terrain, walls) {
   // тёплое пятно света на стене вокруг факела
   const gg = new THREE.PlaneGeometry(3.2, 3.2);
   gg.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
-  const uBoost = { value: 1 };
+  const uBoost = { value: 1 }, uScale = { value: 1 };
   const glowMat = new THREE.ShaderMaterial({
-    uniforms: { uTime, uBoost }, vertexShader: glowVS, fragmentShader: glowFS,
+    uniforms: { uTime, uBoost, uScale }, vertexShader: glowVS, fragmentShader: glowFS,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
@@ -199,7 +201,7 @@ export function createTorches(scene, terrain, walls) {
   const pg = new THREE.PlaneGeometry(7, 7).rotateX(-Math.PI / 2);
   pg.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds.slice(0, Math.max(1, pools.length)), 1));
   const poolMat = new THREE.ShaderMaterial({
-    uniforms: { uTime, uBoost: uPool }, vertexShader: glowVS, fragmentShader: glowFS,
+    uniforms: { uTime, uBoost: uPool, uScale: { value: 1 } }, vertexShader: glowVS, fragmentShader: glowFS,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
@@ -217,7 +219,8 @@ export function createTorches(scene, terrain, walls) {
     update(t) { uTime.value = t; },
     // k: 0 — день, 1 — ночь. Ночью пятна света от факелов ярче и больше.
     setNight(k) {
-      uBoost.value = 1 + k * 2.6;
+      uBoost.value = 1 + k * 2.9;
+      uScale.value = 1 + k * 0.7; // ночью тёплое пятно на стене шире
       uPool.value = k * 1.4;
       pm.visible = k > 0.02;
     },

@@ -16,7 +16,7 @@ const PRESETS = {
     bloom: false,
     grassDensity: 0.3,
     grassRadius: 32,
-    treeDetailDistance: 60,
+    treeDetailDistance: 52,
     treeCount: 0.32,
     waterReflection: false,
     reflectionSize: 256,
@@ -71,7 +71,7 @@ const PRESETS = {
     msaa: 4, // сглаживание — не снижать
     ao: false, // SSAO — самый дорогой эффект
     aoHalfRes: true,
-    godRays: false,
+    godRays: true, // лучи солнца сквозь облака и башни (облегчённые)
     bloom: true,
     grassDensity: 0.7,
     grassRadius: 60,

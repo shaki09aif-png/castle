@@ -199,6 +199,20 @@ export function createLife3(scene, ctx, village, walls) {
       people.push({ x: lx, y: gh(lx, lz) + 0.42, z: lz, yaw, role: 'guard', pose: 'sit', item: null });
     }
     ctx.smokes.push(new Smoke(scene, new V3(c.x, cy + 1.2, c.z), { count: 10, size: 0.5, grow: 2.2, alpha: 0.3, life: 6 }));
+    // ночью костёр освещает землю и стену вокруг тёплым пятном
+    const poolMat = new THREE.ShaderMaterial({
+      uniforms: { uK: { value: 0 }, uT: { value: 0 } },
+      vertexShader: 'varying vec2 vU; void main() { vU = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'varying vec2 vU; uniform float uK, uT; void main() { float d = length(vU - 0.5) * 2.0; float f = 0.85 + 0.1 * sin(uT * 9.0) + 0.05 * sin(uT * 23.0); gl_FragColor = vec4(vec3(1.0, 0.5, 0.18) * pow(max(0.0, 1.0 - d), 1.8) * 0.9 * uK * f, 1.0); }',
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    });
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2), poolMat);
+    pool.position.set(c.x, cy + 0.08, c.z);
+    pool.visible = false;
+    pool.renderOrder = 9;
+    scene.add(pool);
+    out.firePools = [{ pool, mat: poolMat }];
+    upd.push((t) => { poolMat.uniforms.uT.value = t; });
   }
 
   // =========================== УЧЕНИЯ СТРАЖИ ===========================
@@ -212,13 +226,31 @@ export function createLife3(scene, ctx, village, walls) {
       r.mesh.rotation.y = yaw;
       fighters.push({ r, sd, yaw, seed });
     }
+    // поединок: бойцы по очереди атакуют — замах, быстрый удар с выпадом, отход;
+    // второй в это время отступает и подставляет меч (блок)
+    const sm = (a, b, x) => { const u = Math.min(1, Math.max(0, (x - a) / (b - a))); return u * u * (3 - 2 * u); };
     upd.push((t) => {
-      fighters.forEach(({ r, sd, seed }, k) => {
-        const lunge = Math.sin(t * 2.2 + k * Math.PI) * 0.35;
-        const z = c.z + sd * (1.05 + lunge);
-        r.mesh.position.set(c.x + Math.sin(t * 0.7 + k) * 0.25, gh(c.x, z), z);
-        r.mesh.rotation.y = (sd > 0 ? Math.PI : 0) + Math.sin(t * 1.3 + seed) * 0.15;
-        r.uPhase.value = Math.sin(t * 4.4 + k * 1.3) * 1.4;
+      const T = 2.6, cyc = Math.floor(t / T), u = (t % T) / T;
+      const attacker = cyc % 2;
+      const circle = Math.sin(t * 0.35) * 0.5; // бойцы медленно кружат
+      fighters.forEach(({ r, sd }, k) => {
+        const att = k === attacker;
+        let swing, fwd;
+        if (att) {
+          // -1 — меч занесён, +1 — удар закончен
+          swing = u < 0.45 ? -sm(0, 0.45, u) : u < 0.58 ? -1 + 2 * sm(0.45, 0.58, u) : 1 - 1.2 * sm(0.62, 1, u);
+          fwd = u < 0.45 ? -0.12 * sm(0, 0.45, u) : u < 0.62 ? 0.45 * sm(0.45, 0.6, u) : 0.45 * (1 - sm(0.62, 1, u));
+        } else {
+          swing = -0.55 * sm(0.3, 0.5, u) * (1 - sm(0.7, 1, u)); // меч поднят для блока
+          fwd = -0.3 * sm(0.45, 0.6, u) * (1 - sm(0.65, 1, u));
+        }
+        const dz = sd * (1.15 - fwd);
+        const ang = circle + (sd > 0 ? 0 : Math.PI);
+        const x = c.x + Math.sin(ang) * dz * sd, z = c.z + Math.cos(ang) * dz * sd;
+        r.mesh.position.set(x, gh(x, z), z);
+        r.mesh.rotation.y = Math.atan2(c.x - x, c.z - z) + (att ? swing * 0.12 : -0.15 * sm(0.45, 0.6, u) * (1 - sm(0.7, 1, u)));
+        r.uPhase.value = Math.asin(Math.max(-1, Math.min(1, swing)));
+        r.uAmp.value = att ? 0.9 : 0.7;
       });
     });
     // стрельбище: мишени у стены, двое лучников
@@ -310,7 +342,7 @@ export function createLife3(scene, ctx, village, walls) {
           const a = a0 + 0.8 + (T - 9.5) * 0.55;
           pos = circ(a, 9 + Math.sin(T * 0.8) * 1.5);
           look = circ(a + 0.2, 9);
-          flap = Math.sin(T * 0.9) > 0.3 ? 1 : 0; fold = 0;
+          flap = Math.sin(T * 0.9) > 0.55 ? 1 : 0; fold = 0;
         } else { // возвращается на перчатку
           const u = (T - 22.5) / 3.5;
           const a = a0 + 0.8 + 13 * 0.55;
@@ -321,7 +353,10 @@ export function createLife3(scene, ctx, village, walls) {
       }
       bird.position.copy(pos);
       if (look.distanceToSquared(pos) > 1e-4) bird.lookAt(look);
-      const wa = fold ? -1.3 : flap ? Math.sin(t * 16) * 0.7 : 0.05;
+      if (!fold && T >= 9.5 && T < 22.5) bird.rotateZ(-0.38); // крен на вираже
+      // парит на раскрытых крыльях, изредка делает серию сильных взмахов
+      const glide = 0.12 + Math.sin(t * 1.3) * 0.04;
+      const wa = fold ? -1.3 : flap ? Math.sin(t * 13) * 0.75 * (0.6 + 0.4 * Math.abs(Math.sin(t * 0.9))) : glide;
       wings[0].rotation.z = wa; wings[1].rotation.z = -wa;
       wings.forEach((w) => { w.scale.z = fold ? 0.5 : 1; });
     });
@@ -379,7 +414,13 @@ export function createLife3(scene, ctx, village, walls) {
     for (const [x, z] of [[10, -17], [10.5, -13], [8, -15.2]]) {
       const y = gh(x, z);
       wood.addGeometry(new THREE.CylinderGeometry(0.09, 0.13, 1.8, 7), M(x, y + 0.9, z));
-      for (let k = 0; k < 6; k++) colorB.add(GEO.bush, M(x + (rnd() - 0.5) * 1.3, y + 2.1 + rnd() * 0.7, z + (rnd() - 0.5) * 1.3, rnd() * 6, 0.7 + rnd() * 0.3, 0.55, 0.7 + rnd() * 0.3), [0x3a6a24, 0x4a7a2a, 0x2e5a1e][k % 3]);
+      // крона из многих неровных пучков: внутри темнее, снаружи и сверху светлее
+      for (let k = 0; k < 14; k++) {
+        const a2 = rnd() * Math.PI * 2, d = 0.3 + rnd() * 0.8, hh = 1.9 + rnd() * 1.1;
+        const outer = d > 0.7 || hh > 2.6;
+        colorB.add(GEO.bush, M(x + Math.cos(a2) * d, y + hh, z + Math.sin(a2) * d, rnd() * 6, 0.35 + rnd() * 0.25, 0.28 + rnd() * 0.15, 0.35 + rnd() * 0.25), outer ? [0x4a7a2a, 0x5a8a30][k % 2] : [0x2e5a1e, 0x365f22][k % 2]);
+      }
+      for (let k = 0; k < 3; k++) wood.addGeometry(new THREE.CylinderGeometry(0.03, 0.05, 0.9, 5), M(x, y + 1.9, z, k * 2.1, 1, 1, 1, 0.7, 0)); // ветви
       for (let k = 0; k < 10; k++) { const a = rnd() * 6.28, r = 0.6 + rnd() * 0.5; colorB.add(GEO.sph, M(x + Math.cos(a) * r, y + 1.9 + rnd() * 1.1, z + Math.sin(a) * r, 0, 0.07, 0.07, 0.07), rnd() < 0.5 ? 0xc0301a : 0xd8b030); }
     }
     // ульи-колоды и садовник
@@ -626,26 +667,50 @@ export function createLife3(scene, ctx, village, walls) {
     }
     if (best) {
       const { x, z, U, S } = best;
-      const vineB = new ColorBuilder();
-      const leaf = [0x3a5a1e, 0x4a6a24, 0x2e4e1a];
+      // вблизи — настоящие лозы: кривой штамб, рукав вдоль проволоки, листья
+      // пучками на двух ярусах и грозди; издали — простые зелёные валики
+      const vineB = new ColorBuilder(), farB = new ColorBuilder();
+      const leaf = [0x3a5a1e, 0x4a6a24, 0x2e4e1a, 0x55722a];
+      const leafG = new THREE.SphereGeometry(1, 5, 3);
+      const GRAPE = (() => { const g = new THREE.ConeGeometry(0.06, 0.16, 6, 2).rotateX(Math.PI); const p = g.getAttribute('position'); for (let i = 0; i < p.count; i++) { const k = 1 + 0.18 * Math.sin(i * 2.3); p.setXYZ(i, p.getX(i) * k, p.getY(i), p.getZ(i) * k); } g.computeVertexNormals(); return g; })();
+      const yaw = Math.atan2(S.x, S.z);
       for (let row = 0; row < 8; row++) {
         const du = -8 + row * 2.3;
         for (let dv = -11; dv <= 11; dv += 0.8) {
           const px = x + U.x * du + S.x * dv, pz = z + U.z * du + S.z * dv, py = gh(px, pz);
           if (Math.abs(dv % 2.4) < 0.4) wood.box(new V3(px, py + 0.65, pz), UP, S, U, 0.65, 0.03, 0.03, { grain: true });
-          vineB.add(GEO.bush, M(px, py + 0.8, pz, rr() * 6, 0.36 + rr() * 0.12, 0.42, 0.24), leaf[(row + Math.round(dv)) & 1 ? 0 : (rr() < 0.5 ? 1 : 2)]);
-          if (rr() < 0.35) vineB.add(GEO.sph, M(px + U.x * 0.22, py + 0.55, pz + U.z * 0.22, 0, 0.06, 0.1, 0.06), 0x3a1a3a);
+          farB.add(GEO.bush, M(px, py + 0.8, pz, rr() * 6, 0.36 + rr() * 0.12, 0.42, 0.24), leaf[(row + Math.round(dv)) & 1 ? 0 : (rr() < 0.5 ? 1 : 2)]);
+          // штамб: изогнутый, тёмный
+          const lean = (rr() - 0.5) * 0.25;
+          vineB.add(GEO.cylLo, M(px, py + 0.4, pz, 0, 0.035, 0.8, 0.035, lean, (rr() - 0.5) * 0.2), 0x3a2a1c);
+          vineB.add(GEO.cylLo, M(px, py + 0.82, pz, yaw, 0.025, 0.8, 0.025, Math.PI / 2), 0x4a3422); // рукав вдоль проволоки
+          // листья: нижний ярус у проволоки и верхние побеги
+          for (let k = 0; k < 5; k++) {
+            const t = (k / 5 - 0.5) * 0.85, up = k % 2 ? 0.95 + rr() * 0.35 : 0.72 + rr() * 0.2;
+            const side = (rr() - 0.5) * 0.28;
+            const lx = px + S.x * t + U.x * side, lz = pz + S.z * t + U.z * side;
+            vineB.add(leafG, M(lx, py + up, lz, rr() * 6, 0.2 + rr() * 0.07, 0.09 + rr() * 0.04, 0.17 + rr() * 0.05, (rr() - 0.5) * 1.0, (rr() - 0.5) * 1.0), leaf[Math.floor(rr() * 4)]);
+          }
+          // гроздь: конус из ягод под листьями
+          if (rr() < 0.45) {
+            const gx = px + U.x * 0.16 * (rr() < 0.5 ? 1 : -1), gz = pz + U.z * 0.16;
+            vineB.add(GRAPE, M(gx, py + 0.62, gz, rr() * 6), 0x3a1a3a); // гроздь — один бугристый конус
+          }
         }
         const a0 = new V3(x + U.x * du - S.x * 11, 0, z + U.z * du - S.z * 11), a1 = new V3(x + U.x * du + S.x * 11, 0, z + U.z * du + S.z * 11);
         const m = a0.clone().lerp(a1, 0.5);
-        colorB.add(GEO.box, M(m.x, (gh(a0.x, a0.z) + gh(a1.x, a1.z)) / 2 + 1.05, m.z, Math.atan2(S.x, S.z), 0.012, 0.012, 22), 0x3a3028);
+        colorB.add(GEO.box, M(m.x, (gh(a0.x, a0.z) + gh(a1.x, a1.z)) / 2 + 1.05, m.z, yaw, 0.012, 0.012, 22), 0x3a3028);
       }
       const vmat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
-      const vm = new THREE.Mesh(vineB.build(), vmat);
-      vm.castShadow = vm.receiveShadow = true;
-      vm.name = 'vineyard';
-      scene.add(vm);
-      upd.push(() => { const a = AUTUMN.value; vmat.color.setRGB(1 + 1.3 * a, 1 + 0.25 * a, 1 - 0.55 * a); });
+      const vm = new THREE.Mesh(vineB.build(), vmat), vf = new THREE.Mesh(farB.build(), vmat);
+      vm.receiveShadow = vf.receiveShadow = true; vf.castShadow = true; // густая листва вблизи — без теней (дешевле)
+      vm.name = vf.name = 'vineyard';
+      scene.add(vm, vf);
+      const vc = new V3(x, gh(x, z), z);
+      upd.push((t, dt, cam) => {
+        const a = AUTUMN.value; vmat.color.setRGB(1 + 1.3 * a, 1 + 0.25 * a, 1 - 0.55 * a);
+        if (cam) { const near = cam.position.distanceTo(vc) < 75; vm.visible = near; vf.visible = !near; }
+      });
       // сборщики с корзинами и воз с чаном
       for (let k = 0; k < 4; k++) {
         const du = -8 + (1 + k * 2) * 2.3 + 1.15, dv = -7 + k * 4.2;
@@ -822,11 +887,14 @@ export function createLife3(scene, ctx, village, walls) {
     }
   }
 
-  out.update = (t, dt) => {
+  out.update = (t, dt, cam) => {
     for (const m of movers) m.update(dt, gh);
-    for (const f of upd) f(t, dt);
+    for (const f of upd) f(t, dt, cam);
   };
-  out.setNight = (k) => { for (const m of night) m.userData.night = k > 0.35; };
+  out.setNight = (k) => {
+    for (const m of night) m.userData.night = k > 0.35;
+    for (const p of out.firePools || []) { p.mat.uniforms.uK.value = k; p.pool.visible = k > 0.03; }
+  };
   out.night = night;
   return out;
 }

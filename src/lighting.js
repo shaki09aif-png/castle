@@ -376,7 +376,7 @@ export function createLighting(scene, renderer, assets) {
       fog: C(0.74, 0.48, 0.36), horizon: C(1.0, 0.55, 0.28), zenith: C(0.2, 0.22, 0.45), skySun: C(1.0, 0.5, 0.2), cloud: 0.85, night: 0,
     },
     night: {
-      dir: dirAt(az + 2.4, 0.8), sunCol: C(0.55, 0.66, 1.0), sunI: 0.55,
+      dir: dirAt(az + 2.4, 0.8), sunCol: C(0.48, 0.62, 1.0), sunI: 0.68,
       hemiSky: C(0.3, 0.42, 0.7), hemiGround: C(0.06, 0.07, 0.1), hemiI: Q.envLight ? 0.35 : 0.95, env: 0.15,
       fog: C(0.03, 0.045, 0.08), horizon: C(0.05, 0.07, 0.13), zenith: C(0.008, 0.014, 0.04), skySun: C(0.75, 0.8, 0.95), cloud: 0.1, night: 1,
     },
@@ -418,7 +418,10 @@ export function createLighting(scene, renderer, assets) {
     scene.environmentIntensity = cur.env * (0.6 + 0.4 * wcur.hemi);
     // в непогоду туман серее (но ночью остаётся тёмным)
     scene.fog.color.copy(cur.fog).lerp(greyFog.clone().multiplyScalar(Math.max(0.08, 1 - cur.night * 0.9) * (cur.sunI > 1 ? 1 : 0.6)), wcur.grey);
-    scene.fog.density = fogBase * wcur.fog;
+    // низкое солнце: вечерняя дымка гуще, тени мягче (размытые края)
+    const low = Math.max(0, Math.min(1, (0.55 - cur.dir.y) / 0.4)) * (1 - cur.night);
+    scene.fog.density = fogBase * wcur.fog * (1 + low * 0.45);
+    sun.shadow.radius = Q.shadowRadius * (1 + low * 1.6);
     if (skyU) {
       skyU.sunDir.value.copy(SUN_DIR);
       skyU.horizon.value.copy(cur.horizon);

@@ -50,16 +50,24 @@ export const FLAG_TIME = { value: 0 };
 export function createFlag(scene, pos, uTime = FLAG_TIME, { size = 3.8, field } = {}) {
   const W = size, H = size * 0.63;
   const geo = new THREE.PlaneGeometry(W, H, 28, 14);
+  const uPh = { value: pos.x * 0.37 + pos.z * 0.21 };
   geo.translate(W / 2, -H / 2, 0);
   const mat = new THREE.MeshStandardMaterial({ map: bannerTexture(field), side: THREE.DoubleSide, roughness: 0.85 });
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = uTime;
+    shader.uniforms.uPh = uPh;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
-        uniform float uTime;
+        uniform float uTime, uPh;
+        varying float vFold;
         float flagZ(vec2 p) {
           float k = p.x / ${W.toFixed(2)};
-          return (sin(p.x * 1.9 - uTime * 5.5 + p.y * 0.5) * 0.45 + sin(p.x * 4.3 - uTime * 8.7 + p.y * 1.3) * 0.1) * (0.25 + k);
+          float t = uTime + uPh;
+          // порывы: волна то усиливается, то стихает; мелкая рябь у свободного края
+          float gust = 0.75 + 0.3 * sin(t * 0.45) + 0.15 * sin(t * 1.3 + 1.7);
+          return (sin(p.x * 1.9 - t * 5.5 + p.y * 0.5) * 0.45 * gust
+                + sin(p.x * 4.3 - t * 8.7 + p.y * 1.3) * 0.1
+                + sin(p.x * 8.1 - t * 13.0 + p.y * 2.3) * 0.035 * k) * (0.25 + k);
         }`)
       .replace('#include <beginnormal_vertex>', `
         float e = 0.05;
@@ -69,9 +77,18 @@ export function createFlag(scene, pos, uTime = FLAG_TIME, { size = 3.8, field } 
       .replace('#include <begin_vertex>', `
         vec3 transformed = position;
         transformed.z += flagZ(position.xy);
+        vFold = dzdx;
         transformed.x -= abs(flagZ(position.xy)) * 0.25;
         transformed.y -= (position.x / ${W.toFixed(2)}) * 0.18; // край флага чуть провисает`);
   };
+  mat.onBeforeCompile = ((prev) => (sh) => {
+    prev(sh);
+    // складки ткани: впадины темнее, гребни светлее
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vFold;')
+      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= 0.9 + clamp(vFold * 0.18, -0.2, 0.18);');
+  })(mat.onBeforeCompile);
+  mat.customProgramCacheKey = () => 'flag-' + W.toFixed(2);
   const flag = new THREE.Mesh(geo, mat);
   flag.castShadow = true;
   const group = new THREE.Group();

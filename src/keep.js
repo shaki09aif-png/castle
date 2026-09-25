@@ -42,6 +42,7 @@ export function createKeep(scene, terrain, walls) {
   const lv = [g, g + 6.5, g + 13, g + 19, g + 24.5, platY]; // уровни этажей
 
   // ---------- угловые лопатки (плоские контрфорсы) ----------
+  stone.forceA = 1000; // лопатки и пояса — из светлого тёсаного камня
   for (let f = 0; f < 4; f++) {
     const { n, t } = face(f);
     for (const sd of [-1, 1]) {
@@ -59,6 +60,7 @@ export function createKeep(scene, terrain, walls) {
     ring(stone, o0, o1, y + 0.14, UP);
     ring(stone, o0, o1, y - 0.14, UP.clone().negate());
   }
+  stone.forceA = undefined;
 
   // ---------- окна и бойницы по этажам ----------
   const slit = (f, s, y, cross = false) => {

@@ -45,8 +45,8 @@ export function createPostFX(renderer, scene, camera) {
   if (Q.godRays) {
     effects.push(
       new GodRaysEffect(camera, sunMesh, {
-        samples: 60, density: 0.95, decay: 0.93, weight: 0.32, exposure: 0.38,
-        clampMax: 1, blur: true, kernelSize: KernelSize.SMALL, resolutionScale: 0.5,
+        samples: Q.msaa ? 36 : 60, density: 0.95, decay: 0.93, weight: 0.3, exposure: 0.34,
+        clampMax: 1, blur: true, kernelSize: KernelSize.SMALL, resolutionScale: Q.msaa ? 0.4 : 0.5,
       })
     );
   }

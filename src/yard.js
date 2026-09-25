@@ -172,8 +172,8 @@ function stall(B, terrain, s, rnd, people) {
 // Лошадь: бочкообразное туловище, грудь и круп, изогнутая шея, голова с
 // мордой, ноги с суставами и копытами, грива, хвост, седло и уздечка
 const HG = {
-  barrel: (() => { const g = new THREE.CapsuleGeometry(0.34, 0.9, 6, 14); g.rotateX(Math.PI / 2); g.scale(0.95, 1.08, 1); return g; })(),
-  neck: new THREE.CylinderGeometry(0.13, 0.24, 0.78, 12).translate(0, 0.39, 0),
+  barrel: (() => { const g = new THREE.CapsuleGeometry(0.34, 0.9, 8, 18); g.rotateX(Math.PI / 2); g.scale(0.95, 1.08, 1); return g; })(),
+  neck: (() => { const g = new THREE.CylinderGeometry(0.13, 0.24, 0.78, 14, 4).translate(0, 0.39, 0); const p = g.getAttribute('position'); for (let i = 0; i < p.count; i++) { const y = p.getY(i) / 0.78; if (p.getZ(i) < 0) p.setZ(i, p.getZ(i) * (1 + 0.25 * Math.sin(y * Math.PI))); } g.computeVertexNormals(); return g; })(),
   head: (() => { const g = new THREE.CylinderGeometry(0.075, 0.125, 0.52, 10).translate(0, -0.26, 0); g.scale(0.85, 1, 1.15); return g; })(),
   cheek: new THREE.SphereGeometry(0.12, 10, 8),
   muzzle: new THREE.SphereGeometry(0.085, 10, 8),
@@ -181,6 +181,7 @@ const HG = {
   lower: new THREE.CylinderGeometry(0.045, 0.04, 0.4, 8).translate(0, -0.2, 0),
   joint: new THREE.SphereGeometry(0.058, 8, 6),
   hoof: new THREE.CylinderGeometry(0.055, 0.07, 0.09, 10),
+  feather: new THREE.CylinderGeometry(0.05, 0.068, 0.07, 10, 1, true),
   ear: new THREE.ConeGeometry(0.035, 0.13, 6),
   eye: new THREE.SphereGeometry(0.02, 6, 4),
   tail: new THREE.ConeGeometry(0.07, 0.42, 8).translate(0, -0.21, 0),
@@ -196,25 +197,32 @@ export function horse(colorB, x, y, z, yaw, col, rnd) {
   const down = rnd() < 0.5 ? 0.3 : 0;
   // шея наклонена вперёд, голова вниз
   const neck = L(r, 0, 1.45, 0.62, 0.55 + down * 0.6);
-  colorB.add(HG.neck, neck, col);
+  // голова и шея помечены: у идущей лошади они кивают в такт шагу
+  const HB = { add: (g, m, c) => colorB.add(g, m, c, 3, y + 1.45) };
+  HB.add(HG.neck, neck, col);
   const poll = neck.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0.74, 0));
   // голова смотрит вперёд-вниз (ось головы — локальная −Y, темя — локальная +Z)
   const head = poll.clone().multiply(new THREE.Matrix4().makeRotationX(-1.35 + down * 0.2));
-  colorB.add(HG.cheek, head.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.08, -0.02)), col);
-  colorB.add(HG.head, head, col);
-  colorB.add(HG.muzzle, head.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.52, 0.01)), col === 0xe8e0d0 ? 0x9a8a80 : sh);
+  HB.add(HG.cheek, head.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.08, -0.02)), col);
+  HB.add(HG.head, head, col);
+  HB.add(HG.muzzle, head.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.52, 0.01)), col === 0xe8e0d0 ? 0x9a8a80 : sh);
   for (const sd of [-1, 1]) {
-    colorB.add(HG.ear, head.clone().multiply(new THREE.Matrix4().compose(new V3(sd * 0.065, 0.03, 0.1), new THREE.Quaternion().setFromEuler(new THREE.Euler(1.2, 0, sd * -0.25)), new V3(1, 1, 1))), col);
-    colorB.add(HG.eye, head.clone().multiply(new THREE.Matrix4().makeTranslation(sd * 0.105, -0.13, 0.05)), dark);
+    HB.add(HG.ear, head.clone().multiply(new THREE.Matrix4().compose(new V3(sd * 0.065, 0.03, 0.1), new THREE.Quaternion().setFromEuler(new THREE.Euler(1.2, 0, sd * -0.25)), new V3(1, 1, 1))), col);
+    HB.add(HG.eye, head.clone().multiply(new THREE.Matrix4().makeTranslation(sd * 0.105, -0.13, 0.05)), dark);
   }
   // уздечка: ремни вокруг морды и за ушами, поводья
-  colorB.add(new THREE.TorusGeometry(0.1, 0.012, 4, 12), head.clone().multiply(new THREE.Matrix4().compose(new V3(0, -0.38, 0.0), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)), new V3(1, 1, 1.2))), 0x3a2414);
-  colorB.add(new THREE.TorusGeometry(0.13, 0.012, 4, 12), head.clone().multiply(new THREE.Matrix4().compose(new V3(0, -0.02, 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)), new V3(1, 1, 1.1))), 0x3a2414);
+  HB.add(new THREE.TorusGeometry(0.1, 0.012, 4, 12), head.clone().multiply(new THREE.Matrix4().compose(new V3(0, -0.38, 0.0), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)), new V3(1, 1, 1.2))), 0x3a2414);
+  HB.add(new THREE.TorusGeometry(0.13, 0.012, 4, 12), head.clone().multiply(new THREE.Matrix4().compose(new V3(0, -0.02, 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)), new V3(1, 1, 1.1))), 0x3a2414);
   // грива — ряд прядей вдоль шеи
-  for (let k = 0; k < 7; k++) {
-    const t = k / 6;
-    colorB.add(G.box, neck.clone().multiply(new THREE.Matrix4().compose(new V3(0, 0.08 + t * 0.66, -0.13 - (1 - t) * 0.08), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, 0, (k % 2 ? 0.25 : -0.25))), new V3(0.05, 0.14, 0.09))), mane);
+  for (let k = 0; k < 12; k++) {
+    const t = k / 11;
+    const side = k % 3 === 0 ? 0 : k % 3 === 1 ? 0.035 : -0.035;
+    HB.add(G.box, neck.clone().multiply(new THREE.Matrix4().compose(new V3(side, 0.06 + t * 0.7, -0.13 - (1 - t) * 0.08), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3 + (k % 2) * 0.15, 0, side * 6 + (k % 2 ? 0.2 : -0.2))), new V3(0.045, 0.16, 0.085))), mane);
   }
+  // чёлка между ушами
+  for (const sd of [-1, 0, 1]) HB.add(G.box, head.clone().multiply(new THREE.Matrix4().compose(new V3(sd * 0.03, -0.06, 0.1), new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.4, 0, sd * 0.3)), new V3(0.035, 0.12, 0.03))), mane);
+  // ноздри
+  for (const sd of [-1, 1]) HB.add(HG.eye, head.clone().multiply(new THREE.Matrix4().makeTranslation(sd * 0.045, -0.58, 0.05)), dark);
   // ноги: передние прямые, задние с изгибом в скакательном суставе
   for (const [lx, lz, hind] of [[-0.19, 0.55, 0], [0.19, 0.55, 0], [-0.19, -0.62, 1], [0.19, -0.62, 1]]) {
     colorB.curLimb = [(lx < 0) === !hind ? 0.7 : -0.7, 1.12]; // диагональные пары ног шагают вместе
@@ -227,6 +235,7 @@ export function horse(colorB, x, y, z, yaw, col, rnd) {
     colorB.add(HG.joint, fet.clone().multiply(new THREE.Matrix4().makeScale(0.85, 0.85, 0.85)), col);
     const p = new V3().setFromMatrixPosition(fet);
     colorB.add(HG.hoof, M(p.x, y + 0.045, p.z, yaw), dark);
+    colorB.add(HG.feather, M(p.x, y + 0.11, p.z, yaw), col === 0xe8e0d0 ? 0xd8d0c0 : sh); // щётка над копытом
   }
   colorB.curLimb = [0, 0];
   // хвост из двух частей

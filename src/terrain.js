@@ -647,6 +647,13 @@ function makeTerrainMaterial() {
             n1 = normalize(n1 + nb - n);
             #endif
             c1 *= mix(0.85, 1.1, macro2.b);
+            // скалы: трещины и тёмные расселины, выступы светлее
+            {
+              vec2 crs = texture2D(tMacro, vWPos.xz * 0.035 + vWPos.y * 0.05).gb;
+              float crack = (1.0 - smoothstep(0.0, 0.012, abs(crs.x - 0.5))) + (1.0 - smoothstep(0.0, 0.009, abs(crs.y - 0.5))) * 0.8;
+              c1 *= 1.0 - min(1.0, crack) * 0.6;
+              c1 *= 0.88 + 0.28 * smoothstep(0.35, 0.75, o1.r);
+            }
           }
           if (w.z > 0.004) { sc = tileInv.z; planarSampleArr(tArrC, tArrN, tArrO, 2.0, vWPos * sc, dx * sc, dy * sc, n, 1.0, c2, o2, n2); }
           if (w.w > 0.004) { sc = tileInv.w; planarSampleArr(tArrC, tArrN, tArrO, 3.0, vWPos * sc, dx * sc, dy * sc, n, 1.0, c3, o3, n3); }
@@ -892,7 +899,7 @@ function buildRocks(heightAt, roadGrid, groundAt) {
     { geo: rockGeometry(5, 1), list: [] },
     { geo: rockGeometry(6, 1), list: [] },
   ];
-  const mat = triplanarMaterial('rock', { scale: 1.6, tint: 0.3, normalStrength: 1.2 });
+  const mat = triplanarMaterial('rock', { scale: 1.6, tint: 0.3, normalStrength: 1.2, faceted: true });
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();

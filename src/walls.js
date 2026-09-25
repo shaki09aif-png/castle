@@ -3,6 +3,7 @@
 // боевой ход с перилами на кронштейнах, хурды (деревянные галереи) на части
 // стен, каменные лестницы со двора, мох у основания и потёки на кладке.
 import * as THREE from 'three';
+import { addWeathering } from './materials.js';
 import { WALL, insideTower, wallTrace, insideBuilding } from './layout.js';
 import { pbrMaterial, macroNoiseTexture } from './textures.js';
 import { createNoise2D, mulberry32 } from './noise.js';
@@ -23,7 +24,7 @@ class GeoBuilder {
     this.pos.push(p.x, p.y, p.z);
     this.nrm.push(n.x, n.y, n.z);
     this.uv.push(u / this.tile, v / this.tile);
-    this.aux.push(a);
+    this.aux.push(this.forceA !== undefined ? this.forceA : a); // forceA: пометить «тёсаный камень»
     return this.pos.length / 3 - 1;
   }
   // p0..p3 — по контуру; n — нужная нормаль; uvs — в метрах; a — «высота над землёй» (для мха)
@@ -145,7 +146,7 @@ export function createWalls(scene, terrain) {
   for (let i = 0; i < n - 1; i++) sAt.push(sAt[i] + segLen[i]);
 
   const stoneMat = wallMaterial();
-  const woodMat = pbrMaterial('wood', { color: 0x9a8a78 });
+  const woodMat = addWeathering(pbrMaterial('wood', { color: 0x9a8a78 }), 'wood');
   const darkMat = new THREE.MeshStandardMaterial({ color: 0x0b0a09, roughness: 1 });
   const stone = new GeoBuilder(stoneMat.userData.tileMeters);
   const wood = new GeoBuilder(woodMat.userData.tileMeters);
@@ -252,8 +253,16 @@ export function createWalls(scene, terrain) {
         stone.box(new V3(center.x, (baseY + s0y) / 2, center.z), D, UP, N, sw, (s0y - baseY) / 2, hd, { skipBottom: true });
         stone.box(new V3(center.x, (s1y + hTop) / 2, center.z), D, UP, N, sw, (hTop - s1y) / 2, hd);
       }
-      // слегка выступающий камень-покрытие на зубце
-      stone.box(new V3(center.x, hTop + 0.07, center.z), D, UP, N, hw + 0.05, 0.08, hd + 0.05);
+      // слегка выступающий камень-покрытие на зубце; у некоторых угол отколот
+      if (rnd() < 0.4) {
+        const sd = rnd() < 0.5 ? -1 : 1, chip = 0.18 + rnd() * 0.14;
+        const cc = new V3(center.x, hTop + 0.07, center.z).addScaledVector(D, -sd * chip / 2);
+        stone.box(cc, D, UP, N, hw + 0.05 - chip / 2, 0.08, hd + 0.05);
+        const bc = new V3(center.x, hTop + 0.03, center.z).addScaledVector(D, sd * (hw + 0.05 - chip / 2)).addScaledVector(N, (rnd() - 0.5) * 0.12);
+        stone.box(bc, D, UP, N, chip / 2 - 0.02, 0.045, hd - 0.02);
+      } else {
+        stone.box(new V3(center.x, hTop + 0.07, center.z), D, UP, N, hw + 0.05, 0.08, hd + 0.05);
+      }
     }
 
     // ---------- бойницы в теле стены (узкие щели в рамке из тёсаного камня) ----------
@@ -498,16 +507,25 @@ function wallMaterial() {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.tMacro = { value: macro };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aGround;\nvarying float vGround;\nvarying vec3 vWallW;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGround = aGround;\nvWallW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      .replace('#include <common>', '#include <common>\nattribute float aGround;\nvarying float vGround;\nvarying vec3 vWallW;\nvarying vec3 vWallN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGround = aGround;\nvWallW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWallN = normalize(mat3(modelMatrix) * objectNormal);');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D tMacro;\nvarying float vGround;\nvarying vec3 vWallW;\nfloat gMoss;')
+      .replace('#include <common>', '#include <common>\nuniform sampler2D tMacro;\nvarying float vGround;\nvarying vec3 vWallW;\nvarying vec3 vWallN;\nfloat gMoss;')
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
         {
           vec3 m1 = texture2D(tMacro, vWallW.xz * 0.05 + vWallW.y * 0.02).rgb;
           vec3 m2 = texture2D(tMacro, vec2(vWallW.x * 0.35 + vWallW.z * 0.35, vWallW.y * 0.03)).rgb;
+          // тёсаный камень (пояса, лопатки, рамы окон) помечен большим aGround
+          float dressed = step(500.0, vGround);
+          float vGround = mix(vGround, 9.0, dressed);
+          // тёмные швы по тону самой текстуры; у земли в них пробивается трава
+          float jl = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+          float joint = 1.0 - smoothstep(0.05, 0.16, jl);
+          diffuseColor.rgb *= 1.0 - joint * 0.25 * (1.0 - dressed);
+          float grassJ = joint * (1.0 - smoothstep(0.3, 2.6 + m1.r * 1.6, vGround)) * smoothstep(0.42, 0.6, m2.r);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.1, 0.19, 0.04) * (0.8 + m1.g * 0.5), grassJ * 0.85);
           // разнотонность кладки на больших участках
           diffuseColor.rgb *= 0.88 + 0.24 * m1.r;
           // потёки сверху вниз
@@ -524,7 +542,15 @@ function wallMaterial() {
           // трещины в старой кладке: тонкие изломанные линии там, где камень выветрен
           float cr = texture2D(tMacro, vec2(vWallW.x * 0.09 + vWallW.z * 0.09, vWallW.y * 0.07) + m1.rg * 0.08).g;
           float crack = (1.0 - smoothstep(0.0, 0.014, abs(cr - 0.5))) * smoothstep(0.58, 0.72, m2.b);
-          diffuseColor.rgb *= 1.0 - crack * 0.65;
+          diffuseColor.rgb *= 1.0 - crack * 0.65 * (1.0 - dressed);
+          // сырость: тёмная полоса у самой земли
+          diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(0.0, 1.3 + m1.g, vGround)) * 0.16;
+          // верхние грани зубцов и уступов: лишайник и налёт
+          float topF = smoothstep(0.6, 0.92, vWallN.y) * (1.0 - dressed * 0.5);
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.3, 0.29, 0.22), vec3(0.2, 0.25, 0.09), m1.b), topF * 0.35 * (0.5 + m2.g));
+          // тёсаный камень светлее и ровнее по цвету
+          float lum = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, vec3(lum), 0.6) * vec3(1.12, 1.05, 0.9) * 1.6, dressed * 0.85);
         }`
       )
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 1.0, gMoss);');

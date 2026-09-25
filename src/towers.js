@@ -4,6 +4,7 @@
 // крыши из черепицы, видимой отдельными рядами, флюгеры, двери с железными
 // полосами и петлями, окна со ставнями.
 import * as THREE from 'three';
+import { addWeathering } from './materials.js';
 import { TOWERS, WALL } from './layout.js';
 import { GeoBuilder } from './walls.js';
 import { pbrMaterial, assetSource } from './textures.js';
@@ -102,9 +103,12 @@ export function arrowSlit(stone, dark, p, n, y, cross) {
   const c = new V3(p.x, y, p.z);
   dark.box(c.clone().addScaledVector(n, 0.012), t, UP, n, 0.06, 0.62, 0.02);
   if (cross) dark.box(c.clone().addScaledVector(n, 0.012).addScaledVector(UP, 0.15), t, UP, n, 0.24, 0.05, 0.02);
-  for (const sd of [-1, 1]) stone.box(c.clone().addScaledVector(t, sd * 0.17).addScaledVector(n, 0.03), t, UP, n, 0.1, 0.74, 0.05);
-  stone.box(c.clone().addScaledVector(UP, 0.74).addScaledVector(n, 0.03), t, UP, n, 0.28, 0.1, 0.06);
-  stone.box(c.clone().addScaledVector(UP, -0.74).addScaledVector(n, 0.03), t, UP, n, 0.28, 0.1, 0.06);
+  const fa = stone.forceA;
+  stone.forceA = 1000;
+  for (const sd of [-1, 1]) stone.box(c.clone().addScaledVector(t, sd * 0.17).addScaledVector(n, 0.07), t, UP, n, 0.1, 0.74, 0.09);
+  stone.box(c.clone().addScaledVector(UP, 0.74).addScaledVector(n, 0.07), t, UP, n, 0.28, 0.1, 0.1);
+  stone.box(c.clone().addScaledVector(UP, -0.74).addScaledVector(n, 0.07), t, UP, n, 0.28, 0.1, 0.1);
+  stone.forceA = fa;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +144,8 @@ export function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3) {
   const m = new THREE.Matrix4().makeBasis(t, UP, n).setPosition(ringPos.x, baseY + 1.05, ringPos.z);
   metal.addGeometry(ringGeo, m);
   // каменная рама: косяки, клинчатая стрельчатая арка (две дуги радиусом w), порог
+  const fa = stone.forceA;
+  stone.forceA = 1000;
   const fr = c.clone().addScaledVector(n, 0.02);
   for (const sd of [-1, 1]) {
     const jc = fr.clone().addScaledVector(t, sd * (w / 2 + 0.13));
@@ -159,6 +165,7 @@ export function door(stone, wood, metal, p, n, baseY, w = 1.1, h = 2.3) {
     }
   }
   stone.box(new V3(fr.x, baseY - 0.05, fr.z).addScaledVector(n, 0.1), t, UP, n, w / 2 + 0.3, 0.07, 0.25);
+  stone.forceA = fa;
 }
 
 // Окно со ставнями: тёмный проём, каменная рама, распахнутые деревянные ставни
@@ -170,14 +177,18 @@ export function windowWithShutters(stone, wood, dark, metal, p, n, y, w = 0.7, h
   const c = new V3(p.x, y, p.z);
   WINDOWS.push({ c: c.clone(), n: n.clone(), w, h });
   dark.box(c.clone().addScaledVector(n, 0.02), t, UP, n, w / 2, h / 2, 0.02);
+  const fa = stone.forceA;
+  stone.forceA = 1000; // рама из светлого тёсаного камня, выступает — окно кажется глубоким
   // средник-колонка (двойное окно)
-  stone.box(c.clone().addScaledVector(n, 0.04), t, UP, n, 0.05, h / 2, 0.05);
-  for (const sd of [-1, 1]) stone.box(c.clone().addScaledVector(t, sd * (w / 2 + 0.1)).addScaledVector(n, 0.05), t, UP, n, 0.1, h / 2 + 0.12, 0.07);
-  stone.box(c.clone().addScaledVector(UP, h / 2 + 0.12).addScaledVector(n, 0.05), t, UP, n, w / 2 + 0.2, 0.1, 0.08);
-  stone.box(c.clone().addScaledVector(UP, -h / 2 - 0.1).addScaledVector(n, 0.09), t, UP, n, w / 2 + 0.25, 0.07, 0.14);
+  stone.box(c.clone().addScaledVector(n, 0.08), t, UP, n, 0.05, h / 2, 0.08);
+  for (const sd of [-1, 1]) stone.box(c.clone().addScaledVector(t, sd * (w / 2 + 0.1)).addScaledVector(n, 0.1), t, UP, n, 0.1, h / 2 + 0.12, 0.12);
+  stone.box(c.clone().addScaledVector(UP, h / 2 + 0.12).addScaledVector(n, 0.1), t, UP, n, w / 2 + 0.2, 0.1, 0.13);
+  stone.box(c.clone().addScaledVector(UP, h / 2 + 0.27).addScaledVector(n, 0.12), t, UP, n, w / 2 + 0.3, 0.05, 0.14); // слезник
+  stone.box(c.clone().addScaledVector(UP, -h / 2 - 0.1).addScaledVector(n, 0.13), t, UP, n, w / 2 + 0.25, 0.07, 0.18);
+  stone.forceA = fa;
   // ставни на петлях у краёв проёма, раскрыты наружу
   for (const sd of [-1, 1]) {
-    const hinge = c.clone().addScaledVector(t, sd * (w / 2 + 0.2)).addScaledVector(n, 0.1);
+    const hinge = c.clone().addScaledVector(t, sd * (w / 2 + 0.2)).addScaledVector(n, 0.2);
     const dirOpen = t.clone().multiplyScalar(sd).applyAxisAngle(UP, -sd * (Math.PI - openAng));
     const panelC = hinge.clone().addScaledVector(dirOpen, w / 4 + 0.02);
     const pn = new V3().crossVectors(UP, dirOpen).normalize();
@@ -333,7 +344,7 @@ export function makeTowerContext(scene, terrain, walls) {
   const ctx = {
     scene, terrain, walls,
     stoneMat, woodMat,
-    roofMat: pbrMaterial('roof'),
+    roofMat: addWeathering(pbrMaterial('roof'), 'roof'),
     photoRoof: assetSource('roof') === 'polyhaven',
     darkMat: new THREE.MeshStandardMaterial({ color: 0x0a0908, roughness: 1 }),
     ironMat: new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 }),

@@ -130,6 +130,7 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
         uniform float uSpacing, uHalfN, uRadius, uInner, uGroundHalf, uTime;
         varying vec3 vTint;
         varying float vH;
+        varying vec3 vFlower;
         float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
         vec2 hash22(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }`
       )
@@ -142,8 +143,13 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
         float dist = length(wxz - uCam);
         float fade = (1.0 - smoothstep(uRadius * 0.7, uRadius, dist)) * smoothstep(uInner * 0.75, uInner, dist);
         float rnd = hash12(cellI + 17.3);
+        // у кромок (стены, дороги, мостовая) трава не вытоптана — выше
+        float edge = gd.g * (1.0 - gd.g) * 4.0;
         float show = step(rnd, gd.g * 1.15) * fade;
-        float scl = show * (0.65 + 0.7 * hash12(cellI + 3.1)) * (1.0 + gd.b * 0.6) * (1.0 - gd.a * 0.35);
+        float scl = show * (0.65 + 0.7 * hash12(cellI + 3.1)) * (1.0 + gd.b * 0.6 + edge * 0.15) * (1.0 - gd.a * 0.35);
+        // кое-где в траве цветы: белые, жёлтые, лиловые, голубые
+        float fl = hash12(cellI + 41.7);
+        vFlower = fl > 0.93 && gd.a < 0.6 ? (fl > 0.985 ? vec3(0.35, 0.45, 0.9) : fl > 0.97 ? vec3(0.6, 0.3, 0.75) : fl > 0.955 ? vec3(0.95, 0.8, 0.15) : vec3(0.95, 0.95, 0.9)) : vec3(0.0);
         float ang = hash12(cellI + 9.7) * 6.2832;
         mat2 rot = mat2(cos(ang), -sin(ang), sin(ang), cos(ang));
         vec3 objectNormal = normalize(vec3(rot * normal.xz, normal.y).xzy * vec3(1.0, 1.0, 1.0));
@@ -174,7 +180,7 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
         transformed += vec3(wxz.x, gd.r - 0.05, wxz.y);`
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vTint;\nvarying float vH;\nuniform float uAutumn;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vTint;\nvarying float vH;\nvarying vec3 vFlower;\nuniform float uAutumn;')
       .replace(
         '#include <normal_fragment_begin>',
         'float faceDirection = 1.0; vec3 normal = normalize(vNormal); vec3 nonPerturbedNormal = normal;'
@@ -182,7 +188,8 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
       .replace(
         '#include <map_fragment>',
         `diffuseColor.rgb = vTint * mix(0.7, 1.3, vH);
-        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.25, 1.0, 0.5), uAutumn * 0.8); // осенняя подсохшая трава`
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.25, 1.0, 0.5), uAutumn * 0.8); // осенняя подсохшая трава
+        if (vFlower.r + vFlower.g > 0.1) diffuseColor.rgb = mix(diffuseColor.rgb, vFlower * 0.6, smoothstep(0.78, 0.9, vH) * (1.0 - uAutumn));`
       )
       .replace(
         '#include <aomap_fragment>',
@@ -264,7 +271,7 @@ function mergeGeometries(list) {
 
 // Карточки листвы вокруг центра кроны; нормали — «сферические» от центра пучка,
 // поэтому крона освещается мягко и объёмно, а не как набор плоскостей.
-function leafClump(center, radius, cards, cardSize, rnd, out, droop = 0) {
+function leafClump(center, radius, cards, cardSize, rnd, out, droop = 0, tint = 1) {
   for (let k = 0; k < cards; k++) {
     const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2;
     const r = radius * Math.cbrt(0.2 + rnd() * 0.8);
@@ -276,12 +283,15 @@ function leafClump(center, radius, cards, cardSize, rnd, out, droop = 0) {
     const sz = cardSize * (0.7 + rnd() * 0.6);
     const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const base = out.pos.length / 3;
+    // оттенок карточки: внутри кроны и снизу темнее, снаружи и сверху светлее
+    const shade = tint * (0.72 + 0.28 * (r / radius)) * (0.85 + 0.25 * (u * 0.5 + 0.5));
     for (const [cx, cy] of corners) {
       const v = new THREE.Vector3(cx * sz * 0.5, cy * sz * 0.5, 0).applyQuaternion(q).add(p);
       out.pos.push(v.x, v.y, v.z);
       const vn = v.clone().sub(center).normalize();
       out.nrm.push(vn.x, vn.y, vn.z);
       out.uv.push((cx + 1) / 2, (cy + 1) / 2);
+      if (out.col) out.col.push(shade, shade * (1.0 + (tint - 1) * 0.5), shade * 0.95);
     }
     out.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
@@ -292,6 +302,7 @@ function leafGeometry(out) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(out.pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(out.nrm, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(out.uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(out.col && out.col.length ? out.col : new Array(out.pos.length).fill(1), 3));
   g.setIndex(out.idx);
   return g;
 }
@@ -325,8 +336,8 @@ function buildSpecies(name, variant) {
   const rnd = mulberry32(1000 + variant * 97 + name.length * 13);
   const H = lerp(sp.height[0], sp.height[1], 0.5);
   const trunks = [];
-  const leaves = { pos: [], nrm: [], uv: [], idx: [] };
-  const leavesFar = { pos: [], nrm: [], uv: [], idx: [] };
+  const leaves = { pos: [], nrm: [], uv: [], idx: [], col: [] };
+  const leavesFar = { pos: [], nrm: [], uv: [], idx: [], col: [] };
   const trunkFar = [];
   // ствол с лёгким изгибом
   const tp = [], tr = [];
@@ -361,8 +372,15 @@ function buildSpecies(name, variant) {
   if (name === 'pine') clumps.push(tp[7].clone().add(new THREE.Vector3(0.8, 0, 0.4)), tp[7].clone().add(new THREE.Vector3(-0.7, 0.3, -0.5)));
   for (const c of clumps) {
     const r = sp.crownR * (0.8 + rnd() * 0.5);
-    leafClump(c, r, sp.clumpCards, sp.card, rnd, leaves, sp.droop);
-    leafClump(c, r * 0.9, Math.max(5, Math.round(sp.clumpCards / 4)), sp.card * 1.8, rnd, leavesFar, sp.droop);
+    const tint = 0.88 + rnd() * 0.24;
+    // крона из нескольких неровных пучков разного размера — без ровного «шара»
+    const subs = sp.bush ? 2 : 3;
+    for (let k = 0; k < subs; k++) {
+      const a = rnd() * Math.PI * 2, d = r * (0.25 + rnd() * 0.3);
+      const sc = c.clone().add(new THREE.Vector3(Math.cos(a) * d, (rnd() - 0.4) * r * 0.5, Math.sin(a) * d));
+      leafClump(sc, r * (0.52 + rnd() * 0.22), Math.round(sp.clumpCards / subs), sp.card * 0.95, rnd, leaves, sp.droop, tint * (0.92 + rnd() * 0.16));
+    }
+    leafClump(c, r * 0.9, Math.max(5, Math.round(sp.clumpCards / 4)), sp.card * 1.8, rnd, leavesFar, sp.droop, tint);
   }
   return {
     trunk: mergeGeometries(trunks),
@@ -379,7 +397,7 @@ export const FOLIAGE_SUN = SUN_DIR.clone();
 
 function foliageMaterial(tex, evergreen = false) {
   const mat = new THREE.MeshStandardMaterial({
-    map: tex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, metalness: 0,
+    map: tex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, metalness: 0, vertexColors: true,
   });
   const sun = FOLIAGE_SUN; // общий для всех крон: ночью ослабляется (нет просвета листвы)
   mat.onBeforeCompile = (shader) => {
