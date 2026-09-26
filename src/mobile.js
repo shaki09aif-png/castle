@@ -32,7 +32,7 @@ export function setupPhone({ cam, camera, doors, dom, onResize }) {
   modeBtn.addEventListener('click', () => {
     cam.touch.x = cam.touch.y = cam.touch.lift = 0;
     knob.style.transform = '';
-    cam.setMode(cam.mode === 'fly' ? 'orbit' : 'fly');
+    cam.setMode(cam.mode === 'orbit' ? 'fly' : cam.mode === 'fly' ? 'walk' : 'orbit'); // орбита → полёт → пешком
   });
   const root = document.documentElement;
   if (root.requestFullscreen || root.webkitRequestFullscreen) {
@@ -90,11 +90,11 @@ export function setupPhone({ cam, camera, doors, dom, onResize }) {
   // ---- взгляд в полёте: палец по экрану
   let lookId = null, lx = 0, ly = 0;
   dom.addEventListener('pointerdown', (e) => {
-    if (cam.mode !== 'fly' || lookId !== null) return;
+    if (cam.mode === 'orbit' || lookId !== null) return;
     lookId = e.pointerId; lx = e.clientX; ly = e.clientY;
   });
   dom.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== lookId || cam.mode !== 'fly') return;
+    if (e.pointerId !== lookId || cam.mode === 'orbit') return;
     cam.look(e.clientX - lx, e.clientY - ly);
     lx = e.clientX; ly = e.clientY;
   });
@@ -112,7 +112,7 @@ export function setupPhone({ cam, camera, doors, dom, onResize }) {
   const sync = () => {
     if (cam.mode !== last) {
       last = cam.mode;
-      modeBtn.textContent = cam.mode === 'fly' ? '⟳ Орбита' : '✈ Полёт';
+      modeBtn.textContent = cam.mode === 'fly' ? '🚶 Пешком' : cam.mode === 'walk' ? '⟳ Орбита' : '✈ Полёт';
     }
     requestAnimationFrame(sync);
   };
@@ -132,7 +132,7 @@ export function setupPhone({ cam, camera, doors, dom, onResize }) {
   fit();
 
   // ---- короткая подсказка при запуске
-  const tip = el('div', 'm-tip', 'Один палец — вращать · два — приблизить<br>✈ Полёт — джойстик и ▲ ▼ · 👁 — скрыть всё');
+  const tip = el('div', 'm-tip', 'Один палец — вращать · два — приблизить<br>✈ Полёт и 🚶 Пешком — джойстик, ▲ ▼ · 👁 — скрыть всё');
   setTimeout(() => tip.classList.add('gone'), 7000);
   dom.addEventListener('pointerdown', () => tip.classList.add('gone'), { once: true });
 }

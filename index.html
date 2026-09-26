@@ -26,7 +26,8 @@
       #help.hidden { display: none; }
       #help b { color: #ffd98a; font-weight: normal; }
       #help .fly-only, #help .orbit-only { display: none; }
-      #help[data-mode='fly'] .fly-only, #help[data-mode='orbit'] .orbit-only { display: block; }
+      #help .walk-only { display: none; }
+      #help[data-mode='fly'] .fly-only, #help[data-mode='orbit'] .orbit-only, #help[data-mode='walk'] .walk-only { display: block; }
       #help .muted { opacity: 0.7; }
       #mode { font-size: 14px; margin-bottom: 4px; color: #fff; }
       #click-to-fly {
@@ -163,7 +164,7 @@
       <div class="orbit-only">
         <b>ЛКМ</b> — вращение · <b>колесо</b> — приближение<br />
         <b>ПКМ</b> — сдвиг камеры<br />
-        <b>F</b> — свободный полёт<br />
+        <b>F</b> — свободный полёт · <b>V</b> — пешком<br />
         <b>E</b> — открыть дверь рядом · <b>1–0</b>, <b>← →</b> — точки экскурсии · <b>T</b> — экскурсия<br />
         <b>N</b> — время суток · <b>G</b> — ворота<br />
         <b>P</b> — погода · <b>B</b> — штурм
@@ -173,8 +174,15 @@
         <b>W A S D</b> — движение · <b>мышь</b> — обзор<br />
         <b>Пробел</b> — вверх · <b>C</b> или <b>Ctrl</b> — вниз<br />
         <b>Shift</b> — ускорение · <b>колесо</b> — скорость полёта<br />
-        <b>F</b> — вернуться к орбите
+        <b>F</b> — вернуться к орбите · <b>V</b> — пешком
         <div id="speed"></div>
+      </div>
+      <div class="walk-only">
+        <b>Клик</b> — захватить мышь · <b>Esc</b> — отпустить<br />
+        <b>W A S D</b> — идти · <b>мышь</b> — смотреть · <b>Shift</b> — бежать<br />
+        <b>Пробел</b> — прыжок · <b>C</b> — присесть<br />
+        <b>E</b> — открыть дверь · <b>Enter</b> — войти<br />
+        <b>V</b> — вернуться к орбите · <b>F</b> — полёт
       </div>
       <div class="muted">H или 👁 — скрыть весь интерфейс</div>
     </div>

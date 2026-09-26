@@ -4,14 +4,17 @@
 // темница под донжоном и шахта колодца. Подземелья видны только на своих
 // точках экскурсии; свет в них «запечён» в цвета вершин — ламп нет, FPS не падает.
 import * as THREE from 'three';
-import { M, GEO, makeWalker, walkerMaterial, WALKERS, fire, cow, findFlat } from './extras.js';
+import { M, GEO, makeWalker, walkerMaterial, WALKERS, fire, cow, findFlat, riderBuild } from './extras.js';
 import { ColorBuilder, person, addPersonShading } from './people.js';
 import { chicken } from './details.js';
 import { horse } from './yard.js';
 import { Smoke, cart, Frame } from './courtyard.js';
-import { KEEP, WELL, BUILDINGS, riverZ, riverHalfWidth, insideTower } from './layout.js';
+import { KEEP, WELL, BUILDINGS, riverZ, riverHalfWidth, insideTower, GATE_PASSAGE, BARBICAN } from './layout.js';
 import { AUTUMN } from './materials.js';
 import { mulberry32 } from './noise.js';
+import { beginDoor, endDoor } from './doors.js';
+import { TERRAIN_HOLE } from './terrain.js';
+import { materialTextures } from './textures.js';
 
 const V3 = THREE.Vector3;
 const UP = new V3(0, 1, 0);
@@ -77,6 +80,11 @@ class Baked {
 let STONE_TEX = null;
 function stoneTexture() {
   if (STONE_TEX) return STONE_TEX;
+  // та же кладка, что и у стен замка (с картой из набора текстур), если она уже есть
+  try {
+    const t = materialTextures('wallStone');
+    if (t && t.map) { STONE_TEX = t.map; return STONE_TEX; }
+  } catch (e) { /* нарисуем простую */ }
   const S = 256, cv = document.createElement('canvas');
   cv.width = cv.height = S;
   const g = cv.getContext('2d');
@@ -159,6 +167,7 @@ export function createLife3(scene, ctx, village, walls) {
   const gh = terrain.heightAt;
   const upd = [];
   const out = { update() {}, setNight() {}, places: {}, ctl: {}, areas: [] };
+  if (ctx.pavilion) out.places.pavilion = ctx.pavilion;
   const b = (id) => BUILDINGS.find((q) => q.id === id);
   const movers = [];
 
@@ -248,6 +257,141 @@ export function createLife3(scene, ctx, village, walls) {
       // стоящие у казармы рыцари видны только во время тревоги и на пути туда-обратно
       for (const w of muster) w.mesh.userData.night = on || w.mesh.position.distanceTo(w.home || (w.home = w.mesh.position.clone())) > 0.3 ? undefined : false;
     });
+  }
+
+  // ===================== ДОЗОР НА СТЕНАХ (днём) =====================
+  // стражники и лучники ходят по боевому ходу, останавливаются у зубцов и
+  // смотрят вдаль; при штурме лучники на стороне лагеря встают к бойницам и стреляют
+  {
+    const Pw = walls.points, Nw = walls.segNrm, Wk = walls.walk;
+    const nearI = (x, z) => { let bi = 0, bd = 1e9; Pw.forEach((p, i) => { const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; bi = i; } }); return bi; };
+    const sm = (a, b, x) => { const q = Math.min(1, Math.max(0, (x - a) / (b - a))); return q * q * (3 - 2 * q); };
+    const pr = mulberry32(4242);
+    const routes = [[-48, 2, -30, -32, 'archer'], [20, -44, 46, -6, 'guard'], [46, 14, 26, 44, 'archer'], [-30, 40, -48, 18, 'guard'], [-12, -48, 12, -48, 'archer'], [6, 48, 30, 38, 'archer']];
+    const toCampOf = () => (out.siege && out.siege.toCamp) || null;
+    routes.forEach(([ax, az, bx, bz, role], k) => {
+      let i0 = nearI(ax, az), i1 = nearI(bx, bz);
+      if (i0 > i1) [i0, i1] = [i1, i0];
+      if (i1 - i0 < 2) return;
+      const pts = [], nrm = [];
+      for (let i = i0; i <= i1; i++) {
+        const n = Nw[Math.min(i, Nw.length - 1)];
+        const p = Pw[i].clone().addScaledVector(n, -0.55);
+        pts.push(new V3(p.x, Wk[i] + 0.1, p.z)); nrm.push(n.clone());
+      }
+      const seg = []; let total = 0;
+      for (let i = 0; i < pts.length - 1; i++) { const l = pts[i].distanceTo(pts[i + 1]); seg.push(l); total += l; }
+      if (total < 6) return;
+      const r = rig(scene, (B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role, seed: 1300 + k, item: role === 'guard' ? 'spear' : 'bow' }), 0.45);
+      const st = { s: pr() * total, dir: pr() < 0.5 ? 1 : -1, mode: 'walk', left: 5 + pr() * 10, t: 0, yaw: 0, look: 0, seed: pr() * 10 };
+      const pos = new V3(), n = new V3();
+      const at = (sv) => {
+        let d = sv, i = 0;
+        while (i < seg.length - 1 && d > seg[i]) { d -= seg[i]; i++; }
+        const q = Math.min(1, d / seg[i]);
+        pos.copy(pts[i]).lerp(pts[i + 1], q);
+        n.copy(nrm[i]);
+        return pts[i + 1].clone().sub(pts[i]);
+      };
+      const turn = (target, dt, rate = 4) => {
+        let df = target - st.yaw;
+        while (df > Math.PI) df -= Math.PI * 2;
+        while (df < -Math.PI) df += Math.PI * 2;
+        st.yaw += df * Math.min(1, dt * rate);
+      };
+      let shootAt = 0;
+      const shooter = () => (st.mode === 'shoot' ? r.mesh.position.clone().add(new V3(0, 1.5, 0)).addScaledVector(n, 0.6) : null);
+      let registered = false;
+      upd.push((t, dt) => {
+        if (!registered && out.siege && out.siege.extraShooters && role === 'archer') { out.siege.extraShooters.push(shooter); registered = true; }
+        const tc = toCampOf();
+        const alarm = out.siege && out.siege.active;
+        const dirV = at(st.s);
+        if (alarm && tc && n.dot(tc) > 0.15 && role === 'archer') {
+          // тревога: встать к бойнице лицом к лагерю, натянуть лук, выстрелить
+          st.mode = 'shoot';
+          turn(Math.atan2(tc.x, tc.z), dt, 3);
+          shootAt += dt;
+          const cyc = (shootAt + st.seed) % 2.6;
+          r.uPhase.value = -0.6 * sm(0, 1.6, cyc) * (1 - sm(1.7, 1.9, cyc));
+          r.uAmp.value = 0.5;
+        } else if (alarm && tc && n.dot(tc) > 0.15) {
+          st.mode = 'look';
+          turn(Math.atan2(n.x, n.z), dt, 3);
+          r.uAmp.value = 0.1; r.uPhase.value = 0;
+        } else {
+          if (st.mode === 'shoot') st.mode = 'walk';
+          if (st.mode === 'walk') {
+            st.s += dt * 0.85 * st.dir;
+            if (st.s > total) { st.s = total; st.dir = -1; }
+            if (st.s < 0) { st.s = 0; st.dir = 1; }
+            st.left -= dt * 0.85;
+            turn(Math.atan2(dirV.x * st.dir, dirV.z * st.dir), dt);
+            r.uPhase.value += dt * 0.85 / 1.4 * Math.PI * 2;
+            r.uAmp.value = 0.45;
+            if (st.left <= 0) { st.mode = 'look'; st.t = 3 + pr() * 4; st.look = (pr() - 0.5) * 0.9; }
+          } else {
+            // стоит у зубцов и смотрит наружу, медленно поводя головой
+            st.t -= dt;
+            turn(Math.atan2(n.x, n.z) + st.look + Math.sin(t * 0.5 + st.seed) * 0.25, dt, 2);
+            r.uAmp.value = Math.max(0, r.uAmp.value - dt * 2);
+            if (st.t <= 0) { st.mode = 'walk'; st.left = 6 + pr() * 12; if (pr() < 0.3) st.dir *= -1; }
+          }
+        }
+        r.mesh.position.copy(pos);
+        r.mesh.rotation.y = st.yaw;
+      });
+    });
+  }
+
+  // ===================== ВЫЛАЗКА КОННЫХ РЫЦАРЕЙ =====================
+  // по тревоге четверо рыцарей выезжают из ворот и скачут по дороге навстречу
+  // лагерю; когда штурм кончается — возвращаются во двор
+  {
+    const road = terrain.road;
+    const campC = ctx.campSite;
+    if (road && road.length > 20 && campC) {
+      let bi = 0, bd = 1e9;
+      road.forEach((q, i) => { const d = Math.hypot(q.x - campC.x, q.z - campC.z); if (d < bd) { bd = d; bi = i; } });
+      const G = GATE_PASSAGE;
+      const ty = G.thresholdY + 0.05;
+      const cols = [0xe8e0d0, 0x2a1e16, 0x6a4424, 0x8a8a8a];
+      const caps = [0x1d3f8a, 0x7a1c1c, 0x1d3f8a, 0xd6a632];
+      for (let k = 0; k < 4; k++) {
+        const off = (k % 2 ? 1 : -1) * 0.9;
+        const lag = k * 1.6;
+        const pts = [
+          new V3(off, 0, G.rampEndZ - 6 - Math.floor(k / 2) * 3.2),
+          new V3(off, 0, G.rampEndZ),
+          new V3(off * 0.6, ty, G.backZ),
+          new V3(off * 0.6, ty, G.frontZ),
+          new V3(off * 0.6, ty, BARBICAN.zN),
+          new V3(off * 0.6, 0, BARBICAN.zS + 0.5),
+        ];
+        pts.forEach((p) => { if (!p.y) p.y = gh(p.x, p.z); });
+        const nOff = (i) => {
+          const a = road[Math.max(0, i - 1)], b = road[Math.min(road.length - 1, i + 1)];
+          const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
+          return new V3(-dz / l * off, 0, dx / l * off);
+        };
+        for (let i = 2; i < Math.max(3, bi - 20); i += 4) { const o = nOff(i); pts.push(new V3(road[i].x + o.x, road[i].h + 0.05, road[i].z + o.z)); }
+        const w = makeWalker(scene, (B) => riderBuild(B, { horseCol: cols[k], role: 'knight', seed: 1400 + k, item: k < 2 ? 'lance' : 'sword', caparison: caps[k], rnd: mulberry32(1400 + k) }), pts, {
+          loop: false, speed: 5.5, stride: 2.6, amp: 0.6, y: true, s0: 0,
+          hold: (sv, dir, tot) => {
+            const on = out.siege && out.siege.active;
+            if (on) return (dir > 0 && sv >= tot - 0.05) || (dir > 0 && sv <= 0.05 && out.alarmT < 2 + lag);
+            return dir > 0 && sv <= 0.05;
+          },
+        });
+        w.mesh.userData.night = false;
+        movers.push(w);
+        const home = pts[0].clone();
+        upd.push(() => {
+          const on = out.siege && out.siege.active;
+          w.mesh.userData.night = on || Math.hypot(w.mesh.position.x - home.x, w.mesh.position.z - home.z) > 0.3 ? undefined : false;
+        });
+      }
+    }
   }
 
   // =========================== УЧЕНИЯ СТРАЖИ ===========================
@@ -864,10 +1008,24 @@ export function createLife3(scene, ctx, village, walls) {
       stone.box(F.p(-0.3, 0, 0).setY(fy + 2.45), U, UP, S, 0.45, 0.35, 1.7);
       for (const sd of [-1, 1]) stone.box(F.p(-0.2, 0, sd * 2.25).setY(fy + 1.0), U, UP, S, 0.5, 1.8, 0.55);
       stone.box(F.p(-0.25, 0, 0).setY(fy + 3.05), U, UP, S, 0.5, 0.3, 2.8);
-      wood.box(F.p(-0.15, 0, 0).setY(fy + 1.05), U, UP, S, 0.05, 1.05, 0.8, { grain: true });
-      metal.box(F.p(-0.21, 0, 0).setY(fy + 1.6), U, UP, S, 0.02, 0.05, 0.75);
-      metal.box(F.p(-0.21, 0, 0).setY(fy + 0.5), U, UP, S, 0.02, 0.05, 0.75);
-      metal.box(F.p(-0.22, 0, -0.55).setY(fy + 1.05), U, UP, S, 0.03, 0.06, 0.06);
+      // дубовая дверь на петлях — открывается (E), можно войти (Enter)
+      {
+        const nOut = U.clone().negate();
+        const hinge = F.p(-0.15, 0, -0.8).setY(fy);
+        const t = new V3().crossVectors(UP, nOut).normalize();
+        const side = t.dot(S) > 0 ? 1 : -1;
+        const dd = beginDoor(wood.tile, hinge, nOut, 1.6, 2.1, side);
+        if (dd) {
+          dd.wood.box(F.p(-0.15, 0, 0).setY(fy + 1.05), U, UP, S, 0.05, 1.05, 0.8, { grain: true });
+          dd.metal.box(F.p(-0.21, 0, 0).setY(fy + 1.6), U, UP, S, 0.02, 0.05, 0.75);
+          dd.metal.box(F.p(-0.21, 0, 0).setY(fy + 0.5), U, UP, S, 0.02, 0.05, 0.75);
+          dd.metal.box(F.p(-0.22, 0, 0.55).setY(fy + 1.05), U, UP, S, 0.03, 0.06, 0.06);
+          dd.metal.box(F.p(-0.09, 0, 0).setY(fy + 1.6), U, UP, S, 0.02, 0.05, 0.75);
+          dd.metal.box(F.p(-0.09, 0, 0).setY(fy + 0.5), U, UP, S, 0.02, 0.05, 0.75);
+          endDoor(dd.d);
+          out.tunnelDoor = dd.d;
+        }
+      }
       // валуны и кусты вокруг — вход почти не заметен
       for (let k = 0; k < 9; k++) {
         const v = (rnd() - 0.5) * 8, u = -0.5 - rnd() * 2.5;
@@ -879,43 +1037,130 @@ export function createLife3(scene, ctx, village, walls) {
         const p = F.p(u, 0, v), y = u > 0 ? fy + 2.8 : gh(p.x, p.z);
         for (let k = 0; k < 4; k++) colorB.add(GEO.bush, M(p.x + (rnd() - 0.5) * 0.9, y + 0.45 * s, p.z + (rnd() - 0.5) * 0.9, rnd() * 6, 0.7 * s, 0.55 * s, 0.7 * s), [0x2e4a1e, 0x3a5a24, 0x2a421a][k % 3]);
       }
-      // ход внутри холма: свод, пол, факелы, ступени к замку
+      // ход внутри холма: сводчатый коридор → подвал-тайник с припасами →
+      // второй, более длинный ход с подъёмом к замку, в конце — решётка и лестница наверх
       const SB = new Baked(), PB = new Baked();
-      const len = 24, w = 0.85, wallH = 1.5;
+      const w = 0.85, wallH = 1.5, len = 22;
+      const C0 = len, C1 = len + 8, CW = 3, CH = 3.3; // подвал
+      const B0 = C1, B1 = C1 + 40, rise = 3.2;          // второй ход
+      const bw = 0.75, bH = 1.45;
+      const floorB = (u) => fy + Math.max(0, Math.min(1, (u - B0) / (B1 - B0 - 5))) * rise;
       const tM = (u, h, v, sx, sy, sz) => F.m(u, h, v, sx, sy, sz);
-      SB.add(new THREE.BoxGeometry(1, 1, 1), tM(len / 2, fy - 0.15, 0, 2 * w + 0.6, 0.3, len + 0.5), 0x7a7068);
-      for (const sd of [-1, 1]) SB.add(new THREE.BoxGeometry(1, 1, 1), tM(len / 2, fy + wallH / 2, sd * (w + 0.2), 0.4, wallH, len + 0.5), 0x9a8e82);
-      const vault = new THREE.CylinderGeometry(w, w, len + 0.5, 14, 12, true, Math.PI / 2, Math.PI).rotateX(Math.PI / 2);
+      const box1 = new THREE.BoxGeometry(1, 1, 1);
+      // --- коридор 1
+      SB.add(box1, tM(len / 2, fy - 0.15, 0, 2 * w + 0.6, 0.3, len + 0.5), 0x7a7068);
+      for (const sd of [-1, 1]) SB.add(box1, tM(len / 2, fy + wallH / 2, sd * (w + 0.2), 0.4, wallH, len + 0.2), 0x9a8e82);
+      const vault = new THREE.CylinderGeometry(w, w, len + 0.2, 14, 12, true, Math.PI / 2, Math.PI).rotateX(Math.PI / 2);
       SB.add(vault, tM(len / 2, fy + wallH, 0, 1, 1, 1), 0x9a8e82, 0, 0, true);
-      // обратная сторона двери и ступени в конце
-      PB.add(new THREE.BoxGeometry(1, 1, 1), tM(0.25, fy + 1.05, 0, 1.6, 2.1, 0.1), 0x5a3e24);
-      for (let k = 0; k < 8; k++) SB.add(new THREE.BoxGeometry(1, 1, 1), tM(len - 3.6 + k * 0.45, fy + 0.12 * (k + 1), 0, 2 * w, 0.24 * (k + 1), 0.45), 0x8a8078);
-      PB.add(new THREE.BoxGeometry(1, 1, 1), tM(len + 0.1, fy + 1.6, 0, 2 * w, 3.2, 0.1), 0x050404);
-      // капли на полу и корни
-      for (let k = 0; k < 12; k++) PB.add(GEO.cyl, tM(1 + rnd() * (len - 5), fy + 0.01, (rnd() - 0.5) * 1.2, 0.2 + rnd() * 0.3, 0.01, 0.15 + rnd() * 0.2), 0x2a3438);
+      for (let k = 0; k < 12; k++) PB.add(GEO.cyl, tM(1 + rnd() * (len - 3), fy + 0.01, (rnd() - 0.5) * 1.2, 0.2 + rnd() * 0.3, 0.01, 0.15 + rnd() * 0.2), 0x2a3438);
+      // --- подвал: стены, пол, плоский потолок на дубовых балках, столбы
+      SB.add(box1, tM((C0 + C1) / 2, fy - 0.15, 0, 2 * CW + 0.6, 0.3, C1 - C0 + 0.4), 0x7a7068);
+      SB.add(box1, tM((C0 + C1) / 2, fy + CH + 0.15, 0, 2 * CW + 0.6, 0.3, C1 - C0 + 0.4), 0x8a8076);
+      for (const sd of [-1, 1]) SB.add(box1, tM((C0 + C1) / 2, fy + CH / 2, sd * (CW + 0.2), 0.4, CH, C1 - C0 + 0.4), 0x9a8e82);
+      // торцевые стены с проёмами под коридоры
+      for (const [u, ow, oh, ofl] of [[C0, w, wallH + w, fy], [C1, bw, bH + bw, fy]]) {
+        for (const sd of [-1, 1]) SB.add(box1, tM(u, fy + CH / 2, sd * (ow + (CW - ow) / 2 + 0.1), CW - ow + 0.2, CH, 0.4), 0x9a8e82);
+        SB.add(box1, tM(u, (ofl + oh + fy + CH) / 2, 0, 2 * ow + 0.02, fy + CH - ofl - oh, 0.4), 0x9a8e82);
+      }
+      // «пазухи» над полукруглыми сводами в проёмах — чтобы не было щелей
+      const spandrel = (r) => {
+        const sh = new THREE.Shape();
+        sh.moveTo(r + 0.02, 0); sh.lineTo(r + 0.02, r + 0.05); sh.lineTo(-r - 0.02, r + 0.05); sh.lineTo(-r - 0.02, 0);
+        sh.absarc(0, 0, r, Math.PI, 0, true);
+        return new THREE.ShapeGeometry(sh, 8);
+      };
+      SB.add(spandrel(w), tM(C0 - 0.21, fy + wallH, 0, 1, 1, 1), 0x9a8e82);
+      SB.add(spandrel(bw), tM(C1 + 0.21, fy + bH, 0, 1, 1, 1), 0x9a8e82);
+      for (let k = 0; k < 4; k++) PB.add(box1, tM(C0 + 1 + k * 2, fy + CH - 0.12, 0, 2 * CW, 0.24, 0.26), 0x4a3422);
+      for (const sd of [-1, 1]) PB.add(box1, tM((C0 + C1) / 2, fy + CH / 2, sd * 1.4, 0.3, CH, 0.3), 0x4a3422);
+      // припасы: бочки, мешки, ящики, стол со свечой, стойка с оружием, бадья с водой
+      const barrel = new THREE.LatheGeometry([[0.26, 0], [0.31, 0.2], [0.33, 0.4], [0.31, 0.6], [0.26, 0.8]].map(([a, b]) => new THREE.Vector2(a, b)), 10);
+      for (const [u, v, lay] of [[C0 + 0.8, -2.4, 0], [C0 + 1.6, -2.5, 0], [C0 + 2.4, -2.4, 0], [C0 + 1.2, -2.45, 1], [C0 + 2.0, -2.45, 1]]) {
+        const m = lay ? F.m(u, fy + 0.95, v, 1, 1, 1).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)).multiply(new THREE.Matrix4().makeTranslation(0, -0.4, 0)) : tM(u, fy, v, 1, 1, 1);
+        PB.add(barrel, m, 0x6a4a2a);
+      }
+      for (let k = 0; k < 7; k++) PB.add(GEO.sph, tM(C0 + 4.5 + (k % 4) * 0.7, fy + 0.3 + Math.floor(k / 4) * 0.45, -2.3 - (k % 2) * 0.3, 0.34, 0.3, 0.26), 0xb8a47a);
+      for (const [u, v, s0] of [[C0 + 6.8, 2.2, 0.9], [C0 + 6.6, 2.3, 0.6], [C0 + 5.8, 2.4, 0.7]]) PB.add(box1, tM(u, fy + s0 / 2 + (s0 < 0.7 ? 0.9 : 0), v, s0, s0, s0), 0x7a5a3a);
+      PB.add(box1, tM(C0 + 2.5, fy + 0.78, 2.1, 1.0, 0.06, 1.7), 0x6a4a2e);
+      for (const [du, dv] of [[-0.4, -0.7], [0.4, -0.7], [-0.4, 0.7], [0.4, 0.7]]) PB.add(box1, tM(C0 + 2.5 + du, fy + 0.38, 2.1 + dv, 0.07, 0.76, 0.07), 0x4a3422);
+      PB.add(GEO.cyl, tM(C0 + 2.4, fy + 0.86, 2.2, 0.03, 0.12, 0.03), 0xe8dcc0);
+      PB.add(box1, tM(C0 + 2.8, fy + 0.83, 1.8, 0.35, 0.02, 0.28), 0xd8c8a0); // пергамент — план хода
+      for (let k = 0; k < 4; k++) PB.add(box1, tM(C0 + 4.2 + k * 0.25, fy + 1.0, CW - 0.12, 0.03, 2.0, 0.03), 0x5a4a3a);
+      PB.add(box1, tM(C0 + 4.55, fy + 1.4, CW - 0.2, 0.9, 0.05, 0.05), 0x4a3422);
+      PB.add(GEO.cyl, tM(C0 + 6.8, fy + 0.3, -2.3, 0.4, 0.6, 0.4), 0x5a4a32);
+      PB.add(GEO.cyl, tM(C0 + 6.8, fy + 0.58, -2.3, 0.35, 0.02, 0.35), 0x1e2a30);
+      // --- коридор 2: пол поднимается к замку, в конце ступени и решётка
+      const nB = 20;
+      for (let k = 0; k < nB; k++) {
+        const u0 = B0 + (k / nB) * (B1 - B0), u1 = B0 + ((k + 1) / nB) * (B1 - B0), um = (u0 + u1) / 2, fl = floorB(um);
+        SB.add(box1, tM(um, fl - 0.15, 0, 2 * bw + 0.6, 0.3, u1 - u0 + 0.05), 0x7a7068);
+        for (const sd of [-1, 1]) SB.add(box1, tM(um, fl + bH / 2, sd * (bw + 0.2), 0.4, bH + 0.3, u1 - u0 + 0.05), 0x958a7e);
+        const vt = new THREE.CylinderGeometry(bw, bw, u1 - u0 + 0.05, 12, 1, true, Math.PI / 2, Math.PI).rotateX(Math.PI / 2);
+        SB.add(vt, tM(um, fl + bH, 0, 1, 1, 1), 0x958a7e, 0, 0, true);
+      }
+      // решётка и тёмный подъём за ней
+      for (let k = -3; k <= 3; k++) PB.add(box1, tM(B1 - 1, floorB(B1) + 1.0, k * 0.2, 0.04, 2.0, 0.04), 0x2a2826);
+      for (const h of [0.5, 1.4]) PB.add(box1, tM(B1 - 1, floorB(B1) + h, 0, 1.5, 0.05, 0.05), 0x2a2826);
+      for (let k = 0; k < 6; k++) SB.add(box1, tM(B1 - 0.6 + k * 0.35, floorB(B1) + 0.1 + k * 0.2, 0, 2 * bw, 0.2 + k * 0.4, 0.35), 0x8a8078);
+      PB.add(box1, tM(B1 + 1.6, floorB(B1) + 1.8, 0, 2 * bw, 3.6, 0.1), 0x050404);
+      // сквозь щели люка наверху — полосы дневного света
+      for (let k = 0; k < 3; k++) PB.add(box1, tM(B1 + 1.1, floorB(B1) + 2.6, (k - 1) * 0.3, 0.03, 0.02, 0.6), 0xfff4d8);
       const glow = new ColorBuilder();
       const lights = [{ p: F.p(0.4, 0, 0).setY(fy + 1.2), i: 0.25, r: 1.2, c: [0.7, 0.8, 1.0] }];
-      for (const u of [5, 12, 19]) {
-        const sd = u === 12 ? 1 : -1;
-        const tp = F.p(u, 0, sd * (w - 0.08)).setY(fy + 1.55);
-        PB.add(new THREE.BoxGeometry(1, 1, 1), F.m(u, fy + 1.35, sd * (w - 0.04), 0.06, 0.3, 0.06), 0x3a2a1a);
+      const torch = (u, sd, fl, halfW) => {
+        const tp = F.p(u, 0, sd * (halfW - 0.08)).setY(fl + 1.55);
+        PB.add(box1, F.m(u, fl + 1.35, sd * (halfW - 0.04), 0.06, 0.3, 0.06), 0x3a2a1a);
         torchFlame(glow, tp, 1);
         lights.push({ p: tp.clone(), i: 1.8, r: 2.3, c: [1.0, 0.62, 0.3] });
-      }
+      };
+      for (const [u, sd] of [[5, -1], [12, 1], [19, -1]]) torch(u, sd, fy, w);
+      torch(C0 + 1.2, 1, fy, CW); torch(C1 - 1.2, -1, fy, CW);
+      torchFlame(glow, F.p(C0 + 2.4, 0, 2.2).setY(fy + 0.93), 0.35);
+      lights.push({ p: F.p(C0 + 2.4, 0, 2.2).setY(fy + 1.0), i: 0.8, r: 1.5, c: [1.0, 0.7, 0.4] });
+      for (const [u, sd] of [[B0 + 8, 1], [B0 + 20, -1], [B0 + 32, 1]]) torch(u, sd, floorB(u), bw);
+      lights.push({ p: F.p(B1 + 0.8, 0, 0).setY(floorB(B1) + 2.4), i: 1.2, r: 2.2, c: [0.9, 0.92, 1.0] });
       const grp = bakedMeshes(scene, SB, PB, lights, 0.06, null, 'tunnel');
       grp.add(new THREE.Mesh(glow.build(), new THREE.MeshBasicMaterial({ vertexColors: true, fog: false })));
       const inv = new THREE.Matrix4().makeBasis(S, UP, U).invert(), fwd = new THREE.Matrix4().makeBasis(S, UP, U);
       const tmp = new V3();
+      TERRAIN_HOLE.m.value.copy(inv).multiply(new THREE.Matrix4().makeTranslation(-P.x, -P.y, -P.z));
+      TERRAIN_HOLE.on.value = 1;
+      // держит камеру внутри ходов и подвала; true — камера под землёй
       const limit = (cam) => {
-        tmp.copy(cam.position).sub(P).applyMatrix4(inv); // x — вбок, y — вверх, z — вглубь
-        if (tmp.z < 0.8) return; // снаружи — обычная камера
-        tmp.x = Math.max(-w + 0.25, Math.min(w - 0.25, tmp.x));
-        tmp.y = Math.max(0.7, Math.min(wallH + w - 0.3, tmp.y));
-        tmp.z = Math.min(len - 4, tmp.z);
+        tmp.copy(cam.position).sub(P).applyMatrix4(inv); // x — вбок, y — вверх (от fy), z — вглубь
+        if (tmp.z < 0.8 || Math.abs(tmp.x) > 6 || tmp.z > B1 + 3) return false; // снаружи — обычная камера
+        let hw, fl, top;
+        if (tmp.z < C0 + 0.3) { hw = w; fl = 0; top = wallH + w; }
+        else if (tmp.z < C1 - 0.3) { hw = CW; fl = 0; top = CH; }
+        else { hw = bw; fl = floorB(tmp.z) - fy; top = fl + bH + bw; }
+        // в проёмах между залом и коридорами — по ширине проёма
+        if (Math.abs(tmp.z - C0) < 0.5) hw = w;
+        if (Math.abs(tmp.z - C1) < 0.5) hw = bw;
+        tmp.x = Math.max(-hw + 0.25, Math.min(hw - 0.25, tmp.x));
+        tmp.y = Math.max(fl + 0.7, Math.min(top - 0.25, tmp.y));
+        tmp.z = Math.min(B1 - 1.3, tmp.z);
         cam.position.copy(tmp.applyMatrix4(fwd).add(P));
+        return true;
       };
+      // пол под ногами (для хождения пешком): высота пола или null, если точка не в ходах
+      limit.floorAt = (x, z) => {
+        tmp.set(x - P.x, 0, z - P.z).applyMatrix4(inv);
+        if (tmp.z < 0.3 || tmp.z > B1 || Math.abs(tmp.x) > (tmp.z > C0 - 0.3 && tmp.z < C1 + 0.3 ? CW : 1.3)) return null;
+        return tmp.z < C1 ? fy : floorB(tmp.z);
+      };
+      // проверка: хватает ли земли над ходами (если нет — укоротить подвал нельзя, просто сообщим)
+      let minCover = 1e9;
+      for (let u = 5; u < B1; u += 2) { const q = F.p(u, 0, 0); const top = u < C0 ? fy + wallH + w : u < C1 ? fy + CH : floorB(u) + bH + bw; minCover = Math.min(minCover, gh(q.x, q.z) - top); }
+      out.tunnelCover = minCover;
+      upd.push((t, dt, cam) => {
+        if (!cam) return;
+        const d = cam.position.distanceTo(P);
+        const inside = d < B1 + 10 && limit({ position: tmp.copy(cam.position) });
+        const open = out.tunnelDoor ? out.tunnelDoor.open > 0.02 : false;
+        grp.visible = inside || (open && d < 40);
+      });
       out.areas.push({ x, z, r: 7 });
-      out.places.tunnel = { P, U, S, fy, grp, limit,
+      out.places.tunnel = { P, U, S, fy, grp, limit, door: out.tunnelDoor, cover: out.tunnelCover,
         outside: { tgt: P.clone().add(new V3(0, 1.3, 0)), pos: F.p(-11, 0, -4) },
         inside: { pos: F.p(2.2, 0, 0.1).setY(fy + 1.55), tgt: F.p(14, 0, 0).setY(fy + 1.3) } };
       out.places.tunnel.outside.pos.y = gh(out.places.tunnel.outside.pos.x, out.places.tunnel.outside.pos.z) + 3.2;

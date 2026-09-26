@@ -50,20 +50,27 @@ export function createCameraControls(camera, dom, terrain) {
   try { helpHidden = localStorage.getItem('castle-ui-hidden') === '1'; } catch (e) { /* нет хранилища */ }
   function refreshUI() {
     document.body.classList.toggle('ui-hidden', helpHidden); // H или кнопка-глаз прячет весь интерфейс
-    if (modeEl) modeEl.textContent = mode === 'fly' ? 'Режим: свободный полёт' : 'Режим: орбита';
+    if (modeEl) modeEl.textContent = mode === 'fly' ? 'Режим: свободный полёт' : mode === 'walk' ? 'Режим: пешком (от первого лица)' : 'Режим: орбита';
     if (help) help.dataset.mode = mode;
     if (speedEl) speedEl.textContent = mode === 'fly' ? `Скорость: ${speed < 10 ? speed.toFixed(1) : Math.round(speed)} м/с` : '';
     // флаг isLocked у PointerLockControls меняется уже после события 'lock',
     // поэтому проверяем состояние браузера напрямую
     const locked = document.pointerLockElement === dom;
-    if (clickEl) clickEl.style.display = mode === 'fly' && !locked && !PHONE ? 'block' : 'none';
-    document.body.classList.toggle('fly-mode', mode === 'fly');
+    if (clickEl) clickEl.style.display = mode !== 'orbit' && !locked && !PHONE ? 'block' : 'none';
+    document.body.classList.toggle('fly-mode', mode !== 'orbit');
+    document.body.classList.toggle('walk-mode', mode === 'walk');
   }
 
   function setMode(m) {
     if (m === mode) return;
+    const from = mode;
     mode = m;
-    if (mode === 'fly') {
+    if (mode === 'walk') {
+      orbit.enabled = false;
+      vel.set(0, 0, 0);
+      startWalk(from);
+      if (!PHONE) fly.lock();
+    } else if (mode === 'fly') {
       orbit.enabled = false;
       vel.set(0, 0, 0);
       if (!PHONE) fly.lock();
@@ -81,7 +88,7 @@ export function createCameraControls(camera, dom, terrain) {
 
   document.addEventListener('pointerlockchange', refreshUI);
   // клик по сцене в режиме полёта снова захватывает мышь
-  dom.addEventListener('click', () => { if (!PHONE && mode === 'fly' && document.pointerLockElement !== dom) fly.lock(); });
+  dom.addEventListener('click', () => { if (!PHONE && mode !== 'orbit' && document.pointerLockElement !== dom) fly.lock(); });
   if (clickEl) clickEl.addEventListener('click', () => fly.lock());
 
   // Ctrl + W и подобные сочетания браузер не даёт перехватить; для спуска
@@ -91,6 +98,8 @@ export function createCameraControls(camera, dom, terrain) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     const c = code(e);
     if (c === 'KeyF' && !e.repeat) { setMode(mode === 'fly' ? 'orbit' : 'fly'); return; }
+    if (c === 'KeyV' && !e.repeat) { setMode(mode === 'walk' ? 'orbit' : 'walk'); return; }
+    if (c === 'Space' && mode === 'walk' && !e.repeat) jump = true;
     if (c === 'KeyH' && !e.repeat) {
       helpHidden = !helpHidden;
       try { localStorage.setItem('castle-ui-hidden', helpHidden ? '1' : '0'); } catch (err) { /* ignore */ }
@@ -98,7 +107,7 @@ export function createCameraControls(camera, dom, terrain) {
       return;
     }
     keys.add(c);
-    if (mode === 'fly' && ['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ControlLeft', 'ControlRight'].includes(c)) e.preventDefault();
+    if (mode !== 'orbit' && ['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ControlLeft', 'ControlRight'].includes(c)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => keys.delete(code(e)));
   window.addEventListener('blur', () => keys.clear());
@@ -110,10 +119,99 @@ export function createCameraControls(camera, dom, terrain) {
   }, { passive: false });
 
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), want = new THREE.Vector3();
+  // ---------- пешком (от первого лица) ----------
+  // Модели игрока нет: камера на высоте глаз, идёт по земле, полам домов и ходам;
+  // здания, башни и стены не пускают (проходы — через двери и ворота).
+  const EYE = 1.65;
+  const feet = new THREE.Vector3(), expect = new THREE.Vector3();
+  let vy = 0, grounded = true, bob = 0, jump = false, crouch = 0;
+  const W = () => api.walkable;
+  const floorAt = (x, z) => (W() ? W().floorAt(x, z) : terrain.heightAt(x, z));
+  function startWalk(from) {
+    let x = camera.position.x, z = camera.position.z;
+    if (from === 'orbit') { x = orbit.target.x; z = orbit.target.z; }
+    // если под точкой здание или стена — ищем свободное место рядом
+    if (W() && W().solid(x, z)) {
+      search: for (let r = 1; r < 40; r += 1) {
+        for (let a = 0; a < Math.PI * 2; a += 0.4) {
+          const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+          if (!W().solid(px, pz)) { x = px; z = pz; break search; }
+        }
+      }
+    }
+    feet.set(x, floorAt(x, z), z);
+    vy = 0; grounded = true;
+    // взгляд — горизонтально, в прежнем направлении
+    const d = camera.getWorldDirection(new THREE.Vector3());
+    eul.set(0, Math.atan2(-d.x, -d.z), 0, 'YXZ');
+    camera.quaternion.setFromEuler(eul);
+    camera.position.set(feet.x, feet.y + EYE, feet.z);
+    expect.copy(camera.position);
+  }
+  function updateWalk(dt) {
+    // камеру передвинули снаружи (вход в дом, экскурсия) — ноги встают под неё
+    if (camera.position.distanceTo(expect) > 0.3) {
+      feet.set(camera.position.x, floorAt(camera.position.x, camera.position.z), camera.position.z);
+      vy = 0;
+    }
+    camera.getWorldDirection(fwd);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+    fwd.normalize();
+    right.set(-fwd.z, 0, fwd.x);
+    want.set(0, 0, 0);
+    if (keys.has('KeyW') || keys.has('ArrowUp')) want.add(fwd);
+    if (keys.has('KeyS') || keys.has('ArrowDown')) want.sub(fwd);
+    if (keys.has('KeyD') || keys.has('ArrowRight')) want.add(right);
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) want.sub(right);
+    const tm = Math.hypot(touch.x, touch.y);
+    if (tm > 0.05) want.addScaledVector(fwd, touch.y).addScaledVector(right, touch.x);
+    if (want.lengthSq() > 1) want.normalize();
+    const run = keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.hold > 1;
+    touch.hold = tm > 0.92 ? touch.hold + dt : 0;
+    const sp = run ? 5.2 : 1.8;
+    want.multiplyScalar(sp);
+    vel.lerp(want.setY(0), 1 - Math.exp(-dt * (grounded ? 10 : 2)));
+    // шаг по осям отдельно — чтобы скользить вдоль стен, а не застревать
+    const nx = feet.x + vel.x * dt, nz = feet.z + vel.z * dt;
+    const ok = (x0, z0, x1, z1) => {
+      if (W() && !W().canMove(x0, z0, x1, z1)) return false;
+      // слишком крутой подъём (обрыв, стена рва) — не пройти
+      const g0 = floorAt(x0, z0), g1 = floorAt(x1, z1);
+      return g1 - Math.max(g0, feet.y) < 0.65 + Math.hypot(x1 - x0, z1 - z0) * 1.2;
+    };
+    if (ok(feet.x, feet.z, nx, feet.z)) feet.x = nx; else vel.x = 0;
+    if (ok(feet.x, feet.z, feet.x, nz)) feet.z = nz; else vel.z = 0;
+    // сила тяжести и прыжок
+    const g = floorAt(feet.x, feet.z);
+    if ((jump || touch.lift > 0) && grounded) { vy = 4.2; grounded = false; }
+    jump = false;
+    vy -= 9.8 * dt;
+    feet.y += vy * dt;
+    if (feet.y <= g) {
+      // на ступеньку/склон — мягко, вниз — падаем
+      feet.y = g; vy = 0; grounded = true;
+    } else if (feet.y - g < 0.25 && vy <= 0) { feet.y = g; vy = 0; grounded = true; } else grounded = false;
+    // присесть (C/Ctrl) — ниже глаза, медленнее
+    const wantCrouch = keys.has('KeyC') || keys.has('ControlLeft') || keys.has('ControlRight') || touch.lift < 0 ? 1 : 0;
+    crouch += (wantCrouch - crouch) * Math.min(1, dt * 8);
+    // покачивание при ходьбе
+    const hs = Math.hypot(vel.x, vel.z);
+    if (grounded) bob += hs * dt * 1.9;
+    const bobY = grounded ? Math.sin(bob * 2) * 0.03 * Math.min(1, hs / 1.8) : 0;
+    const bobX = grounded ? Math.cos(bob) * 0.02 * Math.min(1, hs / 1.8) : 0;
+    camera.position.set(feet.x + right.x * bobX, feet.y + EYE - crouch * 0.6 + bobY, feet.z + right.z * bobX);
+    // в подземных ходах — своя граница (стены, потолок)
+    for (const zz of api.zones) zz(camera);
+    expect.copy(camera.position);
+  }
+
 
   function keepAboveGround() {
     // в подземельях (темница, колодец, потайной ход) камеру держит своя граница
     if (api.limit) { api.limit(camera, orbit.target); return; }
+    // подземные ходы, куда можно зайти самому: там своя граница вместо земли
+    for (const z of api.zones) if (z(camera)) return;
     const g = terrain.heightAt(camera.position.x, camera.position.z) + 1.2;
     if (camera.position.y < g) camera.position.y = g;
     // не улетать за пределы мира
@@ -130,10 +228,11 @@ export function createCameraControls(camera, dom, terrain) {
       const r = Math.hypot(t.x, t.z);
       if (r > 700) { t.x *= 700 / r; t.z *= 700 / r; }
       const tg = terrain.heightAt(t.x, t.z) + 0.3;
-      if (t.y < tg && !api.limit) t.y = tg;
+      if (t.y < tg && !api.limit && !api.zones.some((z) => z({ position: t.clone() }))) t.y = tg;
       keepAboveGround();
       return;
     }
+    if (mode === 'walk') { updateWalk(dt); return; }
     // полёт: направление взгляда целиком (W ведёт туда, куда смотришь)
     camera.getWorldDirection(fwd);
     right.crossVectors(fwd, camera.up).normalize();
@@ -174,6 +273,8 @@ export function createCameraControls(camera, dom, terrain) {
     get mode() { return mode; },
     setMode,
     limit: null,
+    zones: [],
+    walkable: null,
   };
   return api;
 }

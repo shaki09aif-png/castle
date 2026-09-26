@@ -3,13 +3,15 @@
 // (один объект на материал), движение считает шейдер — FPS почти не меняется.
 import * as THREE from 'three';
 import { GeoBuilder } from './walls.js';
-import { ColorBuilder, person, createPeople, SWAY_TIME, TAIL_GLSL, addTailSway, addPersonShading } from './people.js';
+import { ColorBuilder, person, createPeople, SWAY_TIME, TAIL_GLSL, addTailSway, addPersonShading, CHEER } from './people.js';
 import { horse } from './yard.js';
 import { HALL, Frame, strawMaterial, Smoke, cart, haystack, INTERIORS } from './courtyard.js';
 import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth, GATEHOUSE, GATE_PASSAGE, BARBICAN, RIVER } from './layout.js';
 import { WINDOWS } from './towers.js';
 import { mulberry32 } from './noise.js';
 import { createLife3 } from './life3.js';
+import { siegeCamp, yardPavilion } from './camp.js';
+import { COURT_EXTRAS } from './details.js';
 
 const V3 = THREE.Vector3;
 const UP = new V3(0, 1, 0);
@@ -474,159 +476,6 @@ function findCampSite(terrain, village) {
   return best;
 }
 
-function siegeCamp(ctx, village) {
-  const { terrain, wood, colorB, glowB, straw, people, rnd, metal } = ctx;
-  const site = findCampSite(terrain, village);
-  if (!site) return null;
-  const { x: cx, z: cz } = site;
-  const gh = (x, z) => terrain.heightAt(x, z);
-  // лагерь «смотрит» на замок
-  const face = Math.atan2(-cx, -(cz - 20));
-  const fw = new V3(Math.sin(face), 0, Math.cos(face)), rt = new V3(Math.cos(face), 0, -Math.sin(face));
-  const at = (f, r) => new V3(cx + fw.x * f + rt.x * r, 0, cz + fw.z * f + rt.z * r);
-  const cloth = [0xd8ccb0, 0x3a5a2a, 0xc8a040, 0xb8ac90, 0x5a6a3a];
-  // шатры
-  const tents = [[-14, -10], [-14, 0], [-14, 10], [-4, -14], [-4, 14], [-22, -4], [-22, 6], [-8, -2]];
-  tents.forEach(([f, r], i) => {
-    const p = at(f, r), g = gh(p.x, p.z);
-    const R = 1.8 + rnd() * 0.8, H = 2.6 + rnd() * 0.8;
-    const c = cloth[i % cloth.length];
-    if (i % 3 === 2) { // двускатная палатка
-      const yaw = face + Math.PI / 2;
-      colorB.add(new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateY(Math.PI / 2), M(p.x, g + H * 0.28, p.z, yaw, 2.2, H * 0.56, 1.6), c);
-    } else {
-      colorB.add(GEO.cone, M(p.x, g + H / 2, p.z, rnd() * 3, R, H, R), c);
-      colorB.add(GEO.cone, M(p.x, g + H * 0.62, p.z, 0.3, R * 0.62, H * 0.08, R * 0.62), 0x2e4a26); // кайма
-    }
-    wood.addGeometry(new THREE.CylinderGeometry(0.04, 0.04, H + 0.8, 5), M(p.x, g + (H + 0.8) / 2, p.z));
-    colorB.add(GEO.box, M(p.x + 0.35, g + H + 0.55, p.z, rnd() * 3, 0.7, 0.35, 0.02), i % 2 ? 0x2e4a26 : 0xc8a040);
-  });
-  // шатёр предводителя — большой, полосатый
-  {
-    const p = at(-20, -16), g = gh(p.x, p.z);
-    for (let k = 0; k < 12; k++) {
-      colorB.add(new THREE.CylinderGeometry(3.2, 3.2, 2.4, 2, 1, true, (k / 12) * Math.PI * 2, Math.PI / 6 + 0.01), M(p.x, g + 1.2, p.z), k % 2 ? 0x2e4a26 : 0xe0d4b0);
-      colorB.add(new THREE.ConeGeometry(3.5, 2.2, 2, 1, true, (k / 12) * Math.PI * 2, Math.PI / 6 + 0.01), M(p.x, g + 3.5, p.z), k % 2 ? 0x2e4a26 : 0xe0d4b0);
-    }
-    wood.addGeometry(new THREE.CylinderGeometry(0.06, 0.06, 6, 6), M(p.x, g + 3, p.z));
-    colorB.add(GEO.box, M(p.x + 0.7, g + 5.6, p.z, face, 1.3, 0.8, 0.02), 0xc8a040);
-    people.push({ x: p.x + fw.x * 3.8, y: gh(p.x + fw.x * 3.8, p.z + fw.z * 3.8), z: p.z + fw.z * 3.8, yaw: face, role: 'knight' });
-  }
-  // требушет, нацеленный на замок
-  {
-    const p = at(8, -2), g = gh(p.x, p.z);
-    const A = fw, R = rt;
-    const B = (off, h, hx, hy, hz, ax = A, ay = UP, az = R) => wood.box(p.clone().addScaledVector(A, off.f || 0).addScaledVector(R, off.r || 0).setY(g + h), ax, ay, az, hx, hy, hz, { grain: true });
-    for (const s of [-1, 1]) B({ r: s * 1.1 }, 0.25, 3.4, 0.2, 0.2); // продольные лежни
-    for (const f of [-3, 0, 3]) B({ f }, 0.5, 0.2, 0.15, 1.35, A, UP, R); // поперечины
-    // А-образные стойки к оси
-    const axleY = g + 6.2;
-    for (const s of [-1, 1]) {
-      for (const d of [-1, 1]) {
-        const foot = p.clone().addScaledVector(R, s * 1.1).addScaledVector(A, d * 2.6).setY(g + 0.4);
-        const top = p.clone().addScaledVector(R, s * 1.1).setY(axleY);
-        const dir = top.clone().sub(foot), len = dir.length();
-        dir.normalize();
-        wood.addGeometry(new THREE.BoxGeometry(0.28, len, 0.28), new THREE.Matrix4().compose(foot.clone().addScaledVector(dir, len / 2), new THREE.Quaternion().setFromUnitVectors(UP, dir), new V3(1, 1, 1)));
-      }
-    }
-    metal.addGeometry(new THREE.CylinderGeometry(0.12, 0.12, 2.6, 8).rotateZ(Math.PI / 2), M(p.x, axleY, p.z, face));
-    // метательный рычаг: длинное плечо опущено назад, короткое с противовесом поднято.
-    // Рычаг собирается отдельно (вокруг оси) — при «штурме» он делает бросок.
-    const arm = new V3().copy(A).multiplyScalar(-Math.cos(0.75)).addScaledVector(UP, -Math.sin(0.75)).normalize();
-    const pivot = p.clone().setY(axleY);
-    const armLen = 9.5, short = 2.6;
-    const aw = ctx.armWood, am = ctx.armMetal;
-    const mid = pivot.clone().addScaledVector(arm, (armLen - short) / 2);
-    aw.addGeometry(new THREE.BoxGeometry(0.34, armLen + short, 0.34), new THREE.Matrix4().compose(mid, new THREE.Quaternion().setFromUnitVectors(UP, arm), new V3(1, 1, 1)));
-    const cwTop = pivot.clone().addScaledVector(arm, -short);
-    aw.box(cwTop.clone().setY(cwTop.y - 1.2), A, UP, R, 0.9, 0.8, 0.8, { grain: true }); // ящик-противовес
-    am.box(cwTop.clone().setY(cwTop.y - 0.3), A, UP, R, 0.12, 0.3, 0.12);
-    const tip = pivot.clone().addScaledVector(arm, armLen);
-    aw.addGeometry(new THREE.CylinderGeometry(0.015, 0.015, 2.2, 4), M(tip.x, tip.y - 1.0, tip.z));
-    ctx.treb = { pivot, A, R, arm, armLen, face };
-    for (let k = 0; k < 7; k++) {
-      const q = p.clone().addScaledVector(A, -4.5 + (rnd() - 0.5) * 1.5).addScaledVector(R, 2.5 + (rnd() - 0.5) * 1.5);
-      ctx.stone.addGeometry(new THREE.DodecahedronGeometry(0.3 + rnd() * 0.12, 0), M(q.x, gh(q.x, q.z) + 0.3, q.z, rnd() * 3));
-    }
-    for (const [f, r, role] of [[-3.5, 2.2, 'foe'], [-2.5, -2.4, 'peasant'], [1.5, 2.3, 'foe']]) {
-      const q = p.clone().addScaledVector(A, f).addScaledVector(R, r);
-      people.push({ x: q.x, y: gh(q.x, q.z), z: q.z, yaw: face, role, pose: role === 'peasant' ? 'work' : 'stand' });
-    }
-  }
-  // таран под навесом («черепаха»)
-  {
-    const p = at(4, 12), g = gh(p.x, p.z);
-    const A = fw, R = rt;
-    for (const s of [-1, 1]) for (const f of [-2, 2]) {
-      const w = p.clone().addScaledVector(A, f).addScaledVector(R, s * 1.2);
-      wood.addGeometry(new THREE.CylinderGeometry(0.45, 0.45, 0.2, 12).rotateZ(Math.PI / 2), M(w.x, g + 0.45, w.z, face));
-      wood.box(w.clone().setY(g + 1.6), UP, A, R, 1.2, 0.1, 0.1, { grain: true });
-    }
-    for (const s of [-1, 1]) wood.box(p.clone().addScaledVector(R, s * 1.2).setY(g + 0.75), A, UP, R, 2.6, 0.12, 0.12, { grain: true });
-    // двускатная крыша, обтянутая шкурами
-    for (const s of [-1, 1]) {
-      const c = p.clone().addScaledVector(R, s * 0.7).setY(g + 3.1);
-      const ax = R.clone().multiplyScalar(s).addScaledVector(UP, -0.9).normalize();
-      colorB.add(GEO.box, new THREE.Matrix4().makeBasis(A, ax, new V3().crossVectors(A, ax)).premultiply(new THREE.Matrix4()).setPosition(c).multiply(new THREE.Matrix4().makeScale(5.6, 1.9, 0.08)), 0x6a4a2a);
-    }
-    // бревно тарана на цепях с железным наконечником
-    wood.addGeometry(new THREE.CylinderGeometry(0.28, 0.3, 6.4, 10).rotateX(Math.PI / 2), M(p.x, g + 1.4, p.z, face));
-    const head = p.clone().addScaledVector(A, 3.3);
-    metal.addGeometry(new THREE.ConeGeometry(0.34, 0.6, 10).rotateX(Math.PI / 2), M(head.x, g + 1.4, head.z, face));
-  }
-  // осадные лестницы у телеги
-  for (const [f, r] of [[-2, 20], [-3.5, 20.5]]) {
-    const p = at(f, r), g = gh(p.x, p.z);
-    for (const s of [-1, 1]) wood.box(p.clone().addScaledVector(fw, s * 0.3).setY(g + 0.08), rt, UP, fw, 3.5, 0.05, 0.05, { grain: true });
-    for (let k = -3; k <= 3; k++) wood.box(p.clone().addScaledVector(rt, k * 0.45).setY(g + 0.1), fw, UP, rt, 0.32, 0.03, 0.03, { grain: true });
-  }
-  // частокол со стороны реки (к замку)
-  for (let k = -14; k <= 14; k++) {
-    const p = at(18 + Math.abs(k) * 0.15, k * 1.3), g = gh(p.x, p.z);
-    const lean = new THREE.Quaternion().setFromAxisAngle(rt, 0.35);
-    wood.addGeometry(new THREE.CylinderGeometry(0.1, 0.12, 2.2, 6), new THREE.Matrix4().compose(p.clone().setY(g + 0.9), lean, new V3(1, 1, 1)));
-    const tip = p.clone().addScaledVector(fw, 0.38).setY(g + 2.05);
-    wood.addGeometry(new THREE.ConeGeometry(0.1, 0.35, 6), new THREE.Matrix4().compose(tip, lean, new V3(1, 1, 1)));
-  }
-  // костры с воинами
-  for (const [f, r] of [[-8, 6], [-10, -8], [-18, 2]]) {
-    const p = at(f, r), g = gh(p.x, p.z);
-    for (let k = 0; k < 9; k++) {
-      const a = (k / 9) * Math.PI * 2;
-      ctx.stone.addGeometry(new THREE.DodecahedronGeometry(0.16, 0), M(p.x + Math.cos(a) * 0.6, g + 0.08, p.z + Math.sin(a) * 0.6, a));
-    }
-    for (let k = 0; k < 4; k++) wood.addGeometry(new THREE.CylinderGeometry(0.06, 0.07, 0.8, 6), M(p.x, g + 0.1, p.z, k * 0.8, 1, 1, 1, Math.PI / 2 - 0.2));
-    fire(glowB, p.x, g + 0.1, p.z, 0.8, rnd);
-    for (let k = 0; k < 3; k++) {
-      const a = rnd() * Math.PI * 2;
-      const q = new V3(p.x + Math.cos(a) * 1.6, 0, p.z + Math.sin(a) * 1.6);
-      people.push({ x: q.x, y: gh(q.x, q.z), z: q.z, yaw: Math.atan2(p.x - q.x, p.z - q.z), role: k === 2 ? 'archer' : 'foe' });
-    }
-  }
-  // часовые у частокола, стог сена, лошади
-  for (const r of [-9, 0, 9]) {
-    const p = at(15.5, r);
-    people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: face, role: 'foe' });
-  }
-  for (const [f, r, col] of [[-12, -20, 0x3a2418], [-12, -22.5, 0x8a6a4a]]) {
-    const p = at(f, r);
-    horse(colorB, p.x, gh(p.x, p.z), p.z, face + Math.PI / 2, col, rnd);
-  }
-  const hs = at(-15, -24);
-  const g = new THREE.IcosahedronGeometry(1, 2);
-  straw.addGeometry(g, M(hs.x, gh(hs.x, hs.z) + 0.5, hs.z, 0, 1.4, 0.9, 1.2));
-  // знамёна осаждающих
-  for (const [f, r] of [[12, -8], [12, 8], [-6, 0]]) {
-    const p = at(f, r), gg = gh(p.x, p.z);
-    wood.addGeometry(new THREE.CylinderGeometry(0.05, 0.05, 5, 5), M(p.x, gg + 2.5, p.z));
-    colorB.add(GEO.box, M(p.x + rt.x * 0.55, gg + 4.4, p.z + rt.z * 0.55, face + Math.PI / 2, 1.1, 1.4, 0.02), 0x2e4a26);
-    colorB.add(GEO.box, M(p.x + rt.x * 0.56, gg + 4.4, p.z + rt.z * 0.56, face + Math.PI / 2, 0.4, 0.9, 0.025), 0xc8a040);
-  }
-  return { x: cx, z: cz, face, fw, rt, at, gh };
-}
-
-
 // ===========================================================================
 // ШТУРМ: требушет мечет камни в стену (пыль и обломки при ударе), лучники со
 // стен стреляют по подступам, из машикулей над воротами льют кипящую смолу
@@ -703,6 +552,74 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
   const sgn = test.y > T.arm.y ? 1 : -1;
   const THROW = 2.75, RELEASE = 2.0;
   const armDirAt = (ang) => T.arm.clone().applyAxisAngle(T.R, sgn * ang);
+  // ящик-противовес висит на шарнире и всегда смотрит вниз (с раскачкой)
+  const cwGrp = new THREE.Group();
+  if (T.hinge) {
+    cwGrp.position.copy(T.hinge);
+    for (const [b, mat] of [[ctx.cwWood, armMats.wood], [ctx.cwMetal, armMats.iron], [ctx.cwStone, armMats.stone]]) {
+      if (!b || !b.pos.length) continue;
+      const g = b.build();
+      g.translate(-T.hinge.x, -T.hinge.y, -T.hinge.z);
+      const m = new THREE.Mesh(g, mat);
+      m.receiveShadow = true; m.name = 'extras';
+      cwGrp.add(m);
+    }
+    scene.add(cwGrp);
+  }
+  // праща: две верёвки и кожаный кошель с ядром; в покое лежит в жёлобе
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0x8a7a5a, roughness: 0.95 });
+  const slingGrp = new THREE.Group();
+  const SL = 3.0;
+  for (const sd of [-1, 1]) {
+    const r = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, SL, 4).translate(sd * 0.1, SL / 2, 0), ropeMat);
+    slingGrp.add(r);
+  }
+  const pouch = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 5, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5).scale(1, 0.6, 1).rotateX(Math.PI).translate(0, SL + 0.05, 0), new THREE.MeshStandardMaterial({ color: 0x4a3222, roughness: 0.9, side: THREE.DoubleSide }));
+  slingGrp.add(pouch);
+  const loadedStone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.4, 1).translate(0, SL + 0.1, 0), new THREE.MeshStandardMaterial({ color: 0x8a8278, roughness: 1 }));
+  slingGrp.add(loadedStone);
+  scene.add(slingGrp);
+  // канат ворота к концу рычага (виден, пока рычаг взводят и держат взведённым)
+  const winchRope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1, 5).translate(0, 0.5, 0), new THREE.MeshStandardMaterial({ color: 0x7a6a4a, roughness: 0.95 }));
+  scene.add(winchRope);
+  let curAng = 0, prevAng = 0, prevVel = 0, sw = 0, swV = 0, loaded = true;
+  const DOWN = new V3(0, -1, 0), YUP = new V3(0, 1, 0);
+  const restSling = T.A.clone().addScaledVector(DOWN, 0.2).normalize();
+  const poseMachine = (dt, c) => {
+    const tip = T.pivot.clone().addScaledVector(armDirAt(curAng), T.armLen + 0.35);
+    // противовес: шарнир на коротком плече, раскачка от ускорения рычага
+    if (T.hinge) {
+      cwGrp.position.copy(T.pivot).addScaledVector(armDirAt(curAng), -T.short);
+      const vel = dt > 0 ? (curAng - prevAng) / dt : 0;
+      const acc = dt > 0 ? (vel - prevVel) / dt : 0;
+      prevVel = vel;
+      swV += (-sw * 18 - swV * 2.2 - acc * 0.02 * sgn) * dt;
+      sw += swV * dt;
+      sw = Math.max(-0.9, Math.min(0.9, sw));
+      cwGrp.quaternion.setFromAxisAngle(T.R, sw);
+    }
+    prevAng = curAng;
+    // праща
+    let dir;
+    if (c !== null && c < 0.9) {
+      const k = Math.min(1, Math.max(0, (curAng - 0.15) / (RELEASE - 0.15)));
+      dir = restSling.clone().lerp(armDirAt(curAng + 0.6 * k), k * k).normalize();
+    } else if (curAng > 0.6) dir = DOWN.clone().addScaledVector(T.A, -0.05).normalize();
+    else dir = restSling.clone().lerp(DOWN, curAng / 0.6).normalize();
+    slingGrp.position.copy(tip);
+    slingGrp.quaternion.setFromUnitVectors(YUP, dir);
+    loadedStone.visible = loaded;
+    // канат ворота
+    const cocking = c === null || c >= 2;
+    winchRope.visible = !!T.drum && cocking && curAng < THROW - 0.05;
+    if (winchRope.visible) {
+      const d = tip.clone().sub(T.drum), l = d.length();
+      winchRope.position.copy(T.drum);
+      winchRope.quaternion.setFromUnitVectors(YUP, d.normalize());
+      winchRope.scale.set(1, l, 1);
+    }
+  };
+  poseMachine(0, null);
 
   // цель — внешняя сторона стены, обращённая к лагерю
   const toCamp = new V3(T.pivot.x, 0, T.pivot.z).normalize();
@@ -728,7 +645,7 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
   const debris = Array.from({ length: debrisN }, () => ({ p: new V3(), v: new V3(), rest: false }));
 
   // стрелы со стен
-  const nArrows = 14;
+  const nArrows = 28;
   const arrowGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.9, 4).rotateX(Math.PI / 2);
   const arrows = new THREE.InstancedMesh(arrowGeo, new THREE.MeshBasicMaterial({ color: 0x2a2018 }), nArrows);
   arrows.frustumCulled = false;
@@ -779,13 +696,19 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
       d.rest = false;
     }
   }
+  // стрелки на стенах (дозорные-лучники из life3) дают свои точки выстрела
+  const extraShooters = [];
   function shootArrow() {
     const a = arrowSt.find((x) => !x.on);
     if (!a) return;
-    const from = shooters[Math.floor(Math.random() * shooters.length)];
-    const to = new V3((Math.random() - 0.5) * 30, 0, BARBICAN.zS + 8 + Math.random() * 45);
-    to.y = gh(to.x, to.z);
-    const dur = 1.6 + Math.random() * 0.8;
+    let from = null;
+    if (extraShooters.length && Math.random() < 0.75) from = extraShooters[Math.floor(Math.random() * extraShooters.length)]();
+    if (!from) from = shooters[Math.floor(Math.random() * shooters.length)];
+    // бьют по осадному лагерю: по щитам перед требушетом, частоколу и прислуге
+    const to = T.pivot.clone().addScaledVector(T.A, 4 + Math.random() * 16).addScaledVector(T.R, (Math.random() - 0.5) * 34);
+    to.y = gh(to.x, to.z) + 0.3;
+    const dist = Math.hypot(to.x - from.x, to.z - from.z);
+    const dur = dist / 62 + Math.random() * 0.4;
     a.p0.copy(from);
     a.v.copy(to).sub(from).divideScalar(dur).add(new V3(0, 0.5 * 9.8 * dur, 0));
     Object.assign(a, { t: 0, dur, stuck: 0, on: true });
@@ -794,6 +717,7 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
   return {
     target,
     toCamp,
+    extraShooters,
     get active() { return active; },
     toggle() {
       active = !active;
@@ -809,10 +733,13 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
         const c = clock % 11;
         let ang;
         if (c < 0.9) { const u = c / 0.9; ang = THROW * u * u; } else if (c < 2) ang = THROW; else if (c < 8) { const u = (c - 2) / 6; ang = THROW * (1 - u * u * (3 - 2 * u)); } else ang = 0;
-        if (c >= 0.9 * Math.sqrt(RELEASE / THROW) && !flight && c < 1.2) launch();
+        if (c >= 0.9 * Math.sqrt(RELEASE / THROW) && !flight && c < 1.2 && loaded) { launch(); loaded = false; }
+        if (c >= 8) loaded = true; // заряжено новое ядро
         armGrp.quaternion.setFromAxisAngle(T.R, sgn * ang);
+        curAng = ang;
+        poseMachine(dt, c);
         if (!active && c >= 8) clock = 0; // остановились во взведённом положении
-      }
+      } else if (Math.abs(sw) > 0.001 || Math.abs(swV) > 0.001) poseMachine(dt, null);
       if (flight) {
         flight.t += dt;
         const t = flight.t;
@@ -837,7 +764,7 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
       // стрелы
       if (active) {
         arrowClock -= dt;
-        if (arrowClock <= 0) { shootArrow(); arrowClock = 0.25 + Math.random() * 0.4; }
+        if (arrowClock <= 0) { shootArrow(); arrowClock = 0.18 + Math.random() * 0.3; }
       }
       let anyArrow = false;
       arrowSt.forEach((a, i) => {
@@ -853,7 +780,7 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
         } else {
           a.stuck += dt;
           p = a.last; dir = a.dir;
-          if (a.stuck > 4) a.on = false;
+          if (a.stuck > 6) a.on = false;
         }
         tmpQ.setFromUnitVectors(fwd, dir);
         arrows.setMatrixAt(i, tmpM.compose(p, tmpQ, tmpV.set(1, 1, 1)));
@@ -1153,7 +1080,7 @@ function createLife2(scene, ctx, village, walls) {
           const roles = ['noble', 'townswoman', 'peasant', 'townswoman', 'merchant', 'child', 'knight'];
           if (rnd() < 0.75) {
             const q = p.clone().addScaledVector(U, (rnd() - 0.5) * 1.2);
-            people.push({ x: q.x, y: g + tier * 0.55 + 0.35, z: q.z, yaw: Math.atan2(-Vn.x * face, -Vn.z * face), role: roles[Math.floor(rnd() * roles.length)], pose: 'sit' });
+            people.push({ x: q.x, y: g + tier * 0.55 + 0.35, z: q.z, yaw: Math.atan2(-Vn.x * face, -Vn.z * face), role: roles[Math.floor(rnd() * roles.length)], pose: 'sit', cheer: true });
           }
         }
       }
@@ -1173,7 +1100,7 @@ function createLife2(scene, ctx, village, walls) {
       if (rnd() < 0.4) continue;
       const p = at(u + (rnd() - 0.5), -12.4 - rnd() * 1.2);
       const roles = ['peasant', 'townswoman', 'child', 'servant', 'guard'];
-      people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: Math.atan2(Vn.x, Vn.z), role: roles[Math.floor(rnd() * roles.length)] });
+      people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: Math.atan2(Vn.x, Vn.z), role: roles[Math.floor(rnd() * roles.length)], cheer: true });
     }
     for (const u of [-30, -15, 15, 30]) {
       const p = at(u, -11.6), g = gh(p.x, p.z);
@@ -1192,15 +1119,113 @@ function createLife2(scene, ctx, village, walls) {
     }
     // герольд у барьера
     { const p = at(0, -3.2); people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: Math.atan2(-Vn.x, -Vn.z), role: 'noble' }); }
-    // два рыцаря скачут навстречу друг другу вдоль барьера
-    const lane = (v, from, to) => {
-      const pts = [];
-      for (let k = 0; k <= 8; k++) { const p = at(from + (to - from) * (k / 8), v); pts.push(new V3(p.x, gh(p.x, p.z), p.z)); }
-      return pts;
-    };
+    // ПОЕДИНКИ: 2 рыцаря синих против 2 красных.
+    // 1) сшибка на копьях у барьера: разгон, удар в щит, щепки, отдача, разворот;
+    // 2) пеший бой на мечах в углу ристалища: удары, блоки, отходы.
     const jr = mulberry32(900);
-    movers.push(makeWalker(scene, (B) => riderBuild(B, { horseCol: 0xe8e0d0, role: 'knight', seed: 501, item: 'lance', caparison: 0x1d3f8a, rnd: jr }), lane(-1.6, -28, 28), { loop: false, speed: 6.5, stride: 2.6, amp: 0.7, s0: 0 }));
-    movers.push(makeWalker(scene, (B) => riderBuild(B, { horseCol: 0x2a1e16, role: 'foe', seed: 502, item: 'lance', caparison: 0x7a1c1c, rnd: jr }), lane(1.6, 28, -28), { loop: false, speed: 6.5, stride: 2.6, amp: 0.7, s0: 0 }));
+    const sm = (a, b, x) => { const q = Math.min(1, Math.max(0, (x - a) / (b - a))); return q * q * (3 - 2 * q); };
+    const mkRig = (build, amp) => {
+      const B = new ColorBuilder(); build(B);
+      const { mat, uPhase, uAmp, uHuman } = walkerMaterial();
+      uAmp.value = amp;
+      const mesh = new THREE.Mesh(B.build(), mat);
+      mesh.receiveShadow = true; mesh.castShadow = true; mesh.name = 'walker';
+      scene.add(mesh); WALKERS.push(mesh);
+      return { mesh, uPhase, uAmp, uHuman };
+    };
+    const jousters = [
+      { r: mkRig((B) => riderBuild(B, { horseCol: 0xe8e0d0, role: 'champB', seed: 501, item: 'lance', caparison: 0x1d3f8a, rnd: jr }), 0.7), v: -1.6, sd: -1 },
+      { r: mkRig((B) => riderBuild(B, { horseCol: 0x2a1e16, role: 'champR', seed: 502, item: 'lance', caparison: 0x7a1c1c, rnd: jr }), 0.7), v: 1.6, sd: 1 },
+    ];
+    // щепки от сломанного копья
+    const chipGeo = new THREE.BoxGeometry(0.05, 0.05, 0.5);
+    const chips = new THREE.InstancedMesh(chipGeo, new THREE.MeshLambertMaterial({ color: 0xcdb48a }), 18);
+    chips.frustumCulled = false; chips.visible = false; scene.add(chips); WALKERS.push(chips);
+    const chipV = [], chipP = [], chipR = [];
+    for (let k = 0; k < 18; k++) { chipV.push(new V3()); chipP.push(new V3()); chipR.push(new V3()); }
+    const dm = new THREE.Matrix4(), dq = new THREE.Quaternion(), de = new THREE.Euler(), one = new V3(1, 1, 1);
+    let hitAt = -99, lastRun = -1;
+    const RUN = 7.5, WAIT = 3.2, PER = RUN + WAIT, L = 27;
+    const hitPt = at(0, 0);
+    // пешие бойцы
+    const fc = at(-20, -6.5);
+    const foot = [[1, 'champB', 511], [-1, 'champR', 512]].map(([sd, role, seed]) => ({ sd, r: mkRig((B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role, seed, item: 'sword' }), 0.8) }));
+    let tJ = 0;
+    ctx.tourneyUpdate = (dt) => {
+      tJ += dt;
+      const run = Math.floor(tJ / PER), u = tJ % PER;
+      // сшибка
+      const dir = run % 2 ? -1 : 1;
+      for (const j of jousters) {
+        const m = j.r.mesh;
+        let uu;
+        if (u < RUN) uu = j.sd * dir * (L - 2 * L * Math.min(1, u / RUN));
+        else uu = -j.sd * dir * L;
+        const p = at(uu, j.v);
+        m.position.set(p.x, gh(p.x, p.z), p.z);
+        // направление: во время скачки — вдоль поля, на паузе разворот к новому заезду
+        const going = -j.sd * dir;
+        const yGo = Math.atan2(U.x * going, U.z * going);
+        const yaw = u < RUN ? yGo : yGo + Math.PI * sm(RUN + 0.6, PER - 0.4, u);
+        m.rotation.y = yaw;
+        const gal = u < RUN ? 1 : 0.15 * (1 - sm(RUN, RUN + 1, u)) + 0.25 * sm(RUN + 0.6, PER - 0.4, u) * (1 - sm(PER - 0.6, PER, u));
+        j.r.uPhase.value += dt * (gal * 7 + 0.5) / 2.6 * Math.PI * 2;
+        j.r.uAmp.value = 0.15 + 0.6 * gal;
+        // отдача от удара: всадник с конём вздрагивает, тот, в чей щит попали, сильнее
+        const since = tJ - hitAt;
+        const hurt = (run % 2 ? j.sd > 0 : j.sd < 0) ? 1 : 0.35;
+        const jolt = since > 0 && since < 0.9 ? Math.sin(since * 11) * Math.exp(-since * 5) * hurt : 0;
+        m.rotation.z = jolt * 0.12 * j.sd; m.rotation.x = -jolt * 0.08;
+      }
+      if (u >= RUN / 2 && run !== lastRun) {
+        lastRun = run; hitAt = tJ;
+        CHEER.value = SWAY_TIME.value; // зрители кричат «ура»
+        const y = gh(hitPt.x, hitPt.z) + 2.3;
+        for (let q = 0; q < 18; q++) {
+          chipP[q].set(hitPt.x, y, hitPt.z);
+          chipV[q].set((Math.random() - 0.5) * 5, 1.5 + Math.random() * 4, (Math.random() - 0.5) * 5);
+          chipR[q].set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+        }
+      }
+      const st = tJ - hitAt;
+      chips.visible = st < 2.2;
+      if (chips.visible) {
+        for (let q = 0; q < 18; q++) {
+          chipV[q].y -= 9.8 * dt;
+          chipP[q].addScaledVector(chipV[q], dt);
+          const g = gh(chipP[q].x, chipP[q].z) + 0.03;
+          if (chipP[q].y < g) { chipP[q].y = g; chipV[q].set(0, 0, 0); } else chipR[q].addScalar(dt * 8);
+          dm.compose(chipP[q], dq.setFromEuler(de.set(chipR[q].x, chipR[q].y, chipR[q].z)), one);
+          chips.setMatrixAt(q, dm);
+        }
+        chips.instanceMatrix.needsUpdate = true;
+      }
+      // пеший бой: по очереди атакуют — замах, удар с выпадом; второй блокирует и отступает
+      const T = 2.3, cyc = Math.floor(tJ / T), w = (tJ % T) / T, attacker = cyc % 2;
+      const circle = Math.sin(tJ * 0.3) * 0.8;
+      foot.forEach(({ r, sd }, i) => {
+        const att = i === attacker;
+        let swing, fwd;
+        if (att) {
+          swing = w < 0.45 ? -sm(0, 0.45, w) : w < 0.58 ? -1 + 2 * sm(0.45, 0.58, w) : 1 - 1.2 * sm(0.62, 1, w);
+          fwd = w < 0.45 ? -0.12 * sm(0, 0.45, w) : w < 0.62 ? 0.5 * sm(0.45, 0.6, w) : 0.5 * (1 - sm(0.62, 1, w));
+        } else {
+          swing = -0.55 * sm(0.3, 0.5, w) * (1 - sm(0.7, 1, w));
+          fwd = -0.35 * sm(0.45, 0.6, w) * (1 - sm(0.65, 1, w));
+        }
+        const d = 1.2 - fwd, ang = circle + (sd > 0 ? 0 : Math.PI);
+        const x = fc.x + Math.sin(ang) * d, z = fc.z + Math.cos(ang) * d;
+        r.mesh.position.set(x, gh(x, z), z);
+        r.mesh.rotation.y = Math.atan2(fc.x - x, fc.z - z) + (att ? swing * 0.12 : -0.15 * sm(0.45, 0.6, w) * (1 - sm(0.7, 1, w)));
+        r.uPhase.value = Math.asin(Math.max(-1, Math.min(1, swing)));
+        r.uAmp.value = att ? 0.9 : 0.7;
+      });
+    };
+    // оруженосцы с запасными копьями у концов барьера
+    for (const [uu, vv, sd] of [[-30, -2.6, 1], [30, 2.6, -1]]) {
+      const p = at(uu, vv);
+      people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: Math.atan2(U.x * sd, U.z * sd), role: 'servant', item: 'spear' });
+    }
   }
 
   // ---------------- отряд всадников на дороге к замку ----------------
@@ -1323,6 +1348,7 @@ function createLife2(scene, ctx, village, walls) {
     setGate(g) { gateRef = g; },
     update(t, dt) {
       for (const m of movers) m.update(dt, gh);
+      if (ctx.tourneyUpdate) ctx.tourneyUpdate(Math.min(dt, 0.1));
     },
   };
 }
@@ -1336,9 +1362,11 @@ export function createExtras(scene, terrain, walls, village) {
   const colorB = new ColorBuilder(), glowB = new ColorBuilder();
   const people = [];
   const armWood = new GeoBuilder(walls.woodMaterial.userData.tileMeters), armMetal = new GeoBuilder(1);
-  const ctx = { terrain, wood, stone, metal, straw, colorB, glowB, people, rnd, armWood, armMetal, scene, smokes: [] };
+  const cwWood = new GeoBuilder(walls.woodMaterial.userData.tileMeters), cwMetal = new GeoBuilder(1), cwStone = new GeoBuilder(walls.stoneMaterial.userData.tileMeters);
+  const ctx = { terrain, wood, stone, metal, straw, colorB, glowB, people, rnd, armWood, armMetal, cwWood, cwMetal, cwStone, scene, smokes: [] };
   hallInterior(ctx);
-  const camp = siegeCamp(ctx, village);
+  const camp = siegeCamp(ctx, village, findCampSite);
+  for (const t of COURT_EXTRAS.tents) ctx.pavilion = yardPavilion(scene, ctx, t.x, t.z, Math.atan2(-t.x, -t.z)).stop; // вход — к середине двора
   if (camp) ctx.campSite = { x: camp.x, z: camp.z };
   const country = createCountryLife(scene, ctx, village); // коровы — в общую сетку, поэтому до сборки
   ctx.stoneTile = walls.stoneMaterial.userData.tileMeters;
@@ -1382,7 +1410,7 @@ export function createExtras(scene, terrain, walls, village) {
     rm.visible = false;
     scene.add(rm);
   }
-  const siege = createSiege(scene, ctx, walls, terrain, { wood: walls.woodMaterial, iron });
+  const siege = createSiege(scene, ctx, walls, terrain, { wood: walls.woodMaterial, iron, stone: walls.stoneMaterial });
   life3.siege = siege;
   const windows = createWindowLights(scene);
   // люди разбиты на группы по местам: далёкие группы не рисуются (меньше треугольников)
@@ -1412,8 +1440,8 @@ export function createExtras(scene, terrain, walls, village) {
       dt = Math.min(dt, 0.1);
       if (camera) {
         const cp = camera.position;
-        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < 320 && !(ctxRuins.on) && m.userData.night !== false;
-        for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < 380 && !(ctxRuins.on);
+        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < 260 && !(ctxRuins.on) && m.userData.night !== false;
+        for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < 340 && !(ctxRuins.on);
       }
       peopleUpd.update(t);
       walkers.update(dt);
@@ -1431,8 +1459,9 @@ export function createExtras(scene, terrain, walls, village) {
     get pasture() { return ctx.pasture; },
     set ruinsOn(v) { ctxRuins.on = v; },
     get tourney() { return ctx.tourney; },
+    cheerNow(ago = 0) { CHEER.value = SWAY_TIME.value - ago; },
     setGate(g) { life2.setGate(g); },
   };
 }
 
-export { M, GEO, makeWalker, walkerMaterial, WALKERS, fire, cow, findFlat };
+export { M, GEO, makeWalker, walkerMaterial, WALKERS, fire, cow, findFlat, riderBuild };

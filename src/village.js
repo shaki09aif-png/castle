@@ -263,7 +263,8 @@ function watermill(B, scene, terrain, xRiver, rnd) {
   const hwR = riverInfo(xRiver, zr - 30).hw; // ширина с северной стороны
   const edge = new V3(xRiver, 0, zr).addScaledVector(toNorth, hwR);
   const W = 6, L = 8;
-  const hc = edge.clone().addScaledVector(toNorth, W / 2 + 2.2);
+  // дом стоит на самом берегу: стена к воде — на урезе, колесо целиком в реке
+  const hc = edge.clone().addScaledVector(toNorth, W / 2 - 0.4);
   const yaw = Math.atan2(along.z, along.x);
   const f = new Frame({ x: hc.x, z: hc.z, ax: along.x, az: along.z, nx: -toNorth.x, nz: -toNorth.z });
   let lo = Infinity, hi = -Infinity;
@@ -306,7 +307,7 @@ function watermill(B, scene, terrain, xRiver, rnd) {
   INTERIORS.push({ id: 'mill', f, L, W, floorY, eaveY, ridgeY: ridge, roof: 'gable', pitch, doors: [], backDoor: { lx: -1.5, w: 1.1, h: 2.1 } });
   // колесо
   const R = 2.7, width = 1.0;
-  const wheelC = f.p(1.2, RIVER.waterLevel + R - 0.45, hw + width / 2 + 0.5);
+  const wheelC = f.p(1.2, RIVER.waterLevel + R - 0.55, hw + width / 2 + 1.1);
   const wheel = new THREE.Group();
   wheel.position.copy(wheelC);
   wheel.quaternion.setFromUnitVectors(new V3(0, 0, 1), f.N);
@@ -328,9 +329,9 @@ function watermill(B, scene, terrain, xRiver, rnd) {
     pd.rotateZ((k / 18) * Math.PI * 2);
     wb.addGeometry(pd, new THREE.Matrix4());
   }
-  const axle = new THREE.CylinderGeometry(0.18, 0.18, width + 3.6, 10);
+  const axle = new THREE.CylinderGeometry(0.18, 0.18, width + 4.8, 10);
   axle.rotateX(Math.PI / 2);
-  axle.translate(0, 0, -1.8);
+  axle.translate(0, 0, -2.2);
   wb.addGeometry(axle, new THREE.Matrix4());
   const wm = m(wb.build(), B.woodMat);
   wm.castShadow = wm.receiveShadow = true;
@@ -344,6 +345,20 @@ function watermill(B, scene, terrain, xRiver, rnd) {
     const p = chute.clone().addScaledVector(f.X, s);
     const g = Math.min(terrain.heightAt(p.x, p.z), RIVER.waterLevel) - 0.4;
     B.wood.box(p.clone().setY((g + chute.y) / 2), UP, f.X, f.N, (chute.y - g) / 2, 0.1, 0.1, { grain: true });
+  }
+  // опора вала с речной стороны: столб, вбитый в дно, с подшипником-колодкой
+  {
+    const pp = wheelC.clone().addScaledVector(f.N, width / 2 + 0.55);
+    const bed = RIVER.waterLevel - 1.6;
+    B.wood.box(pp.clone().setY((bed + wheelC.y + 0.25) / 2), UP, f.X, f.N, (wheelC.y + 0.25 - bed) / 2, 0.14, 0.14, { grain: true });
+    B.wood.box(pp.clone().setY(wheelC.y - 0.22), f.X, UP, f.N, 0.35, 0.08, 0.16, { grain: true });
+    // подпорка-раскос от столба к стене
+    const wp = f.p(1.2, 0, hw).setY(wheelC.y - 1.2);
+    const mid = pp.clone().setY(wheelC.y - 0.9).lerp(wp, 0.5);
+    const dir = wp.clone().sub(pp.clone().setY(wheelC.y - 0.9));
+    const len = dir.length(); dir.normalize();
+    const side = new V3().crossVectors(dir, f.X).normalize();
+    B.wood.box(mid, dir, f.X, side, len / 2, 0.08, 0.08, { grain: true });
   }
   void rnd;
   void yaw;

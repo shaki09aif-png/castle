@@ -8,7 +8,7 @@ import { Frame, strawMaterial, buildBarrels } from './courtyard.js';
 import { addYardLife, yardExclude, SACK } from './yard.js';
 import { wattleFence, gardenBeds } from './village.js';
 import { ColorBuilder, createPeople, addTailSway, addPersonShading } from './people.js';
-import { pbrMaterial, makeCanvas, toTexture, foliageTexture } from './textures.js';
+import { pbrMaterial, foliageTexture } from './textures.js';
 import { mulberry32 } from './noise.js';
 
 const V3 = THREE.Vector3;
@@ -17,86 +17,12 @@ const UP = new V3(0, 1, 0);
 export const COURT_EXTRAS = {
   linden: { x: 22, z: -3 },
   garden: { x: -35, z: -2, w: 9, d: 7 },
-  tents: [{ x: 16.5, z: -20, r: 2.5, c: 0x9c1b1b }, { x: 24.5, z: -24.5, r: 2.2, c: 0x1f3f9a }],
+  tents: [{ x: 16.8, z: -18.6, r: 3.9, c: 0x9c1b1b }], // один шатёр рыцаря (строится в camp.js → yardPavilion)
   coop: { x: -32.5, z: 19 },
   quintain: { x: 27, z: 18 },
   table: { x: 7.5, z: 15 },
 };
 
-// ---------------------------------------------------------------------------
-function stripeTexture(color) {
-  const c = makeCanvas(256, 128);
-  const g = c.getContext('2d');
-  const col = new THREE.Color(color);
-  for (let i = 0; i < 16; i++) {
-    g.fillStyle = i % 2 ? '#e9e2cf' : `#${col.getHexString()}`;
-    g.fillRect(i * 16, 0, 16, 128);
-  }
-  // складки и пятна на ткани
-  const rnd = mulberry32(color);
-  for (let k = 0; k < 900; k++) {
-    g.fillStyle = `rgba(0,0,0,${rnd() * 0.06})`;
-    g.fillRect(rnd() * 256, rnd() * 128, 1 + rnd() * 3, 4 + rnd() * 20);
-  }
-  const t = toTexture(c);
-  return t;
-}
-
-// Шатёр-павильон: полосатые стены, конусная крыша, фестоны, растяжки и вымпел
-function pavilion(scene, wood, terrain, { x, z, r, c }, iron) {
-  const g = terrain.heightAt(x, z);
-  const tex = stripeTexture(c);
-  const cloth = new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.9 });
-  const H = 2.2, RH = 1.9;
-  // стена с открытым входом
-  const wallG = new THREE.CylinderGeometry(r, r * 1.02, H, 32, 1, true, 0.5, Math.PI * 2 - 1.0);
-  const wall = new THREE.Mesh(wallG, cloth);
-  wall.position.set(x, g + H / 2, z);
-  wall.rotation.y = -Math.PI / 2;
-  // крыша
-  const roofTex = tex.clone();
-  roofTex.repeat.set(1, 1);
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(r + 0.25, RH, 32, 1, true), cloth);
-  roof.position.set(x, g + H + RH / 2 - 0.05, z);
-  // фестоны по краю крыши (зубчатая кромка)
-  const val = makeCanvas(256, 32);
-  const vg = val.getContext('2d');
-  vg.fillStyle = `#${new THREE.Color(c).getHexString()}`;
-  for (let i = 0; i < 16; i++) {
-    vg.beginPath();
-    vg.moveTo(i * 16, 0); vg.lineTo(i * 16 + 16, 0); vg.lineTo(i * 16 + 16, 14); vg.quadraticCurveTo(i * 16 + 8, 34, i * 16, 14); vg.fill();
-  }
-  const valTex = toTexture(val, { repeat: false });
-  valTex.wrapS = THREE.RepeatWrapping;
-  valTex.repeat.set(3, 1);
-  const valance = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.26, r + 0.26, 0.35, 32, 1, true),
-    new THREE.MeshStandardMaterial({ map: valTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9 }));
-  valance.position.set(x, g + H - 0.12, z);
-  for (const m of [wall, roof, valance]) { m.castShadow = m.receiveShadow = true; scene.add(m); }
-  // центральный шест с шаром и вымпелом
-  wood.addGeometry(new THREE.CylinderGeometry(0.06, 0.07, H + RH + 1.2, 8), new THREE.Matrix4().makeTranslation(x, g + (H + RH + 1.2) / 2, z));
-  const pen = new THREE.Shape();
-  pen.moveTo(0, 0); pen.lineTo(1.1, -0.15); pen.lineTo(0, -0.35); pen.lineTo(0, 0);
-  const pm = new THREE.Mesh(new THREE.ShapeGeometry(pen), new THREE.MeshStandardMaterial({ color: c, side: THREE.DoubleSide, roughness: 0.8 }));
-  pm.position.set(x, g + H + RH + 1.15, z);
-  pm.rotation.y = -0.6;
-  scene.add(pm);
-  // растяжки к колышкам
-  for (let k = 0; k < 8; k++) {
-    const a = (k / 8) * Math.PI * 2 + 0.2;
-    if (Math.abs(((a + Math.PI) % (Math.PI * 2)) - Math.PI) < 0.35) continue; // у входа
-    const top = new V3(x + Math.cos(a) * (r + 0.2), g + H + 0.1, z + Math.sin(a) * (r + 0.2));
-    const peg = new V3(x + Math.cos(a) * (r + 1.4), 0, z + Math.sin(a) * (r + 1.4));
-    peg.y = terrain.heightAt(peg.x, peg.z);
-    const d = peg.clone().sub(top);
-    const len = d.length();
-    const rope = new THREE.CylinderGeometry(0.008, 0.008, len, 4);
-    const q = new THREE.Quaternion().setFromUnitVectors(UP, d.normalize());
-    wood.addGeometry(rope, new THREE.Matrix4().compose(top.clone().addScaledVector(d, len / 2), q, new V3(1, 1, 1)));
-    wood.box(peg.clone().setY(peg.y + 0.1), UP, new V3(1, 0, 0), new V3(0, 0, 1), 0.15, 0.03, 0.03);
-  }
-  void iron;
-}
 
 // Курица: тело, хвост, голова, гребешок, клюв, лапки
 export function chicken(B, x, y, z, yaw, rnd) {
@@ -189,7 +115,7 @@ export function createDetails(scene, terrain, walls, village) {
   }
 
   // ---- шатры ----
-  for (const t of E.tents) pavilion(scene, wood, terrain, t, iron);
+  // шатёр строит extras (yardPavilion) — там общий набор для шатров
 
   // ---- курятник: домик на ножках, лесенка, загон из плетня, куры ----
   {

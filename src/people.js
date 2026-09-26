@@ -90,12 +90,14 @@ export class ColorBuilder {
 // расстоянием (чтобы не рябило). Материал определяется атрибутом aMat.
 // сила ветра для одежды (main.js копирует сюда WIND_K)
 export const CLOTH_WIND = { value: 1 };
+// время последнего «ура» зрителей (по часам SWAY_TIME): удар копья на турнире
+export const CHEER = { value: -100 };
 export function addPersonShading(mat) {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
     if (prev) prev(sh, r);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aMat;\nattribute float aFoot;\nattribute vec3 aAnim;\nuniform float uClothT;\nuniform float uClothW;\nvarying float vMat;\nvarying vec3 vOP;')
+      .replace('#include <common>', '#include <common>\nattribute float aMat;\nattribute float aFoot;\nattribute vec3 aAnim;\nattribute vec2 aPivot;\nuniform float uClothT;\nuniform float uClothW;\nuniform float uCheer;\nvarying float vMat;\nvarying vec3 vOP;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vMat = aMat;
         vOP = position;
@@ -131,13 +133,32 @@ export function addPersonShading(mat) {
               transformed.y -= pk * 0.1 * clamp((position.y - aAnim.y + 0.12) / 0.12, 0.0, 1.0);
             } else if (ak < 4.5) {
               transformed.y += sin(t * 0.7 + ph * 6.28) * 0.035 + sin(t * 5.5 + ph * 3.0) * 0.006;
-            } else {
+            } else if (ak < 5.5) {
               transformed.y += sin(t * 2.1 + ph * 6.28) * 0.008 * clamp((position.y - aAnim.y) / 0.25, 0.0, 1.0);
+            } else {
+              // 6 — зритель: после удара на турнире вскидывает руки (кто-то раньше, кто-то позже)
+              float since = t - uCheer - ph * 0.7;
+              float up = smoothstep(0.0, 0.35, since) * (1.0 - smoothstep(1.6 + ph, 2.6 + ph, since));
+              up *= step(0.35, fract(ph * 7.3)); // руки поднимают не все
+              up += 0.18 * smoothstep(0.6, 1.0, sin(t * 0.9 + ph * 20.0)) * step(0.7, fract(ph * 3.1)); // кто-то машет и так
+              if (up > 0.001) {
+                vec2 L = position.xz - aPivot;
+                float ll = length(L);
+                if (ll > 0.05) {
+                  L /= ll;
+                  vec3 sh = vec3(aPivot.x + L.x * 0.19, aAnim.y, aPivot.y + L.y * 0.19);
+                  vec3 ax = normalize(cross(vec3(L.x, 0.0, L.y), vec3(0.0, 1.0, 0.0)));
+                  float a = up * (2.3 + 0.3 * sin(t * 6.0 + ph * 9.0));
+                  vec3 v = transformed - sh;
+                  transformed = sh + v * cos(a) + cross(ax, v) * sin(a) + ax * dot(ax, v) * (1.0 - cos(a));
+                }
+              }
             }
           }
         }`);
     sh.uniforms.uClothT = SWAY_TIME;
     sh.uniforms.uClothW = CLOTH_WIND;
+    sh.uniforms.uCheer = CHEER;
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         varying float vMat;
@@ -355,6 +376,9 @@ const G = {
   capeline: new THREE.CylinderGeometry(0.12, 0.13, 0.12, 12),
   brim: new THREE.CylinderGeometry(0.21, 0.21, 0.025, 18),
   helmTop: new THREE.SphereGeometry(0.121, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+  // топхельм — горшковидный шлем рыцаря XIII века: цилиндр с плоским верхом
+  greatHelm: new THREE.CylinderGeometry(0.126, 0.132, 0.29, 16, 1, true),
+  greatTop: new THREE.CircleGeometry(0.126, 16).rotateX(-Math.PI / 2),
   coif: openHood(0.128, Math.PI * 0.3, Math.PI * 0.64, Math.PI * 0.72, 0.85),
   mailCape: new THREE.CylinderGeometry(0.12, 0.27, 0.16, 16, 1, true),
   wimple: openHood(0.124, Math.PI * 0.3, Math.PI * 0.66, Math.PI * 0.8, 0.88),
@@ -451,6 +475,8 @@ const ROLES = {
   reaper: { tunic: [0xd8ccb0, 0x8a7a5a, 0x6a5a3a], legs: 0x5a4a38, head: 'hood', item: 'scythe' },
   minstrel: { tunic: [0x8a2a6a, 0x2a6a4a], legs: 0xc8a040, head: 'hair', item: 'lute' },
   merchant: { tunic: [0x2e5a4a, 0x7a3a1a, 0x5a4a7a, 0x8a6a2a], legs: 0x3a3028, head: 'hood', apron: 0xd8ccb0, item: null },
+  champB: { tunic: [0x1d3f8a], legs: 0x5a5a5e, head: 'greathelm', surcoat: 0x1d3f8a, cross: 0xd6a632, sword: true, shield: true, shieldCol: 0x1d3f8a, mail: true },
+  champR: { tunic: [0x7a1c1c], legs: 0x5a5a5e, head: 'greathelm', surcoat: 0x7a1c1c, cross: 0xe8e0c8, sword: true, shield: true, shieldCol: 0x7a1c1c, mail: true },
   townswoman: { tunic: [0x7a2a3a, 0x3d5a7a, 0x6a5a2a, 0x4a6a4a], legs: 0x3a3028, head: 'wimple', dress: true, item: null },
 };
 
@@ -479,7 +505,7 @@ function addHair(B, C, headM, hair, style, rnd, sw, under = false) {
   }
 }
 
-export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand', item: itemArg }) {
+export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose = 'stand', item: itemArg, cheer = false }) {
   const R = ROLES[role];
   const IT = itemArg !== undefined ? itemArg : R.item; // предмет в руках (можно задать явно)
   // сидя (за столом) и верхом: фигура опускается, ноги согнуты
@@ -581,8 +607,8 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   if (R.surcoat) {
     B.add(tunicGeo(1.3, 1.1), M(0, 0.02, 0, lean * 0.25, 0, 0, 1.06, 0.98, 1.08), R.surcoat, 0.4, sw);
     // крест на сюрко
-    B.add(new THREE.BoxGeometry(0.05, 0.3, 0.01), M(0, 1.15, 0.165), 0xa01818, 0.4, sw);
-    B.add(new THREE.BoxGeometry(0.2, 0.05, 0.01), M(0, 1.2, 0.165), 0xa01818, 0.4, sw);
+    B.add(new THREE.BoxGeometry(0.05, 0.3, 0.01), M(0, 1.15, 0.165), R.cross || 0xa01818, 0.4, sw);
+    B.add(new THREE.BoxGeometry(0.2, 0.05, 0.01), M(0, 1.2, 0.165), R.cross || 0xa01818, 0.4, sw);
   }
   if (R.apron) {
     const lg = role === 'smith';
@@ -713,6 +739,17 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
       B.add(G.helmTop, C(headM, 0, 0.012, 0), 0x6e7074, 1, sw);
       B.add(G.brim, C(headM, 0, 0.01, 0, -0.06, 0, 0), 0x5e6064, 1, sw);
       break;
+    case 'greathelm':
+      MT(6);
+      B.add(G.mailCape, M(0, 1.44, 0, 0, 0, 0, 1, 1, 0.8), 0x7e8288, 0.8, sw);
+      MT(3);
+      B.add(G.greatHelm, C(headM, 0, -0.01, 0.006), 0x8e9298, 1, sw);
+      B.add(G.greatTop, C(headM, 0, 0.135, 0.006), 0x7a7e84, 1, sw);
+      for (const sd of [-1, 1]) B.add(new THREE.BoxGeometry(0.075, 0.013, 0.02), C(headM, sd * 0.05, 0.02, 0.125), 0x0c0c0e, 1, sw); // смотровые щели
+      B.add(new THREE.BoxGeometry(0.022, 0.19, 0.012), C(headM, 0, -0.06, 0.134), 0xb89a4a, 1, sw); // латунный крест
+      B.add(new THREE.BoxGeometry(0.2, 0.02, 0.012), C(headM, 0, 0.045, 0.131), 0xb89a4a, 1, sw);
+      for (let k = 0; k < 6; k++) B.add(new THREE.BoxGeometry(0.008, 0.008, 0.012), C(headM, 0.035 + (k % 3) * 0.018, -0.05 - Math.floor(k / 3) * 0.02, 0.131), 0x0c0c0e, 1, sw); // дыхательные отверстия
+      break;
     case 'helm':
       // шапель — железная каска с широкими полями (типична для XIII века) и кольчужный капюшон
       MT(6);
@@ -748,12 +785,12 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   let armLimb = [0, 0];
   [1, -1].forEach((sd, i) => {
     const [fx, sz, eb] = armPose[i];
-    const fixed = ride || sit || ['tray', 'lute', 'lance', 'basket'].includes(IT) || (i === 0 && IT === 'torch') || (i === 1 && IT === 'falcon');
+    const fixed = ride || (sit && !cheer) || ['tray', 'lute', 'lance', 'basket'].includes(IT) || (i === 0 && IT === 'torch') || (i === 1 && IT === 'falcon');
     B.curLimb = fixed ? [0, 0] : [-sd * 0.6, 1.4 * s];
     if (i === 0) armLimb = B.curLimb; // рука — в противофазе с ногой
     const sh = M(sd * 0.2, 1.37, lean * 0.1, fx + lean * 0.3, 0, sd * Math.abs(sz));
     // работающие руки (помешивают, ткут, перебирают) — движение считает шейдер
-    B.curAnim = pose === 'work' && !fixed ? [2, new V3().setFromMatrixPosition(sh).y, (seed * 0.137) % 1] : [0, 0, 0];
+    B.curAnim = pose === 'work' && !fixed ? [2, new V3().setFromMatrixPosition(sh).y, (seed * 0.137) % 1] : cheer && !fixed ? [6, new V3().setFromMatrixPosition(sh).y, (seed * 0.2137) % 1] : [0, 0, 0];
     MT(1);
     B.add(G.shoulder, sh, sleeve, 0.6, sw);
     B.add(G.deltoid, M(sd * 0.165, 1.365, lean * 0.1, lean * 0.3, 0, -sd * 0.3), sleeve, 0.6, sw);
@@ -779,9 +816,9 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(G.tip, new THREE.Matrix4().compose(base.clone().add(new V3(0, 2.5 * s + 0.12, 0)), new THREE.Quaternion(), new V3(1, 1, 1)), 0x9a9ea4, 0.3, sw);
   }
   if (R.shield) {
-    const col = pick([0x7a1c1c, 0xd6a632, 0x1d3f8a]);
+    const col = R.shieldCol || pick([0x7a1c1c, 0xd6a632, 0x1d3f8a]);
     B.add(shieldShape, M(-0.05, 1.12, -0.2, 0.08, Math.PI, 0), col, 0.4, sw);
-    B.add(new THREE.BoxGeometry(0.06, 0.62, 0.012), M(-0.05, 1.05, -0.245, 0.08, Math.PI, 0), 0xe8e0c8, 0.4, sw);
+    B.add(new THREE.BoxGeometry(0.06, 0.62, 0.012), M(-0.05, 1.05, -0.245, 0.08, Math.PI, 0), R.cross || 0xe8e0c8, 0.4, sw);
   }
   if (IT === 'bow') {
     const bow = new THREE.TorusGeometry(0.62, 0.014, 5, 20, Math.PI * 0.9);
@@ -878,7 +915,7 @@ export function createPeople(scene, list) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = uTime;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aSway;\nattribute vec2 aPivot;\nuniform float uTime;\nfloat gHeadA;')
+      .replace('#include <common>', '#include <common>\nattribute vec2 aSway;\nuniform float uTime;\nfloat gHeadA;')
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
         // иногда человек оглядывается: голова поворачивается вокруг шеи
         {

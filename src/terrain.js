@@ -12,6 +12,9 @@ import { triplanarMaterial, TRIPLANAR_GLSL, AUTUMN } from './materials.js';
 import { Q } from './quality.js';
 import { ATMO } from './lighting.js';
 
+// «дыра» в рельефе у входа в потайной ход (матрица мир → система хода)
+export const TERRAIN_HOLE = { m: { value: new THREE.Matrix4() }, on: { value: 0 } };
+
 const nPlain = createNoise2D(101);
 const nHill = createNoise2D(202);
 const nRock = createNoise2D(303);
@@ -591,6 +594,8 @@ function makeTerrainMaterial() {
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.uniforms.uAutumn = AUTUMN;
+    shader.uniforms.uHole = TERRAIN_HOLE.m;
+    shader.uniforms.uHoleOn = TERRAIN_HOLE.on;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -625,6 +630,8 @@ function makeTerrainMaterial() {
         uniform vec4 tileInv;
         uniform vec4 layerMean;
         uniform float uAutumn;
+        uniform mat4 uHole;
+        uniform float uHoleOn;
         varying vec4 vSplat;
         varying vec3 vWPos;
         varying vec3 vWNrm;
@@ -634,7 +641,11 @@ function makeTerrainMaterial() {
       )
       .replace(
         '#include <map_fragment>',
-        `{
+        `if (uHoleOn > 0.5) { // устье потайного хода: земля не закрывает проход
+          vec3 hl = (uHole * vec4(vWPos, 1.0)).xyz;
+          if (hl.z > -0.3 && hl.z < 5.0 && abs(hl.x) < 1.05 && hl.y > -0.6 && hl.y < 2.45) discard;
+        }
+        {
           vec3 n = normalize(vWNrm);
           vec3 bw = triBlend(n);
           vec3 dx = dFdx(vWPos), dy = dFdy(vWPos);

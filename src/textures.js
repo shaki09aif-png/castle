@@ -476,6 +476,57 @@ const GENERATORS = {
     return finishSet(rgb, hgt, 0.95, S, { normal: 3, ao: 2, aoRadius: 3, tileMeters: 2.5 });
   },
 
+  // Парусина шатров: небелёный лён полотняного переплетения, швы между полотнищами
+  // (двойная строчка), утолщения нитей, выгоревшие и потемневшие пятна, латки
+  canvas() {
+    const S = 512;
+    const n = createTileNoise(311);
+    const rnd = mulberry32(312);
+    const rgb = new Float32Array(S * S * 3);
+    const hgt = new Float32Array(S * S);
+    const rough = new Float32Array(S * S);
+    const TH = 96; // нитей на тайл
+    const slubU = new Float32Array(TH), slubV = new Float32Array(TH);
+    for (let k = 0; k < TH; k++) { slubU[k] = (rnd() - 0.5) * 0.12; slubV[k] = (rnd() - 0.5) * 0.12; }
+    const patches = [];
+    for (let k = 0; k < 3; k++) patches.push({ x: rnd() * 0.8 + 0.1, y: rnd() * 0.8 + 0.1, w: 0.05 + rnd() * 0.07, h: 0.04 + rnd() * 0.06, t: 0.9 + rnd() * 0.15 });
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const u = x / S, v = y / S;
+        // переплетение: нити основы и утка чередуются сверху/снизу
+        const fu = u * TH, fv = v * TH;
+        const iu = Math.floor(fu), iv = Math.floor(fv);
+        const over = (iu + iv) % 2 === 0;
+        const cu = Math.sin((fu - iu) * Math.PI), cv = Math.sin((fv - iv) * Math.PI);
+        let weave = over ? cu * 0.7 + cv * 0.3 : cv * 0.7 + cu * 0.3;
+        const slub = over ? slubV[iv % TH] : slubU[iu % TH];
+        // швы: полотнища шириной в половину тайла
+        const su = (u * 2) % 1;
+        const seamD = Math.min(su, 1 - su);
+        const seam = 1 - smoothstep(0.0, 0.025, seamD);
+        const stitch = (seamD > 0.012 && seamD < 0.02) && Math.floor(v * 160) % 2 === 0 ? 1 : 0;
+        const big = n.fbm(u, v, 3, 4);
+        const stain = smoothstep(0.6, 0.8, n.fbm(u + 0.4, v + 0.7, 5, 4));
+        const bleach = smoothstep(0.55, 0.75, n.fbm(u + 0.9, v + 0.2, 4, 3));
+        let patch = 0, pt = 1;
+        for (const q of patches) {
+          if (Math.abs(u - q.x) < q.w && Math.abs(v - q.y) < q.h) { patch = 1; pt = q.t; }
+        }
+        let t = 0.78 + 0.07 * (big - 0.5) + weave * 0.06 + slub + (rnd() - 0.5) * 0.025;
+        t *= pt;
+        let r = t * 1.0, g = t * 0.95, b = t * 0.84;
+        r *= 1 - stain * 0.16; g *= 1 - stain * 0.19; b *= 1 - stain * 0.24;
+        r += bleach * 0.04; g += bleach * 0.04; b += bleach * 0.05;
+        const k = 1 - seam * 0.14 - stitch * 0.2;
+        const i = y * S + x;
+        rgb[i * 3] = r * k; rgb[i * 3 + 1] = g * k; rgb[i * 3 + 2] = b * k;
+        hgt[i] = weave * 0.35 + slub * 1.5 + seam * 0.5 - stitch * 0.3 + patch * 0.25;
+        rough[i] = 0.92 - stain * 0.05;
+      }
+    }
+    return finishSet(rgb, hgt, rough, S, { normal: 2.5, ao: 1.5, aoRadius: 2, tileMeters: 1.6 });
+  },
+
   // Кора дуба/бука: продольные борозды
   bark() {
     const S = 256;

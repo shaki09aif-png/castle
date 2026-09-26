@@ -25,6 +25,7 @@ import { SMOKE_WIND } from './courtyard.js';
 import { createLabels } from './labels.js';
 import { createInteriors } from './interiors.js';
 import { createDoors } from './doors.js';
+import { createWalkable } from './walkable.js';
 import { setupPhone, PHONE } from './mobile.js';
 import { createWear } from './wear.js';
 import { pbrMaterial } from './textures.js';
@@ -339,6 +340,9 @@ async function init() {
   const still = new URLSearchParams(location.search).has('still'); // режим для автоматических скриншотов
   const noAdapt = new URLSearchParams(location.search).has('noadapt'); // без автоупрощения (для замеров)
   // Вход в дом: камера мягко подлетает к открытой двери и проходит внутрь
+  // ограничители камеры в подземных ходах (не дают пройти сквозь стены)
+  if (extras.places && extras.places.tunnel) cam.zones.push(extras.places.tunnel.limit);
+  cam.walkable = createWalkable(terrain, walls, cam.zones);
   let entering = null;
   const easeIO = (x) => x * x * (3 - 2 * x);
   doors.setOnEnter && doors.setOnEnter((d) => {
@@ -355,7 +359,7 @@ async function init() {
     const m4 = new THREE.Matrix4();
     const qOut = new THREE.Quaternion().setFromRotationMatrix(m4.lookAt(outP, lookIn, THREE.Object3D.DEFAULT_UP));
     const d1 = Math.max(0.6, Math.min(2.2, p0.distanceTo(outP) / 5));
-    entering = { t: 0, d1, d2: 1.4, p0, q0, outP, inP, qOut, lookIn, fly: cam.mode === 'fly' };
+    entering = { t: 0, d1, d2: 1.4, p0, q0, outP, inP, qOut, lookIn, fly: cam.mode !== 'orbit' };
     if (cam.mode === 'orbit') cam.orbit.enabled = false;
   });
   function updateEntering(dt) {
