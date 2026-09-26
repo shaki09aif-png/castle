@@ -257,7 +257,7 @@ export function horse(colorB, x, y, z, yaw, col, rnd) {
 }
 
 // Свинья: вытянутое туловище, пятачок, висячие уши, хвостик-завиток
-function pig(colorB, x, y, z, yaw, rnd) {
+export function pig(colorB, x, y, z, yaw, rnd) {
   const r = M(x, y, z, yaw);
   const c = rnd() < 0.3 ? 0x5a4038 : 0xdca494;
   const sn = rnd() < 0.3 ? 0x7a5a50 : 0xc88070;
@@ -282,7 +282,7 @@ function pig(colorB, x, y, z, yaw, rnd) {
 }
 
 // Собака (стоит или лежит): грудь шире таза, шея, морда, уши, ошейник, хвост крючком
-function dog(colorB, x, y, z, yaw, lie, rnd) {
+export function dog(colorB, x, y, z, yaw, lie, rnd) {
   const r = M(x, y, z, yaw);
   const c = [0x8a6a3a, 0x3a2a1a, 0xc8b89a][Math.floor(rnd() * 3)];
   const dk = new THREE.Color(c).multiplyScalar(0.7).getHex();

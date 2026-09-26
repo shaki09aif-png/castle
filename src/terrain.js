@@ -584,6 +584,7 @@ function makeTerrainMaterial() {
     tArrO: { value: arr.orm },
     tMacro: { value: macroNoiseTexture() },
     tileInv: { value: new THREE.Vector4(...arr.tileMeters.map((m) => 1 / m)) },
+    layerMean: { value: new THREE.Vector4(...arr.meanLum) },
   };
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -611,6 +612,7 @@ function makeTerrainMaterial() {
         uniform sampler2DArray tArrC, tArrN, tArrO;
         uniform sampler2D tMacro;
         uniform vec4 tileInv;
+        uniform vec4 layerMean;
         uniform float uAutumn;
         varying vec4 vSplat;
         varying vec3 vWPos;
@@ -682,6 +684,21 @@ function makeTerrainMaterial() {
           gOrm = o0 * b.x + o1 * b.y + o2 * b.z + o3 * b.w;
           gNrm = normalize(n0 * b.x + n1 * b.y + n2 * b.z + n3 * b.w);
           diffuseColor.rgb *= gCol;
+          // мелкая деталь вблизи: преобладающий слой ещё раз, в 3,7 раза мельче
+          // (яркость относительно размытой версии той же текстуры — только рисунок, без сдвига тона)
+          {
+            float td = 1.0 - smoothstep(4.0, 22.0, length(vViewPosition));
+            if (td > 0.0) {
+              float li = 0.0, bm = b.x, scD = tileInv.x, mL = layerMean.x;
+              if (b.y > bm) { bm = b.y; li = 1.0; scD = tileInv.y; mL = layerMean.y; }
+              if (b.z > bm) { bm = b.z; li = 2.0; scD = tileInv.z; mL = layerMean.z; }
+              if (b.w > bm) { bm = b.w; li = 3.0; scD = tileInv.w; mL = layerMean.w; }
+              vec2 duv = (abs(n.y) > 0.6 ? vWPos.xz : vec2(vWPos.x + vWPos.z, vWPos.y)) * scD * 3.73 + 0.37;
+              vec3 dc = texture(tArrC, vec3(duv, li)).rgb;
+              // относительно средней яркости слоя (посчитана заранее) — только рисунок, тон не меняется
+              diffuseColor.rgb *= clamp(1.0 + (dot(dc, vec3(0.3, 0.59, 0.11)) / max(mL, 0.02) - 1.0) * 0.45 * td, 0.65, 1.35);
+            }
+          }
         }`
       )
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = roughness * gOrm.g;')
@@ -695,7 +712,7 @@ function makeTerrainMaterial() {
       );
   };
   if (Q.rockDetail) mat.defines = { ROCK_DETAIL: '' };
-  mat.customProgramCacheKey = () => 'terrain-v3' + (Q.rockDetail ? 'd' : '');
+  mat.customProgramCacheKey = () => 'terrain-v4' + (Q.rockDetail ? 'd' : '');
   return mat;
 }
 

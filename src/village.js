@@ -497,7 +497,7 @@ export function createVillage(scene, terrain, walls) {
     stone: new GeoBuilder(walls.stoneMaterial.userData.tileMeters),
     stoneMill: new GeoBuilder(walls.stoneMaterial.userData.tileMeters),
     wood: new GeoBuilder(woodMat.userData.tileMeters),
-    daub: new GeoBuilder(pbrMaterial('daub').userData.tileMeters),
+    daub: new GeoBuilder(pbrMaterial('daub').userData.tileMeters * 0.5), // мельче трещины
     thatch: new GeoBuilder(pbrMaterial('thatch').userData.tileMeters),
     metal: new GeoBuilder(1),
     dark: new GeoBuilder(1),

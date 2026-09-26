@@ -21,7 +21,7 @@ const PRESETS = {
     waterReflection: false,
     reflectionSize: 256,
     reflectionEvery: 2,
-    textureSize: 512,
+    textureSize: 1024, // чёткая земля и вблизи (память видеокарты позволяет даже на телефонах)
     terrainDetail: 0.6,
     rockDetail: false,
     pointLights: false,

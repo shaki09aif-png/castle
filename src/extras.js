@@ -3,7 +3,7 @@
 // (один объект на материал), движение считает шейдер — FPS почти не меняется.
 import * as THREE from 'three';
 import { GeoBuilder } from './walls.js';
-import { ColorBuilder, person, createPeople, SWAY_TIME, TAIL_GLSL, addTailSway } from './people.js';
+import { ColorBuilder, person, createPeople, SWAY_TIME, TAIL_GLSL, addTailSway, addPersonShading } from './people.js';
 import { horse } from './yard.js';
 import { HALL, Frame, strawMaterial, Smoke, cart, haystack } from './courtyard.js';
 import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth, GATEHOUSE, GATE_PASSAGE, BARBICAN, RIVER } from './layout.js';
@@ -82,6 +82,7 @@ function walkerMaterial() {
         }`);
   };
   mat.customProgramCacheKey = () => 'walker';
+  addPersonShading(mat);
   return { mat, uPhase, uAmp, uHuman };
 }
 
@@ -1327,7 +1328,7 @@ export function createExtras(scene, terrain, walls, village) {
   const life2 = createLife2(scene, ctx, village, walls);
   const life3 = createLife3(scene, ctx, village, walls);
   const iron = new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 });
-  const colorMat = addTailSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+  const colorMat = addPersonShading(addTailSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })));
   // огонь, свечи, пламя костров — светятся сами (без источников света)
   const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
   // пламя костров и свечей колышется и мерцает

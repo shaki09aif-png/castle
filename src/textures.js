@@ -305,6 +305,7 @@ const GENERATORS = {
   // Тёсаная и полутёсаная кладка стен из известняка
   wallStone() {
     return makeMasonry({
+      S: 1024, // главная текстура сцены — в двойном разрешении
       seed: 7, courseMin: 34, courseMax: 72, lenMin: 0.8, lenMax: 2.3, mortar: 2.4, jitter: 3.2,
       base: [0.6, 0.56, 0.48], tint: 0.12, mortarColor: [0.6, 0.57, 0.5], tileMeters: 3.8,
     });
@@ -459,7 +460,8 @@ const GENERATORS = {
       for (let x = 0; x < S; x++) {
         const u = x / S, v = y / S;
         const a = n.fbm(u, v, 8, 5);
-        const crack = smoothstep(0.975, 0.995, 1 - Math.abs(n.fbm(u + 0.2, v + 0.5, 4, 4) * 2 - 1));
+        // трещины короткие и только местами (не сплошной сеткой)
+        const crack = smoothstep(0.975, 0.995, 1 - Math.abs(n.fbm(u + 0.2, v + 0.5, 4, 4) * 2 - 1)) * smoothstep(0.52, 0.66, n.fbm(u + 0.9, v + 0.3, 6, 2));
         const dirt = smoothstep(0.45, 0.85, n.fbm(u * 0.6 + 0.4, v * 0.25, 4, 3));
         const patch = smoothstep(0.64, 0.8, n.fbm(u + 0.7, v + 0.1, 4, 3)); // обвалившаяся побелка — видна глина
         let t = 0.62 + 0.08 * (a - 0.5) + (rnd() - 0.5) * 0.03;
@@ -468,7 +470,7 @@ const GENERATORS = {
         const k = 1 - dirt * 0.22 - crack * 0.18;
         const i = y * S + x;
         rgb[i * 3] = r * k; rgb[i * 3 + 1] = g * k; rgb[i * 3 + 2] = b * k;
-        hgt[i] = a * 0.4 - crack * 0.6 - patch * 0.25;
+        hgt[i] = a * 0.4 - crack * 0.3 - patch * 0.25;
       }
     }
     return finishSet(rgb, hgt, 0.95, S, { normal: 3, ao: 2, aoRadius: 3, tileMeters: 2.5 });
@@ -657,6 +659,55 @@ export function materialTextures(slot) {
   });
 }
 
+// Средняя яркость текстуры (для слоя мелкой детали: он должен только добавлять
+// рисунок, не меняя общий тон)
+const MEAN = new Map();
+function meanLum(tex) {
+  if (!tex || !tex.image) return 0.5;
+  if (MEAN.has(tex.uuid)) return MEAN.get(tex.uuid);
+  let m = 0.5;
+  try {
+    const c = makeCanvas(8, 8), x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(tex.image, 0, 0, 8, 8);
+    const d = x.getImageData(0, 0, 8, 8).data;
+    let sum = 0;
+    for (let i = 0; i < 64; i++) sum += (d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11) / 255;
+    m = sum / 64;
+  } catch (e) { /* нет доступа к пикселям */ }
+  MEAN.set(tex.uuid, m);
+  return m;
+}
+
+// Слой мелкой детали вблизи: та же текстура в ~3,7 раза мельче накладывается
+// поверх (яркость и рельеф карты нормалей). Вблизи поверхность перестаёт быть
+// «размытой», издали слой исчезает — без ряби и без лишней нагрузки вдали.
+// Можно вызывать повторно (после других onBeforeCompile) — слой добавится один раз.
+export function addDetail(mat, strength = 1) {
+  const prev = mat.onBeforeCompile;
+  const mean = { value: meanLum(mat.map) };
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    if (!mat.map || sh.fragmentShader.includes('gDetailK')) return;
+    sh.uniforms.uDetailMean = mean;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uDetailMean;\nfloat gDetailK = 0.0;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        #ifdef USE_MAP
+        gDetailK = (1.0 - smoothstep(4.0, 26.0, length(vViewPosition))) * ${strength.toFixed(2)};
+        if (gDetailK > 0.0) {
+          vec3 dA = texture2D(map, vMapUv * 3.73 + vec2(0.37, 0.61)).rgb;
+          float dl = dot(dA, vec3(0.3, 0.59, 0.11));
+          diffuseColor.rgb *= clamp(1.0 + (dl - uDetailMean) * 0.85 * gDetailK, 0.6, 1.4);
+        }
+        #endif`)
+      .replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', `vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+        if (gDetailK > 0.0) mapN.xy += (texture2D(normalMap, vNormalMapUv * 3.73 + vec2(0.37, 0.61)).xy * 2.0 - 1.0) * 0.6 * gDetailK;`));
+  };
+  const key = mat.customProgramCacheKey ? mat.customProgramCacheKey.bind(mat) : () => '';
+  mat.customProgramCacheKey = () => 'det-' + key();
+  return mat;
+}
+
 // PBR-материал с текстурами слота. UV геометрии должны быть в метрах / tileMeters.
 export function pbrMaterial(slot, opts = {}) {
   const t = materialTextures(slot);
@@ -671,6 +722,7 @@ export function pbrMaterial(slot, opts = {}) {
     ...opts,
   });
   mat.userData.tileMeters = t.tileMeters;
+  addDetail(mat);
   return mat;
 }
 
@@ -700,6 +752,18 @@ export function textureArrays(slots, size) {
     out[kind] = tex;
   }
   out.tileMeters = slots.map((s) => getSet(s).tileMeters);
+  // средняя яркость каждого слоя (в линейном цвете) — для слоя мелкой детали
+  {
+    const d = out.color.image.data, px = size * size;
+    out.meanLum = slots.map((s, layer) => {
+      let sum = 0, cnt = 0;
+      for (let i = layer * px * 4; i < (layer + 1) * px * 4; i += 64) {
+        const r = (d[i] / 255) ** 2.2, g = (d[i + 1] / 255) ** 2.2, b = (d[i + 2] / 255) ** 2.2;
+        sum += r * 0.3 + g * 0.59 + b * 0.11; cnt++;
+      }
+      return sum / cnt;
+    });
+  }
   return out;
 }
 
@@ -748,6 +812,9 @@ function makeMasonry({
   jitter = 3.5, base = [0.56, 0.52, 0.45], tint = 0.12, mortarColor = [0.62, 0.59, 0.52], rubble = 0,
   tileMeters = 3,
 }) {
+  // размеры в пикселях заданы для 512 — при большем разрешении масштабируются
+  const PK = S / 512;
+  courseMin *= PK; courseMax *= PK; mortar *= PK; jitter *= PK;
   const W = S, H = S;
   const rnd = mulberry32(seed);
   const n = createTileNoise(seed + 100);
@@ -784,7 +851,7 @@ function makeMasonry({
       xAcc += len;
     }
     for (const [sx, len] of stones) {
-      const parts = rubble > 0 || rnd() > 0.85 ? splitStone(sx, cy, len, ch, rnd, rubble) : [[sx, cy, len, ch]];
+      const parts = rubble > 0 || rnd() > 0.85 ? splitStone(sx, cy, len, ch, rnd, rubble, PK) : [[sx, cy, len, ch]];
       for (const [px, py, pw, ph] of parts) {
         const col = stoneColor(base, tint, rnd);
         const bulge = 0.6 + rnd() * 0.5;
@@ -807,7 +874,7 @@ function makeMasonry({
             d += (n.noise(u + seedOff, v, 64) - 0.5) * jitter * 2 + (n.noise(u, v + seedOff, 16) - 0.5) * jitter * (1 + rubble * 2);
             if (d < mortar) continue;
             const i = y * W + x;
-            const edge = smoothstep(mortar, mortar + 7, d);
+            const edge = smoothstep(mortar, mortar + 7 * PK, d);
             const surf = n.fbm(u + seedOff * 0.1, v, 32, 4);
             const fine = n.noise(u * 4 + seedOff, v * 4, 64);
             // сколы на гранях
@@ -836,7 +903,7 @@ function makeMasonry({
       rgb[i * 3 + 2] += (0.42 - rgb[i * 3 + 2]) * lichen * 0.3;
     }
   }
-  return finishSet(rgb, hgt, rough, S, { normal: 2.6, ao: 2.2, aoRadius: 6, tileMeters });
+  return finishSet(rgb, hgt, rough, S, { normal: 2.6 * PK, ao: 2.2, aoRadius: Math.round(6 * PK), tileMeters });
 }
 
 function stoneColor(base, tint, rnd) {
@@ -845,14 +912,14 @@ function stoneColor(base, tint, rnd) {
   return [base[0] * l + warm, base[1] * l + warm * 0.5, base[2] * l - warm * 0.4];
 }
 
-function splitStone(x, y, w, h, rnd, rubble) {
+function splitStone(x, y, w, h, rnd, rubble, PK = 1) {
   if (rubble > 0) {
     const out = [];
     const nx = w > h * 1.6 ? 2 : 1;
     let cx = x;
     for (let i = 0; i < nx; i++) {
       const pw = i === nx - 1 ? x + w - cx : (w / nx) * (0.7 + rnd() * 0.6);
-      if (rnd() < 0.45 && h > 20) {
+      if (rnd() < 0.45 && h > 20 * PK) {
         const s = h * (0.35 + rnd() * 0.3);
         out.push([cx, y, pw, s], [cx, y + s, pw, h - s]);
       } else out.push([cx, y, pw, h]);

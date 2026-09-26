@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { addWeathering } from './materials.js';
 import { WALL, insideTower, wallTrace, insideBuilding } from './layout.js';
-import { pbrMaterial, macroNoiseTexture } from './textures.js';
+import { pbrMaterial, macroNoiseTexture, addDetail } from './textures.js';
 import { createNoise2D, mulberry32 } from './noise.js';
 
 const V3 = THREE.Vector3;
@@ -556,7 +556,7 @@ function wallMaterial() {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 1.0, gMoss);');
   };
   mat.customProgramCacheKey = () => 'wall-stone';
-  return mat;
+  return addDetail(mat, 1.1);
 }
 
 export { GeoBuilder };

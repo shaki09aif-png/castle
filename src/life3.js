@@ -5,7 +5,7 @@
 // точках экскурсии; свет в них «запечён» в цвета вершин — ламп нет, FPS не падает.
 import * as THREE from 'three';
 import { M, GEO, makeWalker, walkerMaterial, WALKERS, fire, cow, findFlat } from './extras.js';
-import { ColorBuilder, person } from './people.js';
+import { ColorBuilder, person, addPersonShading } from './people.js';
 import { chicken } from './details.js';
 import { horse } from './yard.js';
 import { Smoke, cart, Frame } from './courtyard.js';
@@ -338,7 +338,7 @@ export function createLife3(scene, ctx, village, walls) {
     const yaw = Math.atan2(outward.x, outward.z);
     const B = new ColorBuilder();
     const res = person(B, { x: 0, y: 0, z: 0, yaw: 0, role: 'noble', seed: 631, item: 'falcon' });
-    const man = new THREE.Mesh(B.build(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+    const man = new THREE.Mesh(B.build(), addPersonShading(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })));
     man.position.set(p.x, fy, p.z);
     man.rotation.y = yaw;
     man.castShadow = true;

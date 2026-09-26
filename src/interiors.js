@@ -6,9 +6,10 @@
 // шейдере — настоящих источников света нет, поэтому это почти бесплатно.
 import * as THREE from 'three';
 import { GeoBuilder } from './walls.js';
-import { ColorBuilder, person } from './people.js';
+import { ColorBuilder, person, addPersonShading } from './people.js';
 import { INTERIORS } from './courtyard.js';
 import { chicken } from './details.js';
+import { pig, dog } from './yard.js';
 import { mulberry32 } from './noise.js';
 import { pbrMaterial } from './textures.js';
 
@@ -24,6 +25,15 @@ const G = {
   cone: new THREE.ConeGeometry(1, 1, 8),
   flame: new THREE.ConeGeometry(1, 1, 7),
   torus: new THREE.TorusGeometry(1, 0.35, 5, 10),
+  dodec: new THREE.DodecahedronGeometry(0.1, 0),
+  // плащ на колышке: полотно со складками, свисающее от точки подвеса
+  hangCloth: (() => {
+    const g = new THREE.CylinderGeometry(0.08, 0.2, 0.8, 12, 4, true, -Math.PI * 0.45, Math.PI * 0.9);
+    const p = g.getAttribute('position');
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), k = (0.4 - y) / 0.8; const a = Math.atan2(x, z); const f = 1 + 0.12 * k * Math.sin(a * 7); p.setXYZ(i, x * f, y, z * f * 0.45); }
+    g.computeVertexNormals();
+    return g.translate(0, -0.4, 0);
+  })(),
   barrel: (() => {
     const pts = [];
     for (let k = 0; k <= 8; k++) { const t = k / 8; pts.push(new THREE.Vector2(0.29 + 0.07 * Math.sin(t * Math.PI), t * 0.95)); }
@@ -48,7 +58,7 @@ function kit(it, tiles) {
   const qB = new THREE.Quaternion().setFromRotationMatrix(basis);
   const M = (lx, y, lz, sx = 1, sy = 1, sz = 1, yaw = 0, rx = 0, rz = 0) =>
     new THREE.Matrix4().compose(f.p(lx, y, lz), qB.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, yaw, rz, 'YXZ'))), new V3(sx, sy, sz));
-  const lights = [], day = [];
+  const lights = [], day = [], fires = [];
   // брус между двумя точками (локальные [lx, y, lz]); возвращает базис для цветных версий
   const beamBasis = (a, b) => {
     const pa = f.p(a[0], a[1], a[2]), pb = f.p(b[0], b[1], b[2]);
@@ -61,7 +71,7 @@ function kit(it, tiles) {
     return { c: pa.lerp(pb, 0.5), d, s2, n3, len };
   };
   const K = {
-    f, stone, wood, daub, thatch, dirt, col, glow, win, M, lights, day,
+    f, stone, wood, daub, thatch, dirt, col, glow, win, M, lights, day, fires,
     // цветная коробка: центр, полуразмеры
     cb: (lx, y, lz, hx, hy, hz, c, yaw = 0, rx = 0, rz = 0) => col.add(G.box, M(lx, y, lz, hx * 2, hy * 2, hz * 2, yaw, rx, rz), c),
     // деревянная коробка (текстура дерева)
@@ -111,10 +121,13 @@ function kit(it, tiles) {
     // цветная плоскость-сетка (пол)
     plane: (lx, y, lz, hx, hz, c) => col.add(new THREE.PlaneGeometry(1, 1, Math.ceil(hx / 0.25), Math.ceil(hz / 0.25)), M(lx, y, lz, hx * 2, hz * 2, 1, 0, -Math.PI / 2), c),
     fire: (lx, y, lz, s, rnd) => {
-      for (let k = 0; k < 7; k++) {
-        const a = rnd() * 6.28, r = rnd() * 0.22 * s, h = (0.3 + rnd() * 0.45) * s, w = (0.05 + rnd() * 0.05) * s;
-        glow.add(G.flame, M(lx + Math.cos(a) * r, y + h / 2, lz + Math.sin(a) * r, w, h, w, rnd() * 3), k < 2 ? 0xffe38a : k < 5 ? 0xffa43a : 0xff6a1a);
+      // языки пламени: снаружи тёмно-оранжевые и широкие, внутри жёлтые и узкие
+      for (let k = 0; k < 13; k++) {
+        const inner = k >= 8;
+        const a = rnd() * 6.28, r = rnd() * (inner ? 0.09 : 0.22) * s, h = (inner ? 0.35 + rnd() * 0.3 : 0.25 + rnd() * 0.4) * s, w = (inner ? 0.025 + rnd() * 0.02 : 0.04 + rnd() * 0.05) * s;
+        glow.add(G.flame, M(lx + Math.cos(a) * r, y + h / 2, lz + Math.sin(a) * r, w, h, w * 0.7, rnd() * 3, (rnd() - 0.5) * 0.3, (rnd() - 0.5) * 0.3), inner ? (k % 2 ? 0xfff0b0 : 0xffd060) : k < 4 ? 0xff8a2a : 0xe0501a);
       }
+      fires.push({ p: f.p(lx, y + 0.3 * s, lz), s });
       glow.add(G.cylLo, M(lx, y + 0.02, lz, 0.3 * s, 0.03, 0.3 * s), 0xb03a14);
       lights.push({ p: f.p(lx, y + 0.45 * s, lz), k: 2.0 * Math.min(1.2, s), r: 2.3 * s + 0.7 });
     },
@@ -380,7 +393,7 @@ function house(K, it, rnd) {
   for (let k = 0; k < 34; k++) {
     const lx = (rnd() * 2 - 1) * (hl - 0.2), lz = (rnd() * 2 - 1) * (hw - 0.2);
     if (Math.hypot(lx - hx, lz - hz) < 0.85) continue;
-    K.cb(lx, y + 0.018, lz, 0.08 + rnd() * 0.1, 0.004, 0.006, pick([0x8a7a48, 0x7a6a40, 0x6a6038, 0x9a8656]), rnd() * 6.28);
+    K.cb(lx, y + 0.016, lz, 0.05 + rnd() * 0.07, 0.003, 0.004, pick([0x5e5434, 0x54492e, 0x4a4230, 0x665a3a]), rnd() * 6.28);
   }
 
   // ---- фахверк изнутри: обвязки, стойки, ригели, раскосы
@@ -450,10 +463,16 @@ function house(K, it, rnd) {
   for (const tx of ties) for (const lz of [-hw + 0.7, hw - 0.9]) {
     const kind = Math.floor(rnd() * 4), top = tieY - 0.09;
     const hang = (len) => K.rod([tx, top, lz], [tx, top - len, lz], 0.006, 0x8a7a58);
-    if (kind === 0) for (let j = 0; j < 3; j++) { // пучки трав
+    if (kind === 0) for (let j = 0; j < 3; j++) { // пучки сушёных трав: стебли вниз головками
       const dx = (j - 1) * 0.18;
-      K.rod([tx + dx, top, lz], [tx + dx, top - 0.2, lz], 0.005, 0x8a7a58);
-      K.col.add(G.cone, K.M(tx + dx, top - 0.38, lz, 0.07, 0.3, 0.07, rnd() * 3, Math.PI), pick([0x5a7a3a, 0x6a6a2e, 0x7a6a3a, 0x4a6a3a]));
+      K.rod([tx + dx, top, lz], [tx + dx, top - 0.14, lz], 0.004, 0x8a7a58);
+      const hc = pick([0x5a6a34, 0x6a6a2e, 0x7a6a3a, 0x4a5a30, 0x6a4a5a]);
+      for (let q = 0; q < 5; q++) {
+        const a = rnd() * 6.28, r = rnd() * 0.05, L = 0.22 + rnd() * 0.12;
+        K.rod([tx + dx, top - 0.14, lz], [tx + dx + Math.cos(a) * r, top - 0.14 - L, lz + Math.sin(a) * r], 0.004, 0x7a7040);
+        K.col.add(G.cone, K.M(tx + dx + Math.cos(a) * r, top - 0.14 - L, lz + Math.sin(a) * r, 0.018, 0.07, 0.018, rnd() * 3, Math.PI), new THREE.Color(hc).multiplyScalar(0.85 + rnd() * 0.3).getHex());
+      }
+      K.cb(tx + dx, top - 0.16, lz, 0.018, 0.012, 0.018, 0x8a6a3a);
     } else if (kind === 1) { // связка лука
       hang(0.25);
       for (let j = 0; j < 7; j++) K.col.add(G.sphLo, K.M(tx + (j % 2 ? 0.035 : -0.035), top - 0.3 - j * 0.07, lz, 0.045, 0.05, 0.045), pick([0xc89a4a, 0xb8843a, 0xd8b070]));
@@ -471,7 +490,7 @@ function house(K, it, rnd) {
   K.sb(hx, y + 0.06, hz, 0.62, 0.06, 0.55);
   for (let k = 0; k < 12; k++) {
     const a = (k / 12) * 6.28;
-    K.stone.addGeometry(new THREE.DodecahedronGeometry(0.1, 0), K.M(hx + Math.cos(a) * 0.55, y + 0.15, hz + Math.sin(a) * 0.47, 1.2, 0.8, 1, a));
+    K.col.add(G.dodec, K.M(hx + Math.cos(a) * 0.55, y + 0.14, hz + Math.sin(a) * 0.47, 1.25, 0.7, 1, a), pick([0x5a524a, 0x4a4440, 0x6a6058, 0x3e3834]));
   }
   K.col.add(G.cyl, K.M(hx, y + 0.125, hz, 0.42, 0.01, 0.36), 0x5a5550);
   for (let k = 0; k < 9; k++) K.glow.add(G.sphLo, K.M(hx + (rnd() - 0.5) * 0.5, y + 0.14, hz + (rnd() - 0.5) * 0.4, 0.05, 0.02, 0.05), pick([0xff5a14, 0xc03a10, 0xff8a2a]));
@@ -505,7 +524,7 @@ function house(K, it, rnd) {
   K.col.add(G.blanket, K.M(bx, y + 0.47, bz + 0.25, 0.92, 0.05, 1.35), blC);
   K.cb(bx, y + 0.5, bz - 0.44, 0.465, 0.02, 0.08, new THREE.Color(blC).multiplyScalar(1.25).getHex());
   K.col.add(G.sack, K.M(bx, y + 0.5, -hw + 0.38, 0.32, 0.075, 0.17), 0xe8e0d0);
-  K.col.add(G.sph, K.M(X(hl - 1.45), y + 0.02, bz + 0.1, 0.3, 0.025, 0.45), 0xb8ac90); // овчина
+  K.col.add(G.blanket, K.M(X(hl - 1.45), y + 0.015, bz + 0.1, 0.6, 0.05, 0.85, 0.3), 0x9a8c74); // овчина
   // сундук в изножье
   const cx = X(hl - 0.55), cz = bz + 1.35;
   K.wb(cx, y + 0.22, cz, 0.4, 0.22, 0.24);
@@ -585,22 +604,59 @@ function house(K, it, rnd) {
   const peg = X(-1.2);
   if (Math.abs(peg) < hl - 0.3) {
     K.rod([peg, y + 1.65, -hw], [peg, y + 1.66, -hw + 0.12], 0.015, WOODC);
-    K.col.add(G.box, K.M(peg, y + 1.3, -hw + 0.08, 0.34, 0.7, 0.04, 0, -0.05), pick([0x5a4a3a, 0x3a3a2a, 0x6a2a24, 0x4a4a5a]));
+    K.col.add(G.hangCloth, K.M(peg, y + 1.66, -hw + 0.1), pick([0x5a4a3a, 0x3a3a2a, 0x6a2a24, 0x4a4a5a]));
   }
   const ex = s * (hl - 0.07);
   const tool = (lz, len, head) => {
     K.rod([s * (hl - 0.38), y, lz], [ex, y + len, lz + 0.08], 0.018, 0x7a5a3a);
     head(lz);
   };
-  tool(-0.7, 1.7, (lz) => { for (let j = -1; j <= 1; j++) K.rod([ex, y + 1.68, lz + 0.08 + j * 0.05], [ex + s * 0.02, y + 1.95, lz + 0.08 + j * 0.06], 0.008, 0x6a6a68); });
-  tool(-0.2, 1.5, (lz) => K.col.add(G.cone, K.M(s * (hl - 0.36), y + 0.14, lz, 0.1, 0.3, 0.08), 0xb8a060)); // метла
-  tool(0.35, 1.65, (lz) => K.cb(ex - s * 0.02, y + 1.66, lz + 0.08, 0.02, 0.02, 0.2, 0x7a5a3a));
+  const tz3 = hasLoom ? [-0.7, -0.2, 0.35] : [0.3, 0.65, 1.0];
+  tool(tz3[0], 1.7, (lz) => { for (let j = -1; j <= 1; j++) K.rod([ex, y + 1.68, lz + 0.08 + j * 0.05], [ex + s * 0.02, y + 1.95, lz + 0.08 + j * 0.06], 0.008, 0x6a6a68); });
+  tool(tz3[1], 1.5, (lz) => K.col.add(G.cone, K.M(s * (hl - 0.36), y + 0.14, lz, 0.1, 0.3, 0.08), 0xb8a060)); // метла
+  tool(tz3[2], 1.65, (lz) => K.cb(ex - s * 0.02, y + 1.66, lz + 0.08, 0.02, 0.02, 0.2, 0x7a5a3a));
   // бочка с водой и ведро у двери
   let wx = doorX + s * 0.95;
   if (Math.abs(wx) > hl - 0.35) wx = doorX - s * 0.95;
   K.barrel(wx, y, hw - 0.38, 0.85);
   K.col.add(G.cyl, K.M(wx, y + 0.78, hw - 0.38, 0.25, 0.005, 0.25), 0x3a4a4a);
   K.wood.addGeometry(G.barrel, K.M(wx + s * 0.1, y, hw - 0.85, 0.45, 0.4, 0.45));
+
+  // ---- хлев за плетнём у торца (как в настоящих крестьянских домах) или кладовка
+  const WATTLE = 0x6a5236;
+  const hurdle = (a, b, h = 0.9) => {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(2, Math.round(L / 0.45));
+    for (let k = 0; k <= n; k++) { const t = k / n, x = a[0] + (b[0] - a[0]) * t, z = a[1] + (b[1] - a[1]) * t; K.rod([x, y, z], [x, y + h + 0.06, z], 0.022, 0x5a4028); }
+    const nx = -(b[1] - a[1]) / L, nz = (b[0] - a[0]) / L;
+    for (let j = 0; j < 7; j++) {
+      const yy = y + 0.12 + j * (h - 0.12) / 6, o = (j % 2 ? 1 : -1) * 0.018;
+      K.rod([a[0] + nx * o, yy, a[1] + nz * o], [b[0] + nx * o, yy, b[1] + nz * o], 0.016, new THREE.Color(WATTLE).multiplyScalar(0.85 + rnd() * 0.3).getHex());
+    }
+  };
+  if (!hasLoom) {
+    const x0 = s * (hl - 1.5), x1 = s * (hl - 0.03), z1 = -0.15;
+    hurdle([x0, -hw + 0.02], [x0, z1]);
+    hurdle([x0, z1], [x1, z1]);
+    K.cb((x0 + x1) / 2, y + 0.02, (-hw + z1) / 2, Math.abs(x1 - x0) / 2 - 0.02, 0.012, (z1 + hw) / 2 - 0.02, 0x7a6a3a); // слой соломы
+    for (let k = 0; k < 70; k++) { // соломинки поверх
+      const lx = x0 + (x1 - x0) * rnd(), lz = -hw + (z1 + hw) * rnd();
+      K.cb(lx, y + 0.036 + rnd() * 0.02, lz, 0.06 + rnd() * 0.08, 0.004, 0.005, pick([0xa89048, 0x96803e, 0xb89e58, 0x80703a]), rnd() * 6.28, 0, (rnd() - 0.5) * 0.4);
+    }
+    const pc = K.f.p((x0 + x1) / 2, y, (-hw + z1) / 2);
+    pig(K.col, pc.x, pc.y, pc.z, Math.atan2(K.f.N.x, K.f.N.z) + (rnd() - 0.5) * 1.2 + Math.PI / 2, rnd);
+    K.wb(s * (hl - 0.35), y + 0.1, -hw + 0.3, 0.25, 0.1, 0.18); // корыто
+  } else {
+    const ux = s * (hl - 0.4), zMax = Math.min(1.0, hw - 1.3);
+    for (let k = 0; k < 3; k++) K.sack(ux - s * (k % 2) * 0.35, y, 0.15 + k * 0.32, 1, rnd);
+    K.col.add(G.bowl, K.M(ux - s * 0.7, y + 0.28, Math.min(zMax, 0.8), 0.24, 0.28, 0.24, 0, Math.PI), 0x9a7a4a); // корзина
+    K.col.add(G.cyl, K.M(ux - s * 0.8, y + 0.07, 0.25, 0.26, 0.07, 0.26), 0x7a746c); // ручной жёрнов
+    K.col.add(G.cyl, K.M(ux - s * 0.8, y + 0.18, 0.25, 0.25, 0.05, 0.25), 0x8a847a);
+    K.rod([ux - s * 0.95, y + 0.2, 0.25], [ux - s * 0.95, y + 0.36, 0.25], 0.015, WOODC);
+  }
+  if (seed % 2) { // собака дремлет у огня
+    const dp = K.f.p(X(1.3), y, -0.95);
+    dog(K.col, dp.x, dp.y, dp.z, Math.atan2(K.f.N.x, K.f.N.z) + Math.PI / 2 * s + 0.4, true, rnd);
+  }
 
   // ---- куры у двери
   for (let k = 0; k < 1 + (seed % 2); k++) K.hen(doorX - s * (0.4 + k * 0.5), y, hw - 1.55 - k * 0.3, rnd() * 6.28, rnd);
@@ -681,16 +737,24 @@ function litMaterial(m) {
 
 export function createInteriors(scene, walls) {
   const rnd = mulberry32(7070);
-  const colMat = litMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+  const colMat = litMaterial(addPersonShading(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })));
   const texMat = (slot, color) => litMaterial(pbrMaterial(slot, color !== undefined ? { color } : {}));
   const stoneMat = texMat('wallStone'), woodMat = texMat('wood', 0x9a8a78);
-  const daubMat = texMat('daub', 0xd8ccb4), thatchMat = texMat('thatch', 0x9a8a6a), dirtMat = texMat('dirt', 0x8a7a66);
+  const daubMat = texMat('daub', 0xe4d8c2), thatchMat = texMat('thatch', 0x9a8a6a), dirtMat = texMat('dirt', 0x8a7a66);
   const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
+  const haloMat = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,200,120,1)'); gr.addColorStop(0.35, 'rgba(255,140,50,0.45)'); gr.addColorStop(1, 'rgba(255,90,20,0)');
+    x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.SpriteMaterial({ map: t, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.5, fog: true });
+  })();
   // «небо» в окнах: днём светлое, ночью тёмно-синее
   const winMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, color: 0xc8d4e0 });
   const tiles = {
     stone: walls.stoneMaterial.userData.tileMeters, wood: walls.woodMaterial.userData.tileMeters,
-    daub: daubMat.userData.tileMeters, thatch: thatchMat.userData.tileMeters, dirt: dirtMat.userData.tileMeters,
+    daub: daubMat.userData.tileMeters * 0.5, thatch: thatchMat.userData.tileMeters, dirt: dirtMat.userData.tileMeters,
   };
   const groups = [];
   for (const it of INTERIORS) {
@@ -708,12 +772,21 @@ export function createInteriors(scene, walls) {
       const geo = b.build();
       if (lit) bake(geo, K, it);
       const m = new THREE.Mesh(geo, mat);
-      m.castShadow = cast; m.receiveShadow = true;
+      m.castShadow = false; m.receiveShadow = true; void cast; // внутри и так тень от крыши — отбрасывать тени незачем
       g.add(m);
     }
+    // ореол над огнём: мягкое тёплое свечение, мерцает
+    const halos = K.fires.map((q) => {
+      const sp = new THREE.Sprite(haloMat);
+      sp.position.copy(q.p);
+      sp.userData.base = 1.5 * q.s + 0.4;
+      sp.userData.ph = Math.random() * 10;
+      g.add(sp);
+      return sp;
+    });
     g.visible = false;
     scene.add(g);
-    groups.push({ g, c: it.f.p(0, it.floorY, 0), r: Math.max(it.L, it.W) / 2 });
+    groups.push({ g, halos, c: it.f.p(0, it.floorY, 0), r: Math.max(it.L, it.W) / 2 });
   }
   const dayCol = new THREE.Color(0xc8d4e0), nightCol = new THREE.Color(0x0c1426);
   return {
@@ -729,7 +802,8 @@ export function createInteriors(scene, walls) {
       const p = camera.position;
       for (const q of groups) {
         const d = Math.hypot(p.x - q.c.x, p.z - q.c.z) - q.r;
-        q.g.visible = d < 24 && p.y - q.c.y < 14;
+        q.g.visible = d < 15 && p.y - q.c.y < 10; // внутрь видно только вблизи (через дверь и окна)
+        if (q.g.visible) for (const h of q.halos) { const k = h.userData.base * (0.9 + 0.07 * Math.sin(t * 9 + h.userData.ph) + 0.04 * Math.sin(t * 23 + h.userData.ph)); h.scale.set(k, k * 1.2, 1); }
       }
     },
   };

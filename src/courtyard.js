@@ -11,7 +11,7 @@ import {
   makeTowerContext, finishTowerContext, door, windowWithShutters, arrowSlit, pyramidRoof,
   rowUV, ROW_H, outline, band, ring,
 } from './towers.js';
-import { pbrMaterial, makeCanvas, toTexture, assetSource } from './textures.js';
+import { pbrMaterial, makeCanvas, toTexture, assetSource, addDetail } from './textures.js';
 import { mulberry32, createNoise2D } from './noise.js';
 import { Q } from './quality.js';
 
@@ -1198,6 +1198,7 @@ function buildPaving(scene, terrain, paths, plazas) {
       #endif`
     );
   };
+  addDetail(mat);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.renderOrder = 1;
