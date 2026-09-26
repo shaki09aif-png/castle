@@ -25,6 +25,7 @@ import { SMOKE_WIND } from './courtyard.js';
 import { createLabels } from './labels.js';
 import { createInteriors } from './interiors.js';
 import { createDoors } from './doors.js';
+import { setupPhone } from './mobile.js';
 import { pbrMaterial } from './textures.js';
 import { addWeathering } from './materials.js';
 import { SWAY_TIME } from './people.js';
@@ -199,6 +200,7 @@ async function init() {
     };
   }
   const tour = createTour(camera, cam, terrain, village, extras);
+  setupPhone({ cam, camera, doors, dom: renderer.domElement });
   const labels = createLabels(camera, { village, extras, terrain });
   // вода на слабом качестве отражает небо (своя маленькая карта окружения)
   if (!Q.envLight && lighting.envTex) {

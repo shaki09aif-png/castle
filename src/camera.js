@@ -9,6 +9,8 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { HILL_TOP } from './layout.js';
 
 const MIN_SPEED = 1, MAX_SPEED = 250;
+// версия для телефона: ?phone в адресе (или страница phone.html)
+export const PHONE = typeof location !== 'undefined' && new URLSearchParams(location.search).has('phone');
 
 export function createCameraControls(camera, dom, terrain) {
   // ---------- орбитальный режим ----------
@@ -29,6 +31,15 @@ export function createCameraControls(camera, dom, terrain) {
   let speed = 12; // м/с, меняется колёсиком
   const keys = new Set();
   const vel = new THREE.Vector3();
+  // сенсорное управление полётом (телефон): джойстик, подъём/спуск, взгляд пальцем
+  const touch = { x: 0, y: 0, lift: 0, hold: 0 };
+  const eul = new THREE.Euler(0, 0, 0, 'YXZ');
+  function look(dx, dy) {
+    eul.setFromQuaternion(camera.quaternion);
+    eul.y -= dx * 0.0042;
+    eul.x = Math.max(-1.5, Math.min(1.5, eul.x - dy * 0.0042));
+    camera.quaternion.setFromEuler(eul);
+  }
 
   // ---------- подсказка ----------
   const help = document.getElementById('help');
@@ -45,7 +56,8 @@ export function createCameraControls(camera, dom, terrain) {
     // флаг isLocked у PointerLockControls меняется уже после события 'lock',
     // поэтому проверяем состояние браузера напрямую
     const locked = document.pointerLockElement === dom;
-    if (clickEl) clickEl.style.display = mode === 'fly' && !locked ? 'block' : 'none';
+    if (clickEl) clickEl.style.display = mode === 'fly' && !locked && !PHONE ? 'block' : 'none';
+    document.body.classList.toggle('fly-mode', mode === 'fly');
   }
 
   function setMode(m) {
@@ -54,7 +66,7 @@ export function createCameraControls(camera, dom, terrain) {
     if (mode === 'fly') {
       orbit.enabled = false;
       vel.set(0, 0, 0);
-      fly.lock();
+      if (!PHONE) fly.lock();
     } else {
       if (fly.isLocked) fly.unlock();
       // точка вращения — впереди по направлению взгляда
@@ -69,7 +81,7 @@ export function createCameraControls(camera, dom, terrain) {
 
   document.addEventListener('pointerlockchange', refreshUI);
   // клик по сцене в режиме полёта снова захватывает мышь
-  dom.addEventListener('click', () => { if (mode === 'fly' && document.pointerLockElement !== dom) fly.lock(); });
+  dom.addEventListener('click', () => { if (!PHONE && mode === 'fly' && document.pointerLockElement !== dom) fly.lock(); });
   if (clickEl) clickEl.addEventListener('click', () => fly.lock());
 
   // Ctrl + W и подобные сочетания браузер не даёт перехватить; для спуска
@@ -133,7 +145,16 @@ export function createCameraControls(camera, dom, terrain) {
     if (keys.has('Space')) want.y += 1; // E теперь открывает двери
     if (keys.has('KeyC') || keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyQ')) want.y -= 1;
     if (want.lengthSq() > 0) want.normalize();
-    const boost = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4 : 1;
+    let boost = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4 : 1;
+    // джойстик: сила — насколько отклонён; если долго держать до упора, полёт ускоряется
+    const tm = Math.hypot(touch.x, touch.y);
+    if (tm > 0.05 || touch.lift) {
+      want.addScaledVector(fwd, touch.y).addScaledVector(right, touch.x);
+      want.y += touch.lift;
+      if (want.length() > 1) want.normalize();
+      touch.hold = tm > 0.92 ? touch.hold + dt : 0;
+      boost = 1 + Math.min(3, Math.max(0, touch.hold - 1) * 1.5);
+    } else touch.hold = 0;
     want.multiplyScalar(speed * boost);
     // плавный разгон и торможение
     vel.lerp(want, 1 - Math.exp(-dt * 8));
@@ -149,7 +170,7 @@ export function createCameraControls(camera, dom, terrain) {
   });
   refreshUI();
   const api = {
-    orbit, fly, update,
+    orbit, fly, update, touch, look,
     get mode() { return mode; },
     setMode,
     limit: null,
