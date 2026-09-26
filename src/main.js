@@ -219,6 +219,7 @@ async function init() {
     if ((o.name === 'river' || o.name === 'moat') && o.material.uniforms && o.material.uniforms.sunDirection) waters.push(o.material.uniforms);
   });
   lighting.onChange((night, st) => {
+    interiors.setNight(night);
     torches.setNight(night);
     extras.setNight(night);
     FOLIAGE_SUN.copy(SUN_DIR).multiplyScalar(1 - 0.95 * night); // ночью листва не «просвечивает»
@@ -280,8 +281,37 @@ async function init() {
   ];
   let stepI = 0, slow = 0, cooldown = 3;
   const simplified = [];
+  // Обратное направление: если кадров с запасом (телефон, хорошая видеокарта),
+  // картинка понемногу улучшается — выше разрешение (чётче) и дальше подробные
+  // деревья. Если потом FPS проседает, последнее улучшение отменяется.
+  const boosts = [];
+  {
+    const cap = Math.min(window.devicePixelRatio || 1, 2);
+    const setRatio = (r) => { renderer.setPixelRatio(r); resize(); };
+    let prev = maxRatio;
+    for (let r = maxRatio + 0.25; r <= cap + 0.001; r += 0.25) {
+      const from = prev, to = r;
+      boosts.push({ up: () => setRatio(to), down: () => setRatio(from) });
+      prev = r;
+      if (boosts.length === 1 && Q.treeDetailDistance < 180) {
+        const d0 = Q.treeDetailDistance;
+        boosts.push({ up: () => { Q.treeDetailDistance = Math.min(180, d0 * 1.8); }, down: () => { Q.treeDetailDistance = d0; } });
+      }
+    }
+  }
+  let boostI = 0, fast = 0, slowB = 0, boostLocked = false;
   function adaptQuality(fps) {
     if (cooldown > 0) { cooldown--; return; } // после загрузки и после шага — дать FPS устояться
+    if (boostI > 0 && fps < 45) { // проседание после улучшения — откатить его
+      slowB++;
+      if (slowB >= 2) { boosts[--boostI].down(); boostLocked = true; slowB = 0; cooldown = 2; }
+      return;
+    }
+    slowB = 0;
+    if (!boostLocked && stepI === 0 && boostI < boosts.length) {
+      fast = fps >= 56 ? fast + 1 : 0;
+      if (fast >= 3) { boosts[boostI++].up(); fast = 0; cooldown = 2; }
+    }
     slow = fps < 28 ? slow + 1 : 0;
     if (slow >= 2 && stepI < steps.length) {
       const [name, fn] = steps[stepI++];
@@ -316,7 +346,7 @@ async function init() {
     details.update(t);
     torches.update(t);
     extras.update(t, dt, camera);
-    interiors.update(camera);
+    interiors.update(camera, t);
     doors.update(Math.min(dt, 0.1));
     weather.update(t, Math.min(dt, 0.1), camera);
     SWAY_TIME.value = t;
@@ -329,7 +359,7 @@ async function init() {
     if (now - fpsTime > 1000) {
       const fps = (frames * 1000) / (now - fpsTime);
       if (!still && !noAdapt) adaptQuality(fps);
-      fpsEl.textContent = `${Math.round(fps)} FPS · ${QUALITY_LEVEL}` + (simplified.length ? ` · упрощено: ${simplified.join(', ')}` : '');
+      fpsEl.textContent = `${Math.round(fps)} FPS · ${QUALITY_LEVEL}` + (simplified.length ? ` · упрощено: ${simplified.join(', ')}` : '') + (boostI ? ` · улучшено: ${boostI}/${boosts.length}` : '');
       frames = 0;
       fpsTime = now;
     }
