@@ -1043,6 +1043,16 @@ function createWindowLights(scene) {
   if (!WINDOWS.length) return { set() {} };
   const g = new THREE.PlaneGeometry(1, 1);
   const mat = new THREE.MeshBasicMaterial({ color: 0xffb04a, fog: true });
+  // свет очага за окном мерцает, у каждого окна по-своему
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uSwayTime = SWAY_TIME;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uSwayTime;\nvarying float vFlk;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nfloat fi = float(gl_InstanceID);\nvFlk = 0.84 + 0.1 * sin(uSwayTime * 6.3 + fi * 1.7) * sin(uSwayTime * 3.1 + fi * 4.3) + 0.06 * sin(uSwayTime * 13.0 + fi);');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vFlk;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= vFlk;');
+  };
+  mat.customProgramCacheKey = () => 'window-flicker';
+  const base = mat.color.clone();
   const im = new THREE.InstancedMesh(g, mat, WINDOWS.length);
   const q = new THREE.Quaternion();
   WINDOWS.forEach((w, i) => {
@@ -1054,7 +1064,8 @@ function createWindowLights(scene) {
   im.visible = false;
   im.name = 'window-lights';
   scene.add(im);
-  return { set(k) { im.visible = k > 0.35; } };
+  // k: 0 — день, 1 — ночь; в сумерках окна уже светятся, но тусклее
+  return { set(k) { im.visible = k > 0.05; mat.color.copy(base).multiplyScalar(0.35 + 0.65 * Math.min(1, k)); } };
 }
 
 // ===========================================================================
@@ -1407,7 +1418,8 @@ export function createExtras(scene, terrain, walls, village) {
       if (life2) life2.update(t, dt);
       life3.update(t, dt, camera);
     },
-    setNight(k) { birds.mesh.visible = k < 0.5; windows.set(k); life3.setNight(k); },
+    setNight(k) { birds.mesh.visible = k < 0.5; life3.setNight(k); },
+    setWindows(k) { windows.set(k); },
     places: life3.places,
     areas: life3.areas,
     get pasture() { return ctx.pasture; },

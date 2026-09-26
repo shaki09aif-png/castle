@@ -100,7 +100,7 @@ async function init() {
   camera.layers.enable(1); // слои 1–2 — трава, мелкие камни, дальние деревья
   camera.layers.enable(2); // (не попадают в отражения воды)
 
-  const lighting = createLighting(scene, renderer, assets);
+  const lighting = createLighting(scene, renderer, assets, WIND_K);
   await step('генерация рельефа');
   const terrain = createTerrain(scene);
   const river = createRiver(scene);
@@ -224,11 +224,14 @@ async function init() {
     interiors.setNight(night);
     torches.setNight(night);
     extras.setNight(night);
+    // свет в окнах: в сумерках (низкое солнце) и ночью
+    const dusk = Math.max(0, Math.min(1, (0.45 - st.dir.y) / 0.3)) * (1 - night);
+    extras.setWindows(Math.max(night, dusk * 0.6));
     FOLIAGE_SUN.copy(SUN_DIR).multiplyScalar(1 - 0.95 * night); // ночью листва не «просвечивает»
     for (const g of glassMeshes) for (const m of [].concat(g.material)) m.emissiveIntensity = 0.55 + night * 1.8; // свечи за витражами
     for (const u of waters) { u.sunDirection.value.copy(SUN_DIR); u.sunColor.value.copy(st.sunCol).multiplyScalar(1 - 0.6 * night); }
   });
-  const weather = createWeather(scene, lighting, { paveMask: court.paveMask, heightAt: terrain.heightAt, renderer });
+  const weather = createWeather(scene, lighting, { paveMask: court.paveMask, heightAt: terrain.heightAt, renderer, road: terrain.road });
   const weatherBtn = document.getElementById('btn-weather'), siegeBtn = document.getElementById('btn-siege');
   const WEATHER_LABEL = { clear: '☁ Ясно', rain: '🌧 Дождь', fog: '🌫 Туман', snow: '❄ Снег', autumn: '🍂 Осень' };
   const cycleWeather = () => { weather.next(); if (weatherBtn) weatherBtn.textContent = WEATHER_LABEL[weather.mode]; };

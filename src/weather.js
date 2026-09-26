@@ -3,6 +3,7 @@
 // снег постепенно ложится на крыши и землю, ров и река замерзают.
 import * as THREE from 'three';
 import { AUTUMN } from './materials.js';
+import { SWAY_TIME } from './people.js';
 
 // Сила ветра по погоде: флаги, дым и деревья колышутся быстрее в непогоду
 export const WIND_K = { value: 1 };
@@ -62,7 +63,7 @@ function precipitation(count, isSnow) {
   return { obj, uniforms };
 }
 
-export function createWeather(scene, lighting, { paveMask, heightAt, renderer }) {
+export function createWeather(scene, lighting, { paveMask, heightAt, renderer, road = [] }) {
   const rain = precipitation(5000, false);
   const snow = precipitation(3500, true);
   snow.uniforms.uPx.value = renderer.getPixelRatio();
@@ -74,8 +75,53 @@ export function createWeather(scene, lighting, { paveMask, heightAt, renderer })
     const x = (Math.random() - 0.5) * 70, z = (Math.random() - 0.5) * 70;
     if (paveMask(x, z) > 0.7) puddles.push([x, z]);
   }
-  const pg = new THREE.CircleGeometry(1, 18).rotateX(-Math.PI / 2);
-  const pMat = new THREE.MeshBasicMaterial({ color: 0x55606a, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  // лужи и на дороге (в колеях), кроме моста
+  for (let k = 0; k < road.length && puddles.length < 110; k += 3) {
+    const q = road[k];
+    if (q.bridge || Math.random() < 0.35) continue;
+    const nx = road[Math.min(road.length - 1, k + 1)].x - q.x, nz = road[Math.min(road.length - 1, k + 1)].z - q.z;
+    const L = Math.hypot(nx, nz) || 1;
+    const o = (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.7);
+    puddles.push([q.x - (nz / L) * o, q.z + (nx / L) * o]);
+  }
+  // неровный край лужи
+  const pg = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
+  { const p = pg.getAttribute('position'); for (let i = 1; i < p.count; i++) { const a = Math.atan2(p.getZ(i), p.getX(i)); const k = 1 + 0.18 * Math.sin(a * 3 + 1.3) + 0.1 * Math.sin(a * 7); p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); } }
+  // вода в лужах отражает небо; по ней расходятся круги от капель
+  const pMat = new THREE.MeshStandardMaterial({ color: 0x3a4248, roughness: 0.06, metalness: 0.0, transparent: true, opacity: 0, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, envMap: lighting.envTex, envMapIntensity: 1.3 });
+  const pU = { uRain: { value: 0 }, uIce: { value: 0 } };
+  pMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uSwayTime = SWAY_TIME; sh.uniforms.uRain = pU.uRain; sh.uniforms.uIce = pU.uIce;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vPW;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvPW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+      uniform float uSwayTime, uRain, uIce;
+      varying vec3 vPW;
+      float pH(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      vec2 ripples(vec2 p, float t) {
+        vec2 g = vec2(0.0);
+        for (int k = 0; k < 2; k++) {
+          vec2 q = p * (3.0 + float(k) * 1.7) + float(k) * 7.3;
+          vec2 c = floor(q), f = fract(q) - 0.5;
+          float h = pH(c + float(k));
+          vec2 d = f - (vec2(pH(c + 3.1), pH(c + 5.7)) - 0.5) * 0.6;
+          float ph = fract(t * (0.8 + h * 0.6) + h);
+          float r = length(d), w = r - ph * 0.45;
+          float a = sin(w * 55.0) * exp(-abs(w) * 18.0) * (1.0 - ph) * step(0.35, fract(h * 7.1));
+          g += normalize(d + 1e-4) * a;
+        }
+        return g;
+      }`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec2 rp = ripples(vPW.xz, uSwayTime) * 0.35 * uRain * (1.0 - uIce);
+          normal = normalize(normal + (viewMatrix * vec4(rp.x, 0.0, rp.y, 0.0)).xyz);
+        }`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.35, uIce);')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.72, 0.8, 0.86), uIce);');
+  };
+  pMat.customProgramCacheKey = () => 'puddle';
   const pm = new THREE.InstancedMesh(pg, pMat, Math.max(1, puddles.length));
   puddles.forEach(([x, z], i) => {
     const s = 0.5 + Math.random() * 1.1;
@@ -103,7 +149,7 @@ export function createWeather(scene, lighting, { paveMask, heightAt, renderer })
 
   const ORDER = ['clear', 'rain', 'fog', 'snow', 'autumn'];
   let mode = 'clear';
-  let wet = 0, snowAmt = 0, rainA = 0, snowA = 0;
+  let wet = 0, snowAmt = 0, rainA = 0, snowA = 0, iceLeft = 0;
   function setMode(m) {
     if (!ORDER.includes(m)) return;
     mode = m;
@@ -128,8 +174,12 @@ export function createWeather(scene, lighting, { paveMask, heightAt, renderer })
         p.uniforms.uTime.value = t;
         p.uniforms.uCam.value.copy(camera.position);
       }
-      pm.visible = wet > 0.03 && snowAmt < 0.3;
-      pMat.opacity = 0.6 * wet;
+      // лужи: при снеге замерзают (лёд), высыхают медленно
+      pm.visible = wet > 0.03 || (snowAmt > 0.2 && iceLeft > 0.03);
+      if (mode === 'rain') iceLeft = wet;
+      pU.uIce.value = Math.min(1, snowAmt * 2);
+      pU.uRain.value = rainA;
+      pMat.opacity = snowAmt > 0.2 ? 0.85 * Math.min(1, iceLeft * 2) : 0.8 * wet;
       const frozen = snowAmt > 0.5;
       for (const { ice, water } of ices) { ice.visible = frozen; water.visible = !frozen; }
     },

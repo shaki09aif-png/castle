@@ -24,7 +24,26 @@ export const FOG = {
   haze: 0.00007, // воздушная перспектива (не зависит от высоты)
 };
 
+// Общие для всех материалов параметры атмосферы (один массив на всю сцену —
+// шейдеры не перекомпилируются): x, y — сдвиг облаков по ветру, z — сила теней
+// от облаков, w — туман в низинах.
+export const ATMO = new Float32Array([0, 0, 0.5, 0]);
+function shareAtmo() {
+  for (const k of ['standard', 'physical', 'lambert', 'phong', 'basic', 'toon', 'matcap']) {
+    const L = THREE.ShaderLib[k];
+    if (L && L.uniforms) L.uniforms.castleAtmo = { value: ATMO }; // типизированный массив не копируется при клонировании — общий на все
+  }
+  // тени от облаков: ослабляем прямой солнечный свет (рассеянный остаётся)
+  const chunk = THREE.ShaderChunk.lights_fragment_begin;
+  const needle = chunk.indexOf('getDirectionalLightInfo( directionalLight, directLight );');
+  if (needle > 0 && !chunk.includes('castleCloud')) {
+    THREE.ShaderChunk.lights_fragment_begin = chunk.replace('getDirectionalLightInfo( directionalLight, directLight );',
+      'getDirectionalLightInfo( directionalLight, directLight );\n\t\t#ifdef USE_FOG\n\t\tdirectLight.color *= castleCloud( vFogWorldPos );\n\t\t#endif');
+  }
+}
+
 function installFogChunks() {
+  shareAtmo();
   const v3 = (v) => `vec3(${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)})`;
   THREE.ShaderChunk.fog_pars_vertex = `
 #ifdef USE_FOG
@@ -39,8 +58,21 @@ function installFogChunks() {
   THREE.ShaderChunk.fog_pars_fragment = `
 #ifdef USE_FOG
   uniform vec3 fogColor;
+  uniform vec4 castleAtmo;
   varying float vFogDepth;
   varying vec3 vFogWorldPos;
+  float cHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+  float cNoise( vec2 p ) {
+    vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
+    return mix( mix( cHash( i ), cHash( i + vec2( 1, 0 ) ), f.x ), mix( cHash( i + vec2( 0, 1 ) ), cHash( i + vec2( 1, 1 ) ), f.x ), f.y );
+  }
+  // тень от облаков: большие мягкие пятна, плывут по ветру
+  float castleCloud( vec3 wp ) {
+    if ( castleAtmo.z < 0.01 ) return 1.0;
+    vec2 p = ( wp.xz + castleAtmo.xy ) * 0.0021;
+    float n = cNoise( p ) * 0.62 + cNoise( p * 2.3 + 7.1 ) * 0.28 + cNoise( p * 5.1 - 3.7 ) * 0.1;
+    return 1.0 - castleAtmo.z * smoothstep( 0.4, 0.6, n );
+  }
   #ifdef FOG_EXP2
     uniform float fogDensity;
   #else
@@ -61,6 +93,13 @@ function installFogChunks() {
       float dens = ${FOG.density.toFixed(5)};
     #endif
     float optical = dens * dist * integ + dist * ${FOG.haze.toFixed(6)};
+    // низкий туман в низинах (у реки): очень малая «высота» слоя
+    if ( castleAtmo.w > 0.001 ) {
+      const float k2 = 0.25;
+      float camL = max( cameraPosition.y - 1.0, -5.0 );
+      float integ2 = abs( dy ) > 0.05 ? exp( -k2 * camL ) * ( 1.0 - exp( -k2 * dy ) ) / ( k2 * dy ) : exp( -k2 * camL );
+      optical += castleAtmo.w * 0.012 * min( dist, 600.0 ) * min( integ2, 1.0 );
+    }
     float f = 1.0 - exp( -optical );
     float sunAmt = pow( max( dot( dir, ${v3(SUN_DIR)} ), 0.0 ), 6.0 );
     // подсветка дымки в сторону солнца — относительно цвета тумана (годится и для заката, и для ночи)
@@ -84,10 +123,23 @@ function installFogChunks() {
       col = mix( col, col * vec3( 0.55, 0.62, 0.42 ) + vec3( 0.02, 0.04, 0.0 ), ruin * vert * smoothstep( -0.1, 0.7, pat ) * 0.75 );
       col *= 1.0 - ruin * 0.1;
     }
-    col *= 1.0 - wet * 0.3 * smoothstep( 0.3, 0.9, up );
-    float cover = smoothstep( 0.3, 0.75, up ) * snowK;
-    vec3 snowC = vec3( 0.9, 0.93, 1.0 ) * clamp( 0.3 + lum * 1.35, 0.12, 1.05 );
-    return mix( col, snowC, cover );
+    // мокрые поверхности: темнее и блестят — под скользящим углом в них отражается небо
+    if ( wet > 0.001 ) {
+      col *= 1.0 - wet * 0.3 * smoothstep( 0.3, 0.9, up ) - wet * 0.12 * ( 1.0 - abs( up ) );
+      vec3 vdir = normalize( wp - cameraPosition );
+      float fres = 0.03 + 0.97 * pow( 1.0 - max( dot( wn, -vdir ), 0.0 ), 5.0 );
+      float wetF = wet * mix( 0.45, 1.0, smoothstep( 0.2, 0.8, up ) );
+      col = mix( col, fogColor * 1.1, clamp( fres * wetF * 0.5, 0.0, 0.3 ) );
+    }
+    // снег: ложится пятнами и надувами, на остальном — иней
+    if ( snowK > 0.001 ) {
+      float patchN = cNoise( wp.xz * 0.33 ) * 0.6 + cNoise( wp.xz * 1.7 + 3.1 ) * 0.3 + cNoise( wp.xz * 7.3 ) * 0.1;
+      float cover = smoothstep( 0.3, 0.75, up ) * smoothstep( 0.36, 0.62, patchN + snowK * 0.28 - 0.08 ) * snowK;
+      vec3 snowC = vec3( 0.9, 0.93, 1.0 ) * clamp( 0.3 + lum * 1.35, 0.12, 1.05 );
+      col = mix( col, mix( col, vec3( 0.82, 0.86, 0.92 ) * ( 0.4 + lum ), 0.35 ), snowK * 0.35 ); // иней
+      col = mix( col, snowC, cover );
+    }
+    return col;
   }
   #endif
 #endif`;
@@ -169,6 +221,9 @@ const skyFragment = /* glsl */ `
     }
     // солнечный диск; ночью — луна (меньше и тусклее)
     col += sunColor * smoothstep(0.99945, 0.99975, sd) * mix(30.0, 4.0, night);
+    // ночью — ореол вокруг луны и её «моря»
+    col += sunColor * night * (pow(sd, 900.0) * 0.5 + pow(sd, 90.0) * 0.12 + pow(sd, 12.0) * 0.03);
+    col -= vec3(0.25) * night * smoothstep(0.99955, 0.99975, sd) * step(0.55, fract(sin(dot(floor(d.xy * 4000.0), vec2(12.9, 78.2))) * 437.5));
     col = mix(col, horizon, (1.0 - smoothstep(0.0, 0.14, abs(h))) * 0.55);
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
@@ -252,7 +307,7 @@ function clampHdri(tex, maxV) {
   tex.needsUpdate = true;
 }
 
-export function createLighting(scene, renderer, assets) {
+export function createLighting(scene, renderer, assets, windK = { value: 1 }) {
   // 1) Небо: HDRI Poly Haven (если скачана) или процедурное
   let sky = null;
   if (assets.sky) {
@@ -376,19 +431,19 @@ export function createLighting(scene, renderer, assets) {
       fog: C(0.74, 0.48, 0.36), horizon: C(1.0, 0.55, 0.28), zenith: C(0.2, 0.22, 0.45), skySun: C(1.0, 0.5, 0.2), cloud: 0.85, night: 0,
     },
     night: {
-      dir: dirAt(az + 2.4, 0.8), sunCol: C(0.48, 0.62, 1.0), sunI: 0.68,
-      hemiSky: C(0.3, 0.42, 0.7), hemiGround: C(0.06, 0.07, 0.1), hemiI: Q.envLight ? 0.35 : 0.95, env: 0.15,
+      dir: dirAt(az + 2.4, 0.8), sunCol: C(0.5, 0.64, 1.0), sunI: 0.9,
+      hemiSky: C(0.28, 0.38, 0.66), hemiGround: C(0.05, 0.06, 0.09), hemiI: Q.envLight ? 0.3 : 0.82, env: 0.13,
       fog: C(0.03, 0.045, 0.08), horizon: C(0.05, 0.07, 0.13), zenith: C(0.008, 0.014, 0.04), skySun: C(0.75, 0.8, 0.95), cloud: 0.1, night: 1,
     },
   };
   const ORDER = ['day', 'sunset', 'night'];
   // Погода: множители к освещению и туману (накладываются на время суток)
   const WEATHER = {
-    clear: { sun: 1, hemi: 1, fog: 1, grey: 0, cover: 0.5, cl: 1 },
-    rain: { sun: 0.22, hemi: 0.75, fog: 2.6, grey: 0.65, cover: 0.97, cl: 0.5 },
-    fog: { sun: 0.4, hemi: 0.95, fog: 7.5, grey: 0.75, cover: 0.75, cl: 0.85 },
-    snow: { sun: 0.4, hemi: 1.05, fog: 3.2, grey: 0.55, cover: 0.92, cl: 0.9 },
-    autumn: { sun: 0.85, hemi: 0.95, fog: 1.6, grey: 0.2, cover: 0.68, cl: 0.95 },
+    clear: { sun: 1, hemi: 1, fog: 1, grey: 0, cover: 0.5, cl: 1, cs: 0.5, mist: 0 },
+    rain: { sun: 0.22, hemi: 0.75, fog: 2.6, grey: 0.65, cover: 0.97, cl: 0.5, cs: 0, mist: 0.4 },
+    fog: { sun: 0.4, hemi: 0.95, fog: 7.5, grey: 0.75, cover: 0.75, cl: 0.85, cs: 0.1, mist: 1.4 },
+    snow: { sun: 0.4, hemi: 1.05, fog: 3.2, grey: 0.55, cover: 0.92, cl: 0.9, cs: 0.2, mist: 0.3 },
+    autumn: { sun: 0.85, hemi: 0.95, fog: 1.6, grey: 0.2, cover: 0.68, cl: 0.95, cs: 0.55, mist: 0.5 },
   };
   const wcur = { ...WEATHER.clear };
   let wfrom = null, wto = WEATHER.clear, wk = 1;
@@ -421,7 +476,11 @@ export function createLighting(scene, renderer, assets) {
     // низкое солнце: вечерняя дымка гуще, тени мягче (размытые края)
     const low = Math.max(0, Math.min(1, (0.55 - cur.dir.y) / 0.4)) * (1 - cur.night);
     scene.fog.density = fogBase * wcur.fog * (1 + low * 0.45);
-    sun.shadow.radius = Q.shadowRadius * (1 + low * 1.6);
+    sun.shadow.radius = Q.shadowRadius * (1 + low * 1.6) * (1 - cur.night * 0.4);
+    // тени от облаков: днём по погоде, ночью слабее; туман в низинах — на закате и ночью
+    ATMO[2] = wcur.cs * (1 - cur.night * 0.6);
+    const dusk = Math.max(low * 1.2, cur.night);
+    ATMO[3] = Math.min(1.6, wcur.mist + dusk * 0.9);
     if (skyU) {
       skyU.sunDir.value.copy(SUN_DIR);
       skyU.horizon.value.copy(cur.horizon);
@@ -475,6 +534,7 @@ export function createLighting(scene, renderer, assets) {
       }
       if (dirty) applyState();
       fitShadow(camera, focus);
+      ATMO[0] += dt * 4.5 * windK.value; ATMO[1] += dt * 1.6 * windK.value; // облака плывут по ветру
       if (sky) {
         sky.position.copy(camera.position);
         sky.material.uniforms.time.value = t;
