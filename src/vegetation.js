@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { mulberry32, createNoise2D, fbm, smoothstep, clamp, lerp } from './noise.js';
 import { plateauRadius, GATE_DIR, GATE_RADIUS, DITCH, insideTower, GATEHOUSE, GATE_PASSAGE, BARBICAN } from './layout.js';
 import { shelfDistance, riverInfo } from './terrain.js';
+import { ATMO } from './lighting.js';
 import { pbrMaterial, foliageTexture, macroNoiseTexture } from './textures.js';
 import { SUN_DIR } from './lighting.js';
 import { AUTUMN } from './materials.js';
@@ -108,6 +109,7 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
   const uniforms = {
     tGround: { value: groundTex },
     tMacro: { value: macroNoiseTexture() },
+    uAtmo: { value: ATMO },
     uCam: { value: new THREE.Vector2() },
     uSpacing: { value: spacing },
     uHalfN: { value: N / 2 },
@@ -126,6 +128,7 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
         `#include <common>
         attribute vec2 aCell;
         uniform sampler2D tGround, tMacro;
+        uniform vec4 uAtmo;
         uniform vec2 uCam;
         uniform float uSpacing, uHalfN, uRadius, uInner, uGroundHalf, uTime;
         varying vec3 vTint;
@@ -176,6 +179,11 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
         // бегущие по полю волны порывов: полоса наклоняет траву сильнее и светлит её
         float band = smoothstep(0.55, 1.0, sin(dot(wxz, vec2(0.075, 0.03)) - uTime * 1.15) * 0.5 + 0.5) * smoothstep(0.3, 0.6, gust + 0.1);
         vTint *= 1.0 + band * 0.35 * uv.y;
+        // тень от облака — как на земле под травой
+        if (uAtmo.z > 0.01) {
+          vec2 cm = texture2D(tMacro, (wxz + uAtmo.xy) * 0.0011).rg;
+          vTint *= 1.0 - 0.65 * uAtmo.z * smoothstep(0.42, 0.62, cm.r * 0.7 + cm.g * 0.3);
+        }
         float sway = (wave + (gust - 0.45) * 2.2 + band * 1.6) * t2 * 0.28 * scl;
         transformed.x += sway;
         transformed.z += sway * 0.45;

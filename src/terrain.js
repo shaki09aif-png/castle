@@ -10,6 +10,7 @@ import {
 import { textureArrays, macroNoiseTexture, pbrMaterial } from './textures.js';
 import { triplanarMaterial, TRIPLANAR_GLSL, AUTUMN } from './materials.js';
 import { Q } from './quality.js';
+import { ATMO } from './lighting.js';
 
 const nPlain = createNoise2D(101);
 const nHill = createNoise2D(202);
@@ -585,6 +586,7 @@ function makeTerrainMaterial() {
     tMacro: { value: macroNoiseTexture() },
     tileInv: { value: new THREE.Vector4(...arr.tileMeters.map((m) => 1 / m)) },
     layerMean: { value: new THREE.Vector4(...arr.meanLum) },
+    uAtmo: { value: ATMO }, // сдвиг облаков и сила их теней (общие с lighting.js)
   };
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -594,16 +596,25 @@ function makeTerrainMaterial() {
         '#include <common>',
         `#include <common>
         attribute vec4 splat;
+        uniform sampler2D tMacro;
+        uniform vec4 uAtmo;
         varying vec4 vSplat;
         varying vec3 vWPos;
-        varying vec3 vWNrm;`
+        varying vec3 vWNrm;
+        varying float vCloudT;`
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vSplat = splat;
         vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-        vWNrm = normalize(mat3(modelMatrix) * objectNormal);`
+        vWNrm = normalize(mat3(modelMatrix) * objectNormal);
+        // тень от облаков: большие пятна плывут по ветру (в вершинах — пятна огромные)
+        vCloudT = 1.0;
+        if (uAtmo.z > 0.01) {
+          vec2 cm = textureLod(tMacro, (vWPos.xz + uAtmo.xy) * 0.0011, 0.0).rg;
+          vCloudT = 1.0 - uAtmo.z * smoothstep(0.42, 0.62, cm.r * 0.7 + cm.g * 0.3);
+        }`
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -617,6 +628,7 @@ function makeTerrainMaterial() {
         varying vec4 vSplat;
         varying vec3 vWPos;
         varying vec3 vWNrm;
+        varying float vCloudT;
         vec3 gCol, gOrm, gNrm;
         ${TRIPLANAR_GLSL}`
       )
@@ -706,6 +718,8 @@ function makeTerrainMaterial() {
       .replace(
         '#include <aomap_fragment>',
         `#include <aomap_fragment>
+        reflectedLight.directDiffuse *= vCloudT;
+        reflectedLight.directSpecular *= vCloudT;
         reflectedLight.indirectDiffuse *= gOrm.r;
         reflectedLight.indirectSpecular *= gOrm.r;
         reflectedLight.directDiffuse *= mix(1.0, gOrm.r, 0.5);`

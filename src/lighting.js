@@ -2,7 +2,6 @@
 // объёмный (высотный) туман с подсветкой от солнца и дымка у горизонта.
 import * as THREE from 'three';
 import { Q } from './quality.js';
-import { macroNoiseTexture } from './textures.js';
 
 // Направление на солнце: послеполуденное, с юго-запада.
 // Если загружена HDRI неба с Poly Haven, направление берётся из неё.
@@ -32,18 +31,9 @@ export const ATMO = new Float32Array([0, 0, 0.5, 0]);
 function shareAtmo() {
   for (const k of ['standard', 'physical', 'lambert', 'phong', 'basic', 'toon', 'matcap']) {
     const L = THREE.ShaderLib[k];
-    if (L && L.uniforms) {
-      L.uniforms.castleAtmo = { value: ATMO }; // типизированный массив не копируется при клонировании — общий на все
-      L.uniforms.castleCloudTex = { value: macroNoiseTexture() }; // копия текстуры делит с оригиналом одно изображение
-    }
+    if (L && L.uniforms) L.uniforms.castleAtmo = { value: ATMO }; // типизированный массив не копируется при клонировании — общий на все
   }
-  // тени от облаков: ослабляем прямой солнечный свет (рассеянный остаётся)
-  const chunk = THREE.ShaderChunk.lights_fragment_begin;
-  const needle = chunk.indexOf('getDirectionalLightInfo( directionalLight, directLight );');
-  if (needle > 0 && !chunk.includes('vCloud')) {
-    THREE.ShaderChunk.lights_fragment_begin = chunk.replace('getDirectionalLightInfo( directionalLight, directLight );',
-      'getDirectionalLightInfo( directionalLight, directLight );\n\t\t#ifdef USE_FOG\n\t\tdirectLight.color *= vCloud;\n\t\t#endif');
-  }
+  // тени от облаков считаются только на земле и траве (terrain.js, vegetation.js) — так дешевле
 }
 
 function installFogChunks() {
@@ -53,20 +43,11 @@ function installFogChunks() {
 #ifdef USE_FOG
   varying float vFogDepth;
   varying vec3 vFogWorldPos;
-  varying float vCloud;
-  uniform vec4 castleAtmo;
-  uniform sampler2D castleCloudTex;
 #endif`;
   THREE.ShaderChunk.fog_vertex = `
 #ifdef USE_FOG
   vFogDepth = - mvPosition.z;
   vFogWorldPos = cameraPosition + ( vec4( mvPosition.xyz, 0.0 ) * viewMatrix ).xyz;
-  // тень от облаков считается в вершинах (пятна огромные — интерполяции хватает)
-  vCloud = 1.0;
-  if ( castleAtmo.z > 0.01 ) {
-    vec2 m = textureLod( castleCloudTex, ( vFogWorldPos.xz + castleAtmo.xy ) * 0.0011, 0.0 ).rg;
-    vCloud = 1.0 - castleAtmo.z * smoothstep( 0.42, 0.62, m.r * 0.7 + m.g * 0.3 );
-  }
 #endif`;
   THREE.ShaderChunk.fog_pars_fragment = `
 #ifdef USE_FOG
@@ -74,7 +55,6 @@ function installFogChunks() {
   uniform vec4 castleAtmo;
   varying float vFogDepth;
   varying vec3 vFogWorldPos;
-  varying float vCloud;
   float cHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
   float cNoise( vec2 p ) {
     vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
@@ -230,8 +210,10 @@ const skyFragment = /* glsl */ `
     // солнечный диск; ночью — луна (меньше и тусклее)
     col += sunColor * smoothstep(0.99945, 0.99975, sd) * mix(30.0, 4.0, night);
     // ночью — ореол вокруг луны и её «моря»
-    col += sunColor * night * (pow(sd, 900.0) * 0.5 + pow(sd, 90.0) * 0.12 + pow(sd, 12.0) * 0.03);
-    col -= vec3(0.25) * night * smoothstep(0.99955, 0.99975, sd) * step(0.55, fract(sin(dot(floor(d.xy * 4000.0), vec2(12.9, 78.2))) * 437.5));
+    if (night > 0.01) {
+      col += sunColor * night * (pow(sd, 900.0) * 0.5 + pow(sd, 90.0) * 0.12 + pow(sd, 12.0) * 0.03);
+      col -= vec3(0.25) * night * smoothstep(0.99955, 0.99975, sd) * step(0.55, fract(sin(dot(floor(d.xy * 4000.0), vec2(12.9, 78.2))) * 437.5));
+    }
     col = mix(col, horizon, (1.0 - smoothstep(0.0, 0.14, abs(h))) * 0.55);
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>

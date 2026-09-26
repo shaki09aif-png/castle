@@ -5,6 +5,7 @@
 // выступающая уборная на консолях, дымовая труба и флаг с гербом на вершине.
 import * as THREE from 'three';
 import { KEEP, WALL } from './layout.js';
+import { INTERIORS, Frame } from './courtyard.js';
 import {
   makeTowerContext, finishTowerContext, buildTower, outline, band, ring, arrowSlit, door,
   windowWithShutters, coneRoof,
@@ -34,9 +35,13 @@ export function createKeep(scene, terrain, walls) {
   const g = terrain.heightAt(pDoorGround.x, pDoorGround.z);
 
   // тело, консольный пояс, парапет с зубцами, пол площадки
+  // вход на втором этаже — сквозной проём в стене (дверь открывается)
+  const doorS = -2.2, doorY0 = g + 6.5 + 0.2, DOOR_W = 1.2, DOOR_H = 2.6;
+  const leafH = DOOR_H - 0.866 * DOOR_W + 0.45 * (0.866 * DOOR_W);
   const top = buildTower(ctx, K, {
     walkY: g, batterAll: true, roof: false, slits: false, walkDoors: false, groundDoor: false, window: false,
     outDir: F0.n,
+    holes: [{ n: F0.n, t: F0.t, c: onFace(0, doorS), s0: -DOOR_W / 2, s1: DOOR_W / 2, y0: doorY0, y1: doorY0 + leafH }],
   });
   const platY = top.platY;
   const lv = [g, g + 6.5, g + 13, g + 19, g + 24.5, platY]; // уровни этажей
@@ -83,9 +88,26 @@ export function createKeep(scene, terrain, walls) {
   for (let f = 0; f < 4; f++) for (const s of [-2.6, 2.6]) slit(f, s, lv[4] + 2.2, true);
 
   // ---------- поднятый вход и деревянная лестница ----------
-  const doorS = -2.2;
-  const doorY = lv[1] + 0.2;
-  door(stone, wood, metal, onFace(0, doorS), F0.n, doorY, 1.2, 2.6);
+  const doorY = doorY0;
+  door(stone, wood, metal, onFace(0, doorS), F0.n, doorY, DOOR_W, DOOR_H, true);
+  // проход сквозь толщу стены (1,8 м): откосы, свод и порог
+  const WT = 1.8;
+  {
+    const ins = (s, off) => onFace(0, s, -off);
+    for (const sd of [-1, 1]) {
+      const c = ins(doorS + sd * (DOOR_W / 2 + 0.2), WT / 2);
+      stone.box(new V3(c.x, doorY + leafH / 2, c.z), F0.t, UP, F0.n, 0.2, leafH / 2 + 0.05, WT / 2);
+    }
+    const cl = ins(doorS, WT / 2);
+    stone.box(new V3(cl.x, doorY + leafH + 0.25, cl.z), F0.t, UP, F0.n, DOOR_W / 2 + 0.4, 0.25, WT / 2);
+    stone.box(new V3(cl.x, doorY - 0.1, cl.z), F0.t, UP, F0.n, DOOR_W / 2 + 0.05, 0.1, WT / 2);
+  }
+  // покои за дверью (обстановка — в interiors.js)
+  INTERIORS.push({
+    id: 'keep', f: new Frame({ x: C.x, z: C.z, ax: F0.t.x, az: F0.t.z, nx: F0.n.x, nz: F0.n.z }),
+    L: 2 * (K.r - WT) + 0.6, W: 2 * (K.r - WT) + 0.6, floorY: doorY, eaveY: lv[2] - 0.2,
+    doors: [{ lx: doorS, w: DOOR_W, h: leafH }], wallT: WT, outer: K.r,
+  });
   const oakW = wood;
   const land = { s0: doorS - 1.2, s1: doorS + 1.1, out: 1.7 };
   // площадка перед дверью на столбах

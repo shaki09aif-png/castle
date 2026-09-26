@@ -437,6 +437,33 @@ export function buildTower(ctx, tw, opts = {}) {
         const inBat = ya1 - bases[j] <= batterH + 0.01;
         const nA = A.n.clone().addScaledVector(UP, inBat ? batOf(A) / batterH : 0).normalize();
         const nB = B.n.clone().addScaledVector(UP, inBat ? batOf(B) / batterH : 0).normalize();
+        // проём в стене (вход в донжон): участок кладки разбивается вокруг отверстия
+        const hole = (opts.holes || []).find((h) => A.n.dot(h.n) > 0.99 && B.n.dot(h.n) > 0.99 && !inBat
+          && Math.min(ya1, yb1) > h.y0 && Math.max(ya0, yb0) < h.y1);
+        if (hole) {
+          const sA = A.p.clone().sub(hole.c).dot(hole.t), sB = B.p.clone().sub(hole.c).dot(hole.t);
+          const lo = Math.max(Math.min(sA, sB), hole.s0), hi = Math.min(Math.max(sA, sB), hole.s1);
+          if (hi > lo) {
+            const fr = (sv) => (sv - sA) / (sB - sA);
+            const at = (sv, y) => A.p.clone().lerp(B.p, fr(sv)).setY(y);
+            const uAt = (sv) => A.u + (B.u - A.u) * fr(sv);
+            const yLo = (sv) => ya0 + (yb0 - ya0) * fr(sv), yHi = (sv) => ya1 + (yb1 - ya1) * fr(sv);
+            const bAt = (sv) => bases[j] + (bases[j + 1] - bases[j]) * fr(sv);
+            const piece = (s0, s1, y00, y10, y11, y01) => {
+              if (Math.abs(s1 - s0) < 1e-3 || Math.max(y11 - y10, y01 - y00) < 1e-3) return;
+              stone.quad4([at(s0, y00), at(s1, y10), at(s1, y11), at(s0, y01)], [nA, nA, nA, nA],
+                [[uAt(s0), y00], [uAt(s1), y10], [uAt(s1), y11], [uAt(s0), y01]],
+                [y00 - bAt(s0) - 1, y10 - bAt(s1) - 1, y11 - bAt(s1) - 1, y01 - bAt(s0) - 1]);
+            };
+            const sMin = Math.min(sA, sB), sMax = Math.max(sA, sB);
+            const cl = (v, sv) => Math.min(yHi(sv), Math.max(yLo(sv), v));
+            piece(sMin, lo, yLo(sMin), yLo(lo), yHi(lo), yHi(sMin));
+            piece(hi, sMax, yLo(hi), yLo(sMax), yHi(sMax), yHi(hi));
+            piece(lo, hi, yLo(lo), yLo(hi), cl(hole.y0, hi), cl(hole.y0, lo));
+            piece(lo, hi, cl(hole.y1, lo), cl(hole.y1, hi), yHi(hi), yHi(lo));
+            continue;
+          }
+        }
         stone.quad4(
           [P(A, ya0, bases[j]), P(B, yb0, bases[j + 1]), P(B, yb1, bases[j + 1]), P(A, ya1, bases[j])],
           [nA, nB, nB, nA],
