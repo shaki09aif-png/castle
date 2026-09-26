@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { setAnisotropy, setLoadedAssets } from './textures.js';
+import { setAnisotropy, setLoadedAssets, preloadTextureCache, saveTextureCache } from './textures.js';
 import { loadAssets } from './assets.js';
 import { createLighting } from './lighting.js';
 import { createTerrain } from './terrain.js';
@@ -25,10 +25,11 @@ import { SMOKE_WIND } from './courtyard.js';
 import { createLabels } from './labels.js';
 import { createInteriors } from './interiors.js';
 import { createDoors } from './doors.js';
-import { setupPhone } from './mobile.js';
+import { setupPhone, PHONE } from './mobile.js';
+import { createWear } from './wear.js';
 import { pbrMaterial } from './textures.js';
 import { addWeathering } from './materials.js';
-import { SWAY_TIME } from './people.js';
+import { SWAY_TIME, CLOTH_WIND } from './people.js';
 import { FOLIAGE_SUN } from './vegetation.js';
 import { SUN_DIR } from './lighting.js';
 import { Q, QUALITY_LEVEL } from './quality.js';
@@ -38,10 +39,15 @@ const loading = document.getElementById('loading');
 const loadingText = loading.querySelector('small');
 
 // Сообщение на экране загрузки + пауза, чтобы браузер успел его отрисовать
+// этапы загрузки: подпись и процент; в фоновой вкладке не ждём кадра (иначе загрузка встаёт)
+let stepN = 0;
+const STEPS = 12;
 const step = (text) =>
   new Promise((res) => {
-    loadingText.textContent = text;
-    requestAnimationFrame(() => setTimeout(res, 20));
+    stepN++;
+    loadingText.textContent = `${text} — ${Math.min(99, Math.round((stepN / STEPS) * 100))}%`;
+    if (document.hidden) setTimeout(res, 0);
+    else requestAnimationFrame(() => setTimeout(res, 20));
   });
 
 // На слабых видеокартах PBR-материалы (GGX) заменяются на более простые
@@ -78,7 +84,8 @@ init().catch((e) => {
 
 async function init() {
   await step('загрузка текстур и HDRI');
-  const assets = await loadAssets();
+  const [assets, texCached] = await Promise.all([loadAssets(), preloadTextureCache()]);
+  window.__texCached = texCached; // сколько наборов текстур взято из кэша (для проверки)
   setLoadedAssets(assets.sets);
 
   // Без постобработки (низкое качество) сглаживание и тональная компрессия
@@ -141,6 +148,7 @@ async function init() {
   const interiors = createInteriors(scene, walls);
   const doors = createDoors(scene, addWeathering(pbrMaterial('wood', { color: 0x8a7a68 }), 'wood'),
     new THREE.MeshStandardMaterial({ color: 0x2c2926, metalness: 0.85, roughness: 0.5 }), camera);
+  createWear(scene, terrain, torches.list || [], doors.list || []);
   if (Q.lambert) toLambert(scene);
   await step('постобработка');
   const direct = { setSize() {}, render() { renderer.render(scene, camera); } };
@@ -153,7 +161,7 @@ async function init() {
   // ---- «Замок сегодня»: руины без крыш, дерева и людей, стены во мху ----
   {
     const CASTLE = new Set(['walls', 'towers', 'keep', 'gate', 'courtyard']);
-    const HIDE = new Set(['gate-oak', 'details', 'extras', 'extras-glow', 'people', 'walker', 'stained-glass', 'torch-iron', 'torch-wood', 'window-lights', 'paving', 'straw']);
+    const HIDE = new Set(['gate-oak', 'details', 'extras', 'extras-glow', 'people', 'walker', 'stained-glass', 'torch-iron', 'torch-wood', 'window-lights', 'paving', 'straw', 'soot', 'trodden']);
     const KEEP = new Set(['terrain', 'sky', 'rain', 'snow', 'tree', 'rocks', 'grass', 'road', 'river', 'moat', 'ice', 'fields', 'village', 'retaining-walls', 'ruin-rubble', 'birds']);
     const isStone = (o) => [].concat(o.material).some((m) => m.customProgramCacheKey && /wall-stone/.test(m.customProgramCacheKey()));
     const tmp = new THREE.Vector3(), im = new THREE.Matrix4();
@@ -330,11 +338,62 @@ async function init() {
   const timer = new THREE.Timer();
   const still = new URLSearchParams(location.search).has('still'); // режим для автоматических скриншотов
   const noAdapt = new URLSearchParams(location.search).has('noadapt'); // без автоупрощения (для замеров)
+  // Вход в дом: камера мягко подлетает к открытой двери и проходит внутрь
+  let entering = null;
+  const easeIO = (x) => x * x * (3 - 2 * x);
+  doors.setOnEnter && doors.setOnEnter((d) => {
+    if (entering || tour.busy) return;
+    const n = d.n, c = d.center;
+    // низкая дверь крестьянского дома под свесом соломы — пригнуться, внутри выпрямиться
+    const floorY = c.y - d.h / 2, low = d.h < 2.3;
+    const eyeY = floorY + (low ? 1.12 : 1.6), eyeIn = floorY + 1.55;
+    const outP = c.clone().addScaledVector(n, 1.8).setY(eyeY);
+    const inP = c.clone().addScaledVector(n, -1.4).setY(eyeIn);
+    const lookIn = c.clone().addScaledVector(n, -4.5).setY(eyeIn - 0.2);
+    const p0 = camera.position.clone();
+    const q0 = camera.quaternion.clone();
+    const m4 = new THREE.Matrix4();
+    const qOut = new THREE.Quaternion().setFromRotationMatrix(m4.lookAt(outP, lookIn, THREE.Object3D.DEFAULT_UP));
+    const d1 = Math.max(0.6, Math.min(2.2, p0.distanceTo(outP) / 5));
+    entering = { t: 0, d1, d2: 1.4, p0, q0, outP, inP, qOut, lookIn, fly: cam.mode === 'fly' };
+    if (cam.mode === 'orbit') cam.orbit.enabled = false;
+  });
+  function updateEntering(dt) {
+    const e = entering;
+    e.t += dt;
+    if (e.t < e.d1) { // к двери
+      const k = easeIO(e.t / e.d1);
+      camera.position.copy(e.p0).lerp(e.outP, k);
+      camera.quaternion.copy(e.q0).slerp(e.qOut, Math.min(1, k * 1.4));
+    } else { // через порог внутрь
+      const k = easeIO(Math.min(1, (e.t - e.d1) / e.d2));
+      camera.position.copy(e.outP).lerp(e.inP, k);
+      camera.position.y = e.outP.y + (e.inP.y - e.outP.y) * Math.max(0, (k - 0.56) / 0.44); // выпрямляется уже за порогом
+      camera.lookAt(e.lookIn);
+      if (k >= 1) {
+        if (!e.fly) { // дальше можно осматриваться: орбита вокруг точки в комнате
+          cam.orbit.target.copy(e.inP).lerp(e.lookIn, 0.5);
+          cam.orbit.enabled = true;
+          cam.orbit.update();
+        }
+        entering = null;
+      }
+    }
+    interiors.update(camera, timer.getElapsed());
+  }
+  // Экономия батареи на телефоне: если долго не трогать экран, кадров вдвое меньше
+  let lastInput = performance.now(), skipOdd = false;
+  for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) window.addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true });
   const frame = () => {
+    if (PHONE && !entering && !tour.busy && performance.now() - lastInput > 20000) {
+      skipOdd = !skipOdd;
+      if (skipOdd) return;
+    }
     timer.update();
     const t = timer.getElapsed();
     const dt = timer.getDelta();
-    if (!tour.update(Math.min(dt, 0.1))) cam.update(dt);
+    if (entering) updateEntering(Math.min(dt, 0.1));
+    else if (!tour.update(Math.min(dt, 0.1))) cam.update(dt);
     lighting.update(t, camera, shadowFocus(), Math.min(dt, 0.1));
     river.update(t);
     windT += dt * WIND_K.value;
@@ -355,6 +414,7 @@ async function init() {
     doors.update(Math.min(dt, 0.1));
     weather.update(t, Math.min(dt, 0.1), camera);
     SWAY_TIME.value = t;
+    CLOTH_WIND.value = WIND_K.value;
     FLAG_TIME.value = flagT;
     labels.update();
     post.render(dt);
@@ -372,6 +432,7 @@ async function init() {
   if (!still) renderer.setAnimationLoop(frame);
 
   loading.style.opacity = '0';
+  setTimeout(() => saveTextureCache(), 4000); // сгенерированные текстуры — в кэш браузера для следующего запуска
   setTimeout(() => loading.remove(), 900);
 
   // доступ из консоли браузера для отладки

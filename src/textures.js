@@ -321,7 +321,7 @@ const GENERATORS = {
 
   // Дубовые доски: волокна, сучки, щели между досками
   wood() {
-    const S = 512;
+    const S = 1024; // двойное разрешение: доски видны вблизи
     const n = createTileNoise(81);
     const rnd = mulberry32(82);
     const rgb = new Float32Array(S * S * 3);
@@ -358,7 +358,7 @@ const GENERATORS = {
         rough[i] = 0.78 + weather * 0.12;
       }
     }
-    return finishSet(rgb, hgt, rough, S, { normal: 3, ao: 2, aoRadius: 3, tileMeters: 1.2 });
+    return finishSet(rgb, hgt, rough, S, { normal: 6, ao: 2, aoRadius: 6, tileMeters: 1.2 });
   },
 
   // Черепица «бобровый хвост»: 4 ряда по 6 плиток со смещением, разные оттенки,
@@ -413,7 +413,7 @@ const GENERATORS = {
 
   // Соломенная кровля: плотные пучки соломы вдоль ската, потемневшая, с мхом
   thatch() {
-    const S = 512;
+    const S = 1024, PK = 2; // двойное разрешение
     const n = createTileNoise(181);
     const rnd = mulberry32(182);
     const rgb = new Float32Array(S * S * 3);
@@ -432,9 +432,9 @@ const GENERATORS = {
       }
     }
     // соломины: короткие штрихи вдоль v, светлые кончики
-    for (let k = 0; k < 42000; k++) {
+    for (let k = 0; k < 42000 * 3; k++) {
       let x = rnd() * S, y = rnd() * S;
-      const len = 10 + rnd() * 26, lean = (rnd() - 0.5) * 0.25;
+      const len = (10 + rnd() * 26) * PK, lean = (rnd() - 0.5) * 0.25;
       const l = 0.28 + rnd() * 0.32;
       for (let s = 0; s < len; s++) {
         const px = ((Math.round(x) % S) + S) % S, py = ((Math.round(y) % S) + S) % S;
@@ -446,7 +446,7 @@ const GENERATORS = {
         y += 1; x += lean;
       }
     }
-    return finishSet(rgb, hgt, 0.97, S, { normal: 4, ao: 2.5, aoRadius: 3, tileMeters: 2 });
+    return finishSet(rgb, hgt, 0.97, S, { normal: 4 * PK, ao: 2.5, aoRadius: 3 * PK, tileMeters: 2 });
   },
 
   // Обмазка стен (глина с известью по плетню): светлая, с трещинами и потёками
@@ -583,8 +583,8 @@ export function foliageTexture(kind, hue = [0.2, 0.32, 0.1]) {
 }
 
 // Черепица/дранка рядами: 4 ряда по PER плиток со смещением
-function tileRoof({ seed, per, round, grain: grain0 = false, palette }) {
-  const S = 512, ROWS = 4, PER = per;
+function tileRoof({ seed, per, round, grain: grain0 = false, palette, S = 1024 }) {
+  const ROWS = 4, PER = per, PK = S / 512;
   const rh = S / ROWS, tw = S / PER;
   const n = createTileNoise(seed);
   const rnd = mulberry32(seed + 1);
@@ -639,13 +639,81 @@ function tileRoof({ seed, per, round, grain: grain0 = false, palette }) {
       rough[i] = 0.72 + lichen * 0.2;
     }
   }
-  return finishSet(rgb, hgt, rough, S, { normal: 3.5, ao: 2.4, aoRadius: 4, tileMeters: 1.56 });
+  return finishSet(rgb, hgt, rough, S, { normal: 3.5 * PK, ao: 2.4, aoRadius: Math.round(4 * PK), tileMeters: 1.56 });
 }
 
 // Получить набор: сначала Poly Haven, иначе процедурный.
 export function getSet(slot) {
   if (LOADED[slot]) return LOADED[slot];
-  return cached('set:' + slot, () => GENERATORS[slot]());
+  return cached('set:' + slot, () => {
+    if (DISK.has(slot)) return DISK.get(slot);
+    FRESH.add(slot);
+    return GENERATORS[slot]();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Кэш сгенерированных текстур в браузере (IndexedDB): при повторном запуске
+// картинки не рисуются заново, а читаются с диска — загрузка заметно быстрее.
+// Ключ включает текст генератора: если код текстуры изменится, кэш обновится сам.
+// ---------------------------------------------------------------------------
+const TEX_VERSION = 't3';
+const DISK = new Map(), FRESH = new Set();
+function hashStr(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+const SRC_HASH = hashStr(Object.values(GENERATORS).map((f) => f.toString()).join('|') + makeMasonry.toString() + tileRoof.toString() + finishSet.toString());
+const keyOf = (slot) => `${TEX_VERSION}:${slot}:${SRC_HASH}`;
+function openDB() {
+  return new Promise((res, rej) => {
+    if (typeof indexedDB === 'undefined') { rej(new Error('нет IndexedDB')); return; }
+    const r = indexedDB.open('castle-textures', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('t');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+const bitmapToCanvas = (b) => { const c = makeCanvas(b.width, b.height); c.getContext('2d').drawImage(b, 0, 0); return c; };
+export async function preloadTextureCache() {
+  try {
+    const db = await openDB();
+    const slots = Object.keys(GENERATORS);
+    const items = await new Promise((res) => {
+      const out = {};
+      const tx = db.transaction('t', 'readonly'), st = tx.objectStore('t');
+      slots.forEach((slot) => { const rq = st.get(keyOf(slot)); rq.onsuccess = () => { if (rq.result) out[slot] = rq.result; }; });
+      tx.oncomplete = () => res(out);
+      tx.onerror = () => res(out);
+    });
+    const opt = { colorSpaceConversion: 'none', premultiplyAlpha: 'none' };
+    await Promise.all(Object.entries(items).map(async ([slot, v]) => {
+      try {
+        const [c, n, o] = await Promise.all([v.color, v.normal, v.orm].map((b) => createImageBitmap(b, opt)));
+        DISK.set(slot, { color: bitmapToCanvas(c), normal: bitmapToCanvas(n), orm: bitmapToCanvas(o), tileMeters: v.tileMeters, size: v.size, credit: null });
+      } catch (e) { /* повреждённая запись — сгенерируем заново */ }
+    }));
+    return DISK.size;
+  } catch (e) {
+    return 0;
+  }
+}
+// сохранить в кэш то, что пришлось сгенерировать (в фоне, после загрузки сцены)
+export async function saveTextureCache() {
+  if (!FRESH.size) return;
+  try {
+    const db = await openDB();
+    const blob = (c) => new Promise((res) => c.toBlob(res, 'image/png'));
+    for (const slot of [...FRESH]) {
+      const set = cache.get('set:' + slot);
+      if (!set || !set.color || !set.color.toBlob) continue;
+      const [color, normal, orm] = await Promise.all([set.color, set.normal, set.orm].map(blob));
+      if (!color || !normal || !orm) continue;
+      await new Promise((res) => {
+        const tx = db.transaction('t', 'readwrite');
+        tx.objectStore('t').put({ color, normal, orm, tileMeters: set.tileMeters, size: set.size }, keyOf(slot));
+        tx.oncomplete = res; tx.onerror = res;
+      });
+      FRESH.delete(slot);
+    }
+  } catch (e) { /* нет места или доступа — не страшно */ }
 }
 
 // Текстуры Three.js для обычного PBR-материала.

@@ -173,7 +173,10 @@ function grassLayer(groundTex, { spacing, radius, inner, blades, segs, height, w
         float t2 = uv.y * uv.y;
         float gust = texture2D(tMacro, wxz * 0.01 - vec2(uTime * 0.03, uTime * 0.012)).r;
         float wave = sin(uTime * 1.6 + wxz.x * 0.21 + wxz.y * 0.13) * 0.5 + sin(uTime * 3.7 + wxz.x * 0.7) * 0.18;
-        float sway = (wave + (gust - 0.45) * 2.2) * t2 * 0.28 * scl;
+        // бегущие по полю волны порывов: полоса наклоняет траву сильнее и светлит её
+        float band = smoothstep(0.55, 1.0, sin(dot(wxz, vec2(0.075, 0.03)) - uTime * 1.15) * 0.5 + 0.5) * smoothstep(0.3, 0.6, gust + 0.1);
+        vTint *= 1.0 + band * 0.35 * uv.y;
+        float sway = (wave + (gust - 0.45) * 2.2 + band * 1.6) * t2 * 0.28 * scl;
         transformed.x += sway;
         transformed.z += sway * 0.45;
         transformed.y -= abs(sway) * 0.25;
@@ -416,8 +419,10 @@ function foliageMaterial(tex, evergreen = false) {
         #endif
         float ph = ip.x * 0.13 + ip.z * 0.17;
         float hk = max(0.0, position.y) * 0.08;
-        transformed.x += sin(uTime * 1.3 + ph + position.y * 0.3) * 0.12 * hk + sin(uTime * 4.1 + position.x * 2.0) * 0.03 * hk;
-        transformed.z += cos(uTime * 1.1 + ph) * 0.08 * hk;
+        // порывы: волна проходит по лесу, деревья качаются сильнее и все в одну сторону
+        float gustT = smoothstep(0.5, 1.0, sin(ip.x * 0.02 + ip.z * 0.008 - uTime * 0.55) * 0.5 + 0.5);
+        transformed.x += sin(uTime * 1.3 + ph + position.y * 0.3) * 0.12 * hk * (1.0 + gustT) + sin(uTime * 4.1 + position.x * 2.0) * 0.03 * hk + gustT * 0.18 * hk;
+        transformed.z += cos(uTime * 1.1 + ph) * 0.08 * hk + gustT * 0.07 * hk;
         vLeafH = position.y;`
       )
       .replace(

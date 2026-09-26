@@ -105,10 +105,13 @@ export function createDoors(scene, woodMat, ironMat, camera) {
     }
     return best;
   };
+  let onEnter = null;
   window.addEventListener('keydown', (e) => {
-    if (e.code !== 'KeyE' || e.repeat) return;
-    const d = findNear();
-    if (d) d.target = d.target > 0.5 ? 0 : 1;
+    if (e.repeat) return;
+    if (e.code === 'KeyE') {
+      const d = findNear();
+      if (d) d.target = d.target > 0.5 ? 0 : 1;
+    } else if (e.code === 'Enter' && near && near.target > 0.5 && onEnter) onEnter(near);
   });
   let acc = 0;
   return {
@@ -117,7 +120,8 @@ export function createDoors(scene, woodMat, ironMat, camera) {
       if (acc > 0.15) { // поиск ближайшей двери — несколько раз в секунду
         acc = 0;
         near = findNear();
-        hint.textContent = near && near.target > 0.5 ? 'E — закрыть дверь' : 'E — открыть дверь';
+        hint.textContent = near && near.target > 0.5 ? (onEnter ? 'E — закрыть · Enter — войти' : 'E — закрыть дверь') : 'E — открыть дверь';
+        hint.dataset.open = near && near.target > 0.5 ? '1' : '';
         hint.classList.toggle('show', !!near);
       }
       for (const d of DOORS.list) {
@@ -129,6 +133,10 @@ export function createDoors(scene, woodMat, ironMat, camera) {
       }
     },
     toggleNearest() { const d = findNear(); if (d) d.target = d.target > 0.5 ? 0 : 1; },
+    // войти в открытую дверь (камеру ведёт main.js); на телефоне — нажатием на подсказку
+    get near() { return near; },
+    setOnEnter(f) { onEnter = f; },
+    enterNearest() { if (near && near.target > 0.5 && onEnter) onEnter(near); else this.toggleNearest(); },
     list: DOORS.list,
   };
 }

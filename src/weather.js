@@ -11,6 +11,58 @@ const WIND_BY = { clear: 1, rain: 2.3, fog: 0.4, snow: 1.6, autumn: 1.7 };
 
 const BOX = new THREE.Vector3(70, 45, 70);
 
+// Листопад осенью: листья планируют, кружась, вокруг камеры
+function leafFall(count) {
+  const off = [];
+  for (let i = 0; i < count; i++) off.push(Math.random() * BOX.x, Math.random() * BOX.y, Math.random() * BOX.z, Math.random());
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(count * 3), 3));
+  g.setAttribute('aOff', new THREE.Float32BufferAttribute(off, 4));
+  const uniforms = { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() }, uBox: { value: BOX.clone() }, uAlpha: { value: 0 }, uPx: { value: 1 } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false,
+    vertexShader: `
+      attribute vec4 aOff;
+      uniform float uTime, uPx;
+      uniform vec3 uCam, uBox;
+      varying float vA, vRot;
+      varying vec3 vCol;
+      void main() {
+        vec3 p = aOff.xyz;
+        float s = aOff.w;
+        p.y -= uTime * (0.7 + s * 0.5);
+        p.x += uTime * 1.4 + sin(uTime * 1.3 + s * 40.0) * 1.6;
+        p.z += cos(uTime * 0.9 + s * 25.0) * 1.2;
+        p = mod(p - uCam + uBox * 0.5, uBox) + uCam - uBox * 0.5;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        vA = 1.0 - smoothstep(14.0, 30.0, length(p - uCam));
+        vRot = uTime * (1.5 + s * 3.0) + s * 20.0;
+        vCol = mix(mix(vec3(0.75, 0.32, 0.06), vec3(0.85, 0.6, 0.12), fract(s * 7.3)), vec3(0.45, 0.22, 0.08), step(0.7, fract(s * 13.1)));
+        gl_PointSize = uPx * (0.13 + s * 0.09) * 700.0 / -mv.z;
+      }`,
+    fragmentShader: `
+      uniform float uAlpha;
+      varying float vA, vRot;
+      varying vec3 vCol;
+      void main() {
+        vec2 c = gl_PointCoord - 0.5;
+        float cs = cos(vRot), sn = sin(vRot);
+        c = mat2(cs, -sn, sn, cs) * c;
+        c.x *= 1.0 + 0.9 * abs(sin(vRot * 0.7)); // лист поворачивается ребром
+        float d = length(c * vec2(1.0, 2.0));
+        if (d > 0.5) discard;
+        gl_FragColor = vec4(vCol * (0.8 + 0.4 * (0.5 - d)), uAlpha * vA);
+      }`,
+  });
+  const obj = new THREE.Points(g, mat);
+  obj.frustumCulled = false;
+  obj.visible = false;
+  obj.renderOrder = 20;
+  obj.name = 'leaves';
+  return { obj, uniforms };
+}
+
 function precipitation(count, isSnow) {
   const off = [], end = [];
   const rnd = Math.random;
@@ -67,7 +119,9 @@ export function createWeather(scene, lighting, { paveMask, heightAt, renderer, r
   const rain = precipitation(5000, false);
   const snow = precipitation(3500, true);
   snow.uniforms.uPx.value = renderer.getPixelRatio();
-  scene.add(rain.obj, snow.obj);
+  const leaves = leafFall(700);
+  leaves.uniforms.uPx.value = renderer.getPixelRatio();
+  scene.add(rain.obj, snow.obj, leaves.obj);
 
   // лужи на мостовой двора (видны, пока земля мокрая)
   const puddles = [];
@@ -149,7 +203,7 @@ export function createWeather(scene, lighting, { paveMask, heightAt, renderer, r
 
   const ORDER = ['clear', 'rain', 'fog', 'snow', 'autumn'];
   let mode = 'clear';
-  let wet = 0, snowAmt = 0, rainA = 0, snowA = 0, iceLeft = 0;
+  let wet = 0, snowAmt = 0, rainA = 0, snowA = 0, iceLeft = 0, leafA = 0;
   function setMode(m) {
     if (!ORDER.includes(m)) return;
     mode = m;
@@ -168,7 +222,8 @@ export function createWeather(scene, lighting, { paveMask, heightAt, renderer, r
       lighting.setSurface(wet * (1 - snowAmt), snowAmt);
       AUTUMN.value += ((mode === 'autumn' ? 1 : 0) - AUTUMN.value) * Math.min(1, dt * 0.4);
       WIND_K.value += ((WIND_BY[mode] || 1) - WIND_K.value) * Math.min(1, dt * 0.5);
-      for (const [p, a] of [[rain, rainA], [snow, snowA]]) {
+      leafA += ((mode === 'autumn' ? 1 : 0) - leafA) * Math.min(1, dt * 0.5);
+      for (const [p, a] of [[rain, rainA], [snow, snowA], [leaves, leafA]]) {
         p.obj.visible = a > 0.02;
         p.uniforms.uAlpha.value = a;
         p.uniforms.uTime.value = t;

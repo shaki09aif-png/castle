@@ -34,7 +34,7 @@ export function addTailSway(mat) {
 }
 
 export class ColorBuilder {
-  constructor() { this.pos = []; this.nrm = []; this.col = []; this.aux = []; this.idx = []; this.limb = []; this.curLimb = [0, 0]; this.piv = []; this.curPiv = [0, 0]; this.mat = []; this.curMat = 0; }
+  constructor() { this.pos = []; this.nrm = []; this.col = []; this.aux = []; this.idx = []; this.limb = []; this.curLimb = [0, 0]; this.piv = []; this.curPiv = [0, 0]; this.mat = []; this.curMat = 0; this.foot = []; this.curFoot = 0; this.anim = []; this.curAnim = [0, 0, 0]; }
   add(geo, m, color, sway = 0, seed = 0) {
     const g = geo.index ? geo : geo;
     const p = g.getAttribute('position'), n = g.getAttribute('normal');
@@ -51,7 +51,9 @@ export class ColorBuilder {
       this.aux.push(sway, seed);
       this.limb.push(this.curLimb[0], this.curLimb[1]); // для ходьбы: сторона/знак качания и высота шарнира
       this.piv.push(this.curPiv[0], this.curPiv[1]); // шея фигуры (x, z) — ось поворота головы
-      this.mat.push(this.curMat); // из чего поверхность: 1 ткань, 2 кожа, 3 металл, 4 волосы, 5 выделанная кожа, 6 кольчуга, 7 ткань с узором
+      this.mat.push(this.curMat);
+      this.foot.push(this.curFoot); // высота ступней фигуры — для ткани, колышущейся на ветру
+      this.anim.push(this.curAnim[0], this.curAnim[1], this.curAnim[2]); // мелкая анимация: вид, опорная высота, фаза // из чего поверхность: 1 ткань, 2 кожа, 3 металл, 4 волосы, 5 выделанная кожа, 6 кольчуга, 7 ткань с узором
     }
     if (g.index) for (let i = 0; i < g.index.count; i++) this.idx.push(base + g.index.getX(i));
     else for (let i = 0; i < p.count; i++) this.idx.push(base + i);
@@ -74,6 +76,8 @@ export class ColorBuilder {
     if (this.limb.some((v) => v !== 0)) g.setAttribute('aLimb', new THREE.Float32BufferAttribute(this.limb, 2));
     if (this.piv.some((v) => v !== 0)) g.setAttribute('aPivot', new THREE.Float32BufferAttribute(this.piv, 2));
     if (this.mat.some((v) => v !== 0)) g.setAttribute('aMat', new THREE.Float32BufferAttribute(this.mat, 1));
+    if (this.foot.some((v) => v !== 0)) g.setAttribute('aFoot', new THREE.Float32BufferAttribute(this.foot, 1));
+    if (this.anim.some((v) => v !== 0)) g.setAttribute('aAnim', new THREE.Float32BufferAttribute(this.anim, 3));
     g.setIndex(this.idx);
     g.computeBoundingSphere();
     return g;
@@ -84,13 +88,56 @@ export class ColorBuilder {
 // просвечиванием по краям и лёгким блеском, металл и кольчуга с бликами,
 // волосы прядями. Мелкий узор виден только вблизи и плавно исчезает с
 // расстоянием (чтобы не рябило). Материал определяется атрибутом aMat.
+// сила ветра для одежды (main.js копирует сюда WIND_K)
+export const CLOTH_WIND = { value: 1 };
 export function addPersonShading(mat) {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
     if (prev) prev(sh, r);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aMat;\nvarying float vMat;\nvarying vec3 vOP;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMat = aMat;\nvOP = position;');
+      .replace('#include <common>', '#include <common>\nattribute float aMat;\nattribute float aFoot;\nattribute vec3 aAnim;\nuniform float uClothT;\nuniform float uClothW;\nvarying float vMat;\nvarying vec3 vOP;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vMat = aMat;
+        vOP = position;
+        {
+          // подолы, плащи и рукава колышутся на ветру: сильнее внизу, у каждого в своей фазе
+          float cm = floor(aMat + 0.5);
+          if (cm > 0.5 && cm < 1.5 || cm > 6.5) {
+            float hh = position.y - aFoot;
+            float k = (1.0 - smoothstep(0.35, 1.05, hh)) * step(0.15, hh);
+            float ph = aFoot * 3.7 + position.x * 0.9 + position.z * 1.3;
+            float w = sin(uClothT * 2.3 + ph + hh * 5.0) * 0.6 + sin(uClothT * 5.1 + ph * 1.7) * 0.25;
+            transformed.x += k * (0.012 + w * 0.014) * uClothW;
+            transformed.z += k * w * 0.009 * uClothW;
+          }
+          // мелкие движения: 1 — моргание, 2 — работа руками, 3 — курица клюёт,
+          // 4 — корова жуёт и кивает, 5 — дыхание (собака)
+          float ak = floor(aAnim.x + 0.5);
+          if (ak > 0.5) {
+            float ph = aAnim.z, t = uClothT;
+            if (ak < 1.5) {
+              float p = fract(t / (3.2 + ph * 2.5) + ph);
+              float bl = 1.0 - smoothstep(0.0, 0.035, abs(p - 0.5));
+              transformed.y = aAnim.y + (transformed.y - aAnim.y) * (1.0 - 0.92 * bl);
+            } else if (ak < 2.5) {
+              float k2 = clamp((aAnim.y - position.y) / 0.55, 0.0, 1.0);
+              float a = t * (1.9 + ph * 0.8) + ph * 6.28;
+              transformed.x += cos(a) * 0.045 * k2;
+              transformed.z += sin(a) * 0.045 * k2;
+              transformed.y += sin(a * 2.0) * 0.012 * k2;
+            } else if (ak < 3.5) {
+              float p = fract(t * 0.45 + ph);
+              float pk = smoothstep(0.0, 0.08, p) * (1.0 - smoothstep(0.12, 0.2, p)) + smoothstep(0.3, 0.36, p) * (1.0 - smoothstep(0.4, 0.48, p));
+              transformed.y -= pk * 0.1 * clamp((position.y - aAnim.y + 0.12) / 0.12, 0.0, 1.0);
+            } else if (ak < 4.5) {
+              transformed.y += sin(t * 0.7 + ph * 6.28) * 0.035 + sin(t * 5.5 + ph * 3.0) * 0.006;
+            } else {
+              transformed.y += sin(t * 2.1 + ph * 6.28) * 0.008 * clamp((position.y - aAnim.y) / 0.25, 0.0, 1.0);
+            }
+          }
+        }`);
+    sh.uniforms.uClothT = SWAY_TIME;
+    sh.uniforms.uClothW = CLOTH_WIND;
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         varying float vMat;
@@ -442,7 +489,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const s = (R.scale || 1) * (0.93 + rnd() * 0.12);
   const root = new THREE.Matrix4().compose(new V3(x, y - drop * (R.scale || 1), z), new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), yaw), new V3(s, s, s));
-  { const nk = new V3(0, 1.5, 0).applyMatrix4(root); B.curPiv = [nk.x, nk.z]; }
+  { const nk = new V3(0, 1.5, 0).applyMatrix4(root); B.curPiv = [nk.x, nk.z]; B.curFoot = y - drop * (R.scale || 1); }
   const rot = (rx = 0, ry = 0, rz = 0) => new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz));
   const M = (px, py, pz, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) =>
     root.clone().multiply(new THREE.Matrix4().compose(new V3(px, py, pz), rot(rx, ry, rz), new V3(sx, sy, sz)));
@@ -577,11 +624,14 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   B.add(G.noseBridge, C(headM, 0, 0.0, 0.1), shade(skin, 0.97), 1, sw);
   B.add(G.noseTip, C(headM, 0, -0.02, 0.111), warm(0.1), 1, sw);
   for (const sd of [-1, 1]) B.add(G.nostril, C(headM, sd * 0.011, -0.024, 0.103), warm(0.08), 1, sw);
+  const blinkPh = rnd();
   const eyeC = pick([0x4a2e1a, 0x5a3a20, 0x3a5a7a, 0x4a6a5a, 0x5a5e62, 0x2a1c12]);
   for (const sd of [-1, 1]) {
+    B.curAnim = [1, new V3().setFromMatrixPosition(C(headM, 0, 0.021, 0.09)).y, blinkPh];
     B.add(G.eyeWhite, C(headM, sd * 0.034, 0.022, 0.086), 0xe6dfd4, 1, sw);
     B.add(G.iris, C(headM, sd * 0.034, 0.021, 0.0915), eyeC, 1, sw);
     B.add(G.pupil, C(headM, sd * 0.034, 0.021, 0.0935), 0x0c0908, 1, sw);
+    B.curAnim = [0, 0, 0];
     B.add(G.lid, C(headM, sd * 0.034, 0.024, 0.086, -0.25), shade(skin, 0.9), 1, sw); // верхнее веко
     MT(4);
     B.add(G.brow, C(headM, sd * 0.034, 0.043, 0.098, -0.2, 0, sd * -0.12), shade(hair, 0.8), 1, sw);
@@ -702,6 +752,8 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.curLimb = fixed ? [0, 0] : [-sd * 0.6, 1.4 * s];
     if (i === 0) armLimb = B.curLimb; // рука — в противофазе с ногой
     const sh = M(sd * 0.2, 1.37, lean * 0.1, fx + lean * 0.3, 0, sd * Math.abs(sz));
+    // работающие руки (помешивают, ткут, перебирают) — движение считает шейдер
+    B.curAnim = pose === 'work' && !fixed ? [2, new V3().setFromMatrixPosition(sh).y, (seed * 0.137) % 1] : [0, 0, 0];
     MT(1);
     B.add(G.shoulder, sh, sleeve, 0.6, sw);
     B.add(G.deltoid, M(sd * 0.165, 1.365, lean * 0.1, lean * 0.3, 0, -sd * 0.3), sleeve, 0.6, sw);
@@ -714,6 +766,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     MT(2);
     B.add(G.hand, hm, skin, 0.6, sw);
     hands.push(new V3().setFromMatrixPosition(hm));
+    B.curAnim = [0, 0, 0];
   });
   B.curLimb = [0, 0];
   MT(0);
@@ -813,6 +866,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   }
   B.curPiv = [0, 0];
   B.curMat = 0;
+  B.curFoot = 0;
   return { hands, root };
 }
 

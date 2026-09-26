@@ -108,6 +108,7 @@ export function chicken(B, x, y, z, yaw, rnd) {
   B.add(sph, M(0, 0.2, 0, 0.12, 0.11, 0.17), col);
   B.add(sph, M(0, 0.27, -0.14, 0.06, 0.1, 0.06, -0.6), col);
   const hy = peck ? 0.1 : 0.36, hz = peck ? 0.2 : 0.14;
+  if (!peck) B.curAnim = [3, y + hy - 0.06, rnd()]; // стоящая курица время от времени клюёт
   B.add(sph, M(0, hy, hz, 0.055, 0.065, 0.06), col);
   B.add(new THREE.BoxGeometry(0.015, 0.05, 0.06), M(0, hy + 0.07, hz, 1, 1, 1), 0xc0201a);
   B.add(new THREE.ConeGeometry(0.018, 0.05, 5), M(0, hy, hz + 0.07, 1, 1, 1, Math.PI / 2), 0xe0a020);
@@ -120,6 +121,7 @@ export function chicken(B, x, y, z, yaw, rnd) {
   }
   for (let k = 0; k < 3; k++) B.add(sph, M((k - 1) * 0.035, 0.32 + k % 2 * 0.02, -0.17, 0.02, 0.1, 0.035, -0.9 + (k - 1) * 0.15), k === 1 ? dk : col);
   B.add(sph, M(0, hy - 0.05, hz + 0.045, 0.012, 0.022, 0.012), 0xc0201a);
+  B.curAnim = [0, 0, 0];
 }
 
 // Плющ: веточки и листья-карточки, растущие по стене пятном от земли вверх

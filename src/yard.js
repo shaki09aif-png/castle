@@ -287,6 +287,7 @@ export function dog(colorB, x, y, z, yaw, lie, rnd) {
   const c = [0x8a6a3a, 0x3a2a1a, 0xc8b89a][Math.floor(rnd() * 3)];
   const dk = new THREE.Color(c).multiplyScalar(0.7).getHex();
   const h = lie ? 0.16 : 0.44;
+  if (lie) colorB.curAnim = [5, y + h - 0.05, rnd()]; // спящая собака дышит
   colorB.add(G.sph, L(r, 0, h + 0.02, 0.14, 0.15, 0.16, 0.2), c); // грудь
   colorB.add(G.sph, L(r, 0, h, -0.16, 0.12, 0.13, 0.22), c); // таз
   colorB.add(G.cylLo, L(r, 0, h + 0.12, 0.3, 0.07, 0.2, 0.07, 0.8), c); // шея
@@ -310,6 +311,7 @@ export function dog(colorB, x, y, z, yaw, lie, rnd) {
       colorB.add(G.sphLo, L(r, lx, 0.02, lz + 0.025 + (hind ? -0.05 : 0), 0.03, 0.02, 0.045), dk);
     }
   }
+  colorB.curAnim = [0, 0, 0];
 }
 const AG = {
   pigBody: new THREE.CapsuleGeometry(0.25, 0.44, 6, 14).rotateX(Math.PI / 2),

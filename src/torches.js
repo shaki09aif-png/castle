@@ -215,6 +215,7 @@ export function createTorches(scene, terrain, walls) {
   scene.add(pm);
 
   return {
+    list, // для копоти над факелами (wear.js)
     count: list.length,
     update(t) { uTime.value = t; },
     // k: 0 — день, 1 — ночь. Ночью пятна света от факелов ярче и больше.

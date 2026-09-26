@@ -58,7 +58,7 @@ function kit(it, tiles) {
   const qB = new THREE.Quaternion().setFromRotationMatrix(basis);
   const M = (lx, y, lz, sx = 1, sy = 1, sz = 1, yaw = 0, rx = 0, rz = 0) =>
     new THREE.Matrix4().compose(f.p(lx, y, lz), qB.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, yaw, rz, 'YXZ'))), new V3(sx, sy, sz));
-  const lights = [], day = [], fires = [];
+  const lights = [], day = [], fires = [], soot = [];
   // брус между двумя точками (локальные [lx, y, lz]); возвращает базис для цветных версий
   const beamBasis = (a, b) => {
     const pa = f.p(a[0], a[1], a[2]), pb = f.p(b[0], b[1], b[2]);
@@ -71,7 +71,7 @@ function kit(it, tiles) {
     return { c: pa.lerp(pb, 0.5), d, s2, n3, len };
   };
   const K = {
-    f, stone, wood, daub, thatch, dirt, col, glow, win, M, lights, day, fires,
+    f, stone, wood, daub, thatch, dirt, col, glow, win, M, lights, day, fires, soot,
     // цветная коробка: центр, полуразмеры
     cb: (lx, y, lz, hx, hy, hz, c, yaw = 0, rx = 0, rz = 0) => col.add(G.box, M(lx, y, lz, hx * 2, hy * 2, hz * 2, yaw, rx, rz), c),
     // деревянная коробка (текстура дерева)
@@ -211,7 +211,44 @@ function kitchen(K, it, rnd) {
   for (const [lx, lz] of [[-hl + 0.4, -hw + 0.4], [-hl + 0.4, -hw + 1.05]]) K.barrel(lx, y, lz);
   K.sack(-hl + 1.1, y, -hw + 0.4, 1, rnd);
   K.npc(0.4, y, -0.9, Math.PI, { role: 'woman', pose: 'work', item: null, seed: 801 });
-  K.npc(hl - 1.6, y, 0.4, -Math.PI / 2, { role: 'servant', item: 'bucket', seed: 802 });
+  // вертел над очагом: железные рогатины, пруток с тушкой, поддон для жира; поварёнок крутит ручку
+  const sx = hl - 1.12;
+  for (const z of [-1.55, 0.35]) K.rod([sx, y, z], [sx, y + 1.0, z], 0.022, 0x2a2622);
+  K.rod([sx, y + 0.95, -1.7], [sx, y + 0.95, 0.5], 0.012, 0x3a3634);
+  K.rod([sx, y + 0.95, 0.5], [sx, y + 0.75, 0.55], 0.012, 0x3a3634);
+  K.col.add(G.sph, K.M(sx, y + 0.95, -0.6, 0.2, 0.18, 0.5), 0x7a3a18); // жаркое
+  for (const z of [-1.0, -0.2]) K.col.add(G.sph, K.M(sx, y + 0.86, z, 0.08, 0.1, 0.1), 0x6a3014); // окорочка
+  K.col.add(G.box, K.M(sx, y + 0.12, -0.6, 0.3, 0.04, 1.6), 0x3a3634); // поддон
+  K.npc(sx - 0.62, y, 0.62, Math.PI / 2, { role: 'servant', pose: 'work', item: null, seed: 802 });
+  // хлебная печь: каменный купол на цоколе, в устье тлеют угли
+  const ox = hl - 2.2, oz = -hw + 0.8;
+  K.sb(ox, y + 0.3, oz, 0.75, 0.3, 0.75);
+  K.stone.addGeometry(new THREE.SphereGeometry(0.72, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), K.M(ox, y + 0.6, oz, 1, 0.85, 1));
+  K.col.add(G.cyl, K.M(ox, y + 0.78, oz + 0.62, 0.22, 0.2, 0.1, 0, Math.PI / 2), 0x1a1210);
+  for (let k = 0; k < 5; k++) K.glow.add(G.sphLo, K.M(ox + (rnd() - 0.5) * 0.3, y + 0.64, oz + 0.45 + rnd() * 0.15, 0.05, 0.025, 0.05), rnd() < 0.5 ? 0xff5a14 : 0xc03a10);
+  K.lights.push({ p: K.f.p(ox, y + 0.75, oz + 0.8), k: 0.5, r: 1.2 });
+  K.wb(ox + 0.95, y + 1.0, oz + 0.9, 0.05, 1.0, 0.05, 'y'); // лопата для хлеба у печи
+  K.cb(ox + 0.95, y + 0.08, oz + 0.9, 0.16, 0.012, 0.12, 0x8a6a4a);
+  // разделочный стол у фасада: доска, нож, рыба, капуста, репа
+  const wx = 1.4, wz = hw - 0.55;
+  K.wb(wx, y + 0.84, wz, 0.7, 0.05, 0.32);
+  for (const dx of [-0.6, 0.6]) for (const dz of [-0.25, 0.25]) K.wb(wx + dx, y + 0.4, wz + dz, 0.04, 0.4, 0.04, 'y');
+  K.wb(wx - 0.2, y + 0.9, wz, 0.25, 0.02, 0.18);
+  K.cb(wx - 0.15, y + 0.93, wz + 0.02, 0.1, 0.004, 0.015, 0x9a9a98, 0.4);
+  K.col.add(G.sph, K.M(wx + 0.3, y + 0.93, wz - 0.05, 0.16, 0.04, 0.05, 0.3), 0x8a9aa0); // рыба
+  for (let k = 0; k < 4; k++) K.col.add(G.sph, K.M(wx + 0.1 + k * 0.12, y + 0.94, wz + 0.18, 0.06, 0.06, 0.06), k % 2 ? 0x5a8a3a : 0xd8d0c0);
+  // корзины с овощами на полу
+  for (const [bx, bz, c] of [[wx - 1.0, wz - 0.1, 0x6a9a3a], [wx - 1.5, wz - 0.3, 0xc8a060]]) {
+    K.col.add(G.bowl, K.M(bx, y + 0.3, bz, 0.25, 0.3, 0.25, 0, Math.PI), 0x9a7a4a);
+    for (let k = 0; k < 5; k++) K.col.add(G.sphLo, K.M(bx + (rnd() - 0.5) * 0.25, y + 0.3, bz + (rnd() - 0.5) * 0.25, 0.08, 0.07, 0.08), c);
+  }
+  // сковороды и половники на крюках у очага
+  K.wb(hl - 0.08, y + 1.75, 1.3, 0.03, 0.03, 0.6, 'z');
+  for (let k = 0; k < 4; k++) {
+    const z = 0.85 + k * 0.3;
+    K.col.add(k % 2 ? G.cyl : G.bowl, K.M(hl - 0.1, y + 1.45 - (k % 2) * 0.1, z, k % 2 ? 0.02 : 0.13, k % 2 ? 0.45 : 0.03, k % 2 ? 0.02 : 0.13, 0, 0, Math.PI / 2), 0x2a2622);
+  }
+  K.soot.push({ p: K.f.p(hl - 0.3, it.eaveY, -0.6), r: 2.4 }, { p: K.f.p(ox, y + 1.6, oz), r: 1.2 });
 }
 
 function barracks(K, it, rnd) {
@@ -241,6 +278,35 @@ function barracks(K, it, rnd) {
   for (let k = 0; k < 5; k++) K.col.add(G.cylLo, K.M(hl - 0.25, y + 1.2, -1.2 + k * 0.3, 0.02, 2.4, 0.02, 0, 0, 0.08), 0x5a3e24);
   K.wb(hl - 0.25, y + 0.9, -0.6, 0.06, 0.05, 0.9);
   for (let k = 0; k < 3; k++) K.col.add(G.cyl, K.M(hl - 0.08, y + 1.6, 0.6 + k * 0.7, 0.28, 0.03, 0.28, 0, 0, Math.PI / 2), [0x7a1c1c, 0x1d3f8a, 0xd6a632][k]);
+  // стойка с кольчугой и шлемом, мечи и топор на торцевой стене
+  {
+    const ax = -hl + 0.6, az = 0.9;
+    K.wb(ax, y + 0.75, az, 0.04, 0.75, 0.04, 'y');
+    K.wb(ax, y + 1.42, az, 0.04, 0.03, 0.3, 'z');
+    K.col.curMat = 6; // кольчуга — кольца видны вблизи
+    K.col.add(G.cyl, K.M(ax, y + 1.08, az, 0.22, 0.62, 0.16), 0x8a8e94);
+    K.col.add(G.sph, K.M(ax, y + 1.38, az, 0.24, 0.1, 0.17), 0x8a8e94);
+    K.col.curMat = 3;
+    K.col.add(G.sph, K.M(ax, y + 1.62, az, 0.12, 0.12, 0.12), 0x6e7074);
+    K.col.add(G.cyl, K.M(ax, y + 1.58, az, 0.2, 0.01, 0.2), 0x5e6064);
+    for (const [z, r] of [[-0.6, 0.5], [-0.2, -0.5]]) K.col.add(G.box, K.M(-hl + 0.06, y + 1.6, z, 0.02, 0.85, 0.045, 0, r), 0xa8acb2);
+    K.col.add(G.box, K.M(-hl + 0.06, y + 1.2, -1.2, 0.02, 0.22, 0.14), 0x8a8e94);
+    K.col.curMat = 0;
+    for (const [z, r] of [[-0.6, 0.5], [-0.2, -0.5]]) K.col.add(G.box, K.M(-hl + 0.07, y + 1.12 + (r > 0 ? 0.2 : 0.2), z + (r > 0 ? 0.2 : -0.2), 0.03, 0.12, 0.03, 0, r), 0x4a3020);
+    K.wb(-hl + 0.1, y + 1.1, -1.2, 0.03, 0.5, 0.025, 'y');
+  }
+  // жаровня на треноге и стражник, точащий меч
+  {
+    const bx = -2.1, bz = 0.3;
+    for (let k = 0; k < 3; k++) { const a = k * 2.09; K.rod([bx + Math.cos(a) * 0.28, y, bz + Math.sin(a) * 0.28], [bx + Math.cos(a) * 0.12, y + 0.6, bz + Math.sin(a) * 0.12], 0.015, 0x2a2622); }
+    K.col.add(G.bowl, K.M(bx, y + 0.58, bz, 0.3, 0.14, 0.3), 0x2a2622);
+    for (let k = 0; k < 8; k++) K.glow.add(G.sphLo, K.M(bx + (rnd() - 0.5) * 0.35, y + 0.7, bz + (rnd() - 0.5) * 0.35, 0.06, 0.03, 0.06), rnd() < 0.5 ? 0xff6a1a : 0xc03a10);
+    K.fire(bx, y + 0.68, bz, 0.35, rnd);
+    K.wood.addGeometry(G.cyl, K.M(bx + 0.9, y + 0.4, bz + 0.4, 0.16, 0.04, 0.16));
+    K.npc(bx + 0.9, y + 0.45, bz + 0.4, -Math.PI / 2 - 0.4, { role: 'guard', pose: 'work', item: null, seed: 813 });
+  }
+  // сапоги у нар
+  for (let k = 0; k < 4; k++) for (const s2 of [-1, 1]) K.col.add(G.sph, K.M(-hl + 1.5 + k * 2.2 + s2 * 0.08, y + 0.08, -hw + 1.25, 0.06, 0.08, 0.13), 0x2a1d14);
   // фонарь на балке
   K.col.add(G.box, K.M(0, it.eaveY - 0.7, 0.9, 0.18, 0.25, 0.18), 0x2a2622);
   K.glow.add(G.flame, K.M(0, it.eaveY - 0.75, 0.9, 0.04, 0.12, 0.04), 0xffc060);
@@ -669,7 +735,42 @@ function house(K, it, rnd) {
   else if (seed % 3 === 2) K.npc(X(-0.55), y + 0.45, hz + 0.05, -s * Math.PI / 2, { role: 'peasant', pose: 'sit', item: null, seed: 875 + seed });
 }
 
-const BUILD = { kitchen, barracks, chapel, store, granary, mill, house };
+// Большой зал (стены, столы и люди строятся в extras.js) — здесь дополнения:
+// камыш и травы на полу, собаки у очага, блюда и свечи на высоком столе, ореолы огня
+function hall(K, it, rnd) {
+  const hl = it.L / 2 - 0.3, hw = it.W / 2 - 0.3, y = it.floorY;
+  const [hxL, hzL] = it.hearth;
+  for (let k = 0; k < 140; k++) {
+    const lx = (rnd() * 2 - 1) * hl, lz = (rnd() * 2 - 1) * hw;
+    if (Math.hypot(lx - hxL, lz - hzL) < 1.3) continue;
+    K.cb(lx, y + 0.045, lz, 0.05 + rnd() * 0.07, 0.003, 0.004, [0x5e5434, 0x54492e, 0x4a4230, 0x6a6a3a][Math.floor(rnd() * 4)], rnd() * 6.28);
+  }
+  for (let k = 0; k < 10; k++) { // брошенные травы: лаванда, мята
+    const lx = (rnd() * 2 - 1) * hl * 0.8, lz = (rnd() - 0.5) * 1.2;
+    K.cb(lx, y + 0.05, lz, 0.06, 0.012, 0.012, rnd() < 0.5 ? 0x6a5a8a : 0x4a6a3a, rnd() * 6.28);
+  }
+  const dp = (lx, lz, yaw) => { const p = K.f.p(lx, y + 0.04, lz); dog(K.col, p.x, p.y, p.z, Math.atan2(K.f.N.x, K.f.N.z) + yaw, true, rnd); };
+  dp(hxL - 1.5, hzL + 0.6, 1.2);
+  dp(hxL + 0.4, hzL - 1.6, -0.6);
+  // кость у собаки
+  K.cb(hxL - 1.1, y + 0.06, hzL + 0.35, 0.09, 0.015, 0.015, 0xe0d8c0, 0.7);
+  // высокий стол: блюда с жарким, кубки, свечи
+  const dx = it.dais + 0.4, ty = y + 1.2;
+  for (const lz of [-1.8, -0.6, 0.6, 1.8]) {
+    K.col.add(G.bowl, K.M(dx, ty + 0.01, lz, 0.2, 0.03, 0.2), 0xb09050);
+    K.col.add(G.sph, K.M(dx, ty + 0.07, lz, 0.13, 0.07, 0.1, rnd() * 3), [0x7a3a18, 0x9a6a30, 0xc89a4a][Math.floor(rnd() * 3)]);
+    K.col.curMat = 3;
+    K.col.add(G.cylLo, K.M(dx - 0.25, ty + 0.09, lz + 0.25, 0.035, 0.16, 0.035), 0xc8a040);
+    K.col.curMat = 0;
+  }
+  for (const lz of [-1.2, 0, 1.2]) K.candle(dx + 0.2, ty, lz);
+  // тёплое свечение над очагом и люстрами
+  K.fires.push({ p: K.f.p(hxL, y + 0.6, hzL), s: 1.1 });
+  for (const lx of it.chandeliers) K.fires.push({ p: K.f.p(lx, it.eaveY - 1.5, 0), s: 0.35 });
+  K.lights.push({ p: K.f.p(hxL, y + 0.6, hzL), k: 2.0, r: 3.0 });
+}
+
+const BUILD = { kitchen, barracks, chapel, store, granary, mill, house, hall };
 
 // Запечь освещение в вершины: x — отсвет огня, y — затенение (углы, пол,
 // копоть под крышей), z — дневной свет из дверей и окон
@@ -701,6 +802,7 @@ function bake(geo, K, it) {
     amb *= 0.75 + 0.25 * ss(0.1, 0.9, Math.max(dx, dz)); // углы темнее
     amb *= 0.72 + 0.28 * ss(0.0, 0.3, p.y - y0);
     amb *= 1 - 0.4 * ss(eave - 0.5, eave + 1.2, p.y); // копоть под крышей
+    for (const S of K.soot) { const ds = p.distanceTo(S.p); amb *= 1 - 0.55 * (1 - ss(0, S.r, ds)); } // копоть у очага и печи
     out[i * 3] = Math.min(2.2, light(K.lights));
     out[i * 3 + 1] = amb;
     out[i * 3 + 2] = Math.min(1.4, light(K.day));

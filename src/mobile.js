@@ -104,7 +104,8 @@ export function setupPhone({ cam, camera, doors, dom, onResize }) {
 
   // ---- дверь: нажать на подсказку
   const hint = document.getElementById('door-hint');
-  if (hint && doors && doors.toggleNearest) hint.addEventListener('click', () => doors.toggleNearest());
+  // закрыта — открыть; открыта — войти
+  if (hint && doors && doors.enterNearest) hint.addEventListener('click', () => doors.enterNearest());
 
   // ---- подпись режима на кнопке и сброс джойстика при смене режима
   let last = null;

@@ -2,6 +2,7 @@
 // объёмный (высотный) туман с подсветкой от солнца и дымка у горизонта.
 import * as THREE from 'three';
 import { Q } from './quality.js';
+import { macroNoiseTexture } from './textures.js';
 
 // Направление на солнце: послеполуденное, с юго-запада.
 // Если загружена HDRI неба с Poly Haven, направление берётся из неё.
@@ -31,14 +32,17 @@ export const ATMO = new Float32Array([0, 0, 0.5, 0]);
 function shareAtmo() {
   for (const k of ['standard', 'physical', 'lambert', 'phong', 'basic', 'toon', 'matcap']) {
     const L = THREE.ShaderLib[k];
-    if (L && L.uniforms) L.uniforms.castleAtmo = { value: ATMO }; // типизированный массив не копируется при клонировании — общий на все
+    if (L && L.uniforms) {
+      L.uniforms.castleAtmo = { value: ATMO }; // типизированный массив не копируется при клонировании — общий на все
+      L.uniforms.castleCloudTex = { value: macroNoiseTexture() }; // копия текстуры делит с оригиналом одно изображение
+    }
   }
   // тени от облаков: ослабляем прямой солнечный свет (рассеянный остаётся)
   const chunk = THREE.ShaderChunk.lights_fragment_begin;
   const needle = chunk.indexOf('getDirectionalLightInfo( directionalLight, directLight );');
-  if (needle > 0 && !chunk.includes('castleCloud')) {
+  if (needle > 0 && !chunk.includes('vCloud')) {
     THREE.ShaderChunk.lights_fragment_begin = chunk.replace('getDirectionalLightInfo( directionalLight, directLight );',
-      'getDirectionalLightInfo( directionalLight, directLight );\n\t\t#ifdef USE_FOG\n\t\tdirectLight.color *= castleCloud( vFogWorldPos );\n\t\t#endif');
+      'getDirectionalLightInfo( directionalLight, directLight );\n\t\t#ifdef USE_FOG\n\t\tdirectLight.color *= vCloud;\n\t\t#endif');
   }
 }
 
@@ -49,11 +53,20 @@ function installFogChunks() {
 #ifdef USE_FOG
   varying float vFogDepth;
   varying vec3 vFogWorldPos;
+  varying float vCloud;
+  uniform vec4 castleAtmo;
+  uniform sampler2D castleCloudTex;
 #endif`;
   THREE.ShaderChunk.fog_vertex = `
 #ifdef USE_FOG
   vFogDepth = - mvPosition.z;
   vFogWorldPos = cameraPosition + ( vec4( mvPosition.xyz, 0.0 ) * viewMatrix ).xyz;
+  // тень от облаков считается в вершинах (пятна огромные — интерполяции хватает)
+  vCloud = 1.0;
+  if ( castleAtmo.z > 0.01 ) {
+    vec2 m = textureLod( castleCloudTex, ( vFogWorldPos.xz + castleAtmo.xy ) * 0.0011, 0.0 ).rg;
+    vCloud = 1.0 - castleAtmo.z * smoothstep( 0.42, 0.62, m.r * 0.7 + m.g * 0.3 );
+  }
 #endif`;
   THREE.ShaderChunk.fog_pars_fragment = `
 #ifdef USE_FOG
@@ -61,18 +74,13 @@ function installFogChunks() {
   uniform vec4 castleAtmo;
   varying float vFogDepth;
   varying vec3 vFogWorldPos;
+  varying float vCloud;
   float cHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
   float cNoise( vec2 p ) {
     vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
     return mix( mix( cHash( i ), cHash( i + vec2( 1, 0 ) ), f.x ), mix( cHash( i + vec2( 0, 1 ) ), cHash( i + vec2( 1, 1 ) ), f.x ), f.y );
   }
-  // тень от облаков: большие мягкие пятна, плывут по ветру
-  float castleCloud( vec3 wp ) {
-    if ( castleAtmo.z < 0.01 ) return 1.0;
-    vec2 p = ( wp.xz + castleAtmo.xy ) * 0.0021;
-    float n = cNoise( p ) * 0.62 + cNoise( p * 2.3 + 7.1 ) * 0.28 + cNoise( p * 5.1 - 3.7 ) * 0.1;
-    return 1.0 - castleAtmo.z * smoothstep( 0.4, 0.6, n );
-  }
+
   #ifdef FOG_EXP2
     uniform float fogDensity;
   #else

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GeoBuilder } from './walls.js';
 import { ColorBuilder, person, createPeople, SWAY_TIME, TAIL_GLSL, addTailSway, addPersonShading } from './people.js';
 import { horse } from './yard.js';
-import { HALL, Frame, strawMaterial, Smoke, cart, haystack } from './courtyard.js';
+import { HALL, Frame, strawMaterial, Smoke, cart, haystack, INTERIORS } from './courtyard.js';
 import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth, GATEHOUSE, GATE_PASSAGE, BARBICAN, RIVER } from './layout.js';
 import { WINDOWS } from './towers.js';
 import { mulberry32 } from './noise.js';
@@ -98,6 +98,8 @@ function makeWalker(scene, build, path, { speed = 1.1, loop = true, stride = 1.5
   if (bs.y > 0.9 && bs.y < 2.3 && Math.max(bs.x, bs.z) < 1.3 && geo.getAttribute('aLimb')) {
     const sc = Math.min(1, bs.y / 1.78);
     uHuman.value = sc;
+    // у каждого своя походка: кто-то идёт быстрее и шире шагает, кто-то медленнее
+    if (loop) { const v = 0.88 + Math.random() * 0.24; speed *= v; stride *= Math.sqrt(v); }
     amp = Math.asin(Math.min(0.8, stride / (4 * 0.9 * sc)));
   }
   uAmp.value = amp;
@@ -436,6 +438,8 @@ function hallInterior(ctx) {
   pp(5.0, 1.0, -1, -0.6, 'minstrel'); // менестрель с лютней у очага
   pp(-hl + 3.6, -3.4, 1, 0.3, 'servant'); // виночерпий
   ctx.hallAisle = { f, floorY, x0: -hl + 3.6, x1: hl - 2.2 };
+  // дополнения (камыш на полу, собаки, блюда на высоком столе, ореолы огня) — в интерьерах
+  INTERIORS.push({ id: 'hall', f, L: b.L, W: b.W, floorY, eaveY, doors: [], hearth: [1.2, 0], dais: dx, chandeliers: [-2.2, 3.0] });
 }
 
 // ===========================================================================
@@ -893,7 +897,8 @@ function cow(B, x, y, z, yaw, rnd, color = null) {
   // шея с подгрудком
   B.add(new THREE.CylinderGeometry(0.2, 0.3, 0.62, 12), L(0, (hy + 1.2) / 2, 0.8, 1, 1, 1, graze ? 1.0 : 0.5), base);
   B.add(GEO.sph, L(0, (hy + 1.0) / 2 - 0.08, 0.86, 0.08, 0.22, 0.2, graze ? 0.9 : 0.4), base);
-  // голова: широкий лоб, сужение к морде, влажный нос, глаза, уши, рога
+  // голова: широкий лоб, сужение к морде, влажный нос, глаза, уши, рога (жуёт и кивает — шейдер)
+  B.curAnim = [4, 0, rnd()];
   B.add(COWG.skull, L(0, hy + 0.04, hz - 0.06, 1, 1, 1, tilt), base);
   B.add(COWG.snout, L(0, hy - (graze ? 0.14 : 0.04), hz + (graze ? 0.16 : 0.2), 1, 1, 1, tilt + Math.PI / 2 - 0.2), base);
   B.add(GEO.sph, L(0, hy - (graze ? 0.26 : 0.08), hz + (graze ? 0.25 : 0.36), 0.13, 0.09, 0.08, tilt), 0xc89a8a);
@@ -904,6 +909,7 @@ function cow(B, x, y, z, yaw, rnd, color = null) {
     B.add(GEO.cone, L(sd * 0.25, hy + 0.3, hz - 0.12, 0.015, 0.07, 0.015, 0, sd * 0.3), 0x3a3028);
     B.add(COWG.ear, L(sd * 0.23, hy + 0.1, hz - 0.1, 1, 1, 1, 0, sd * -1.25), base);
   }
+  B.curAnim = [0, 0, 0];
   // ноги: бедро, скакательный/запястный сустав, голень, раздвоенное копыто
   for (const [lx, lz] of [[-0.22, 0.55], [0.22, 0.55], [-0.22, -0.6], [0.22, -0.6]]) {
     B.curLimb = [(lx < 0) === (lz > 0) ? 0.7 : -0.7, 0.72]; // для ходьбы (волы в упряжке)
