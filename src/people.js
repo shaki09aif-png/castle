@@ -55,6 +55,15 @@ export class ColorBuilder {
     if (g.index) for (let i = 0; i < g.index.count; i++) this.idx.push(base + g.index.getX(i));
     else for (let i = 0; i < p.count; i++) this.idx.push(base + i);
   }
+  // затенить только что добавленную геометрию по её исходным координатам
+  // (складки ткани темнее, низ одежды темнее верха) — «запечённый» объём
+  shadeLast(geo, fn) {
+    const p = geo.getAttribute('position'), n = p.count, base = this.col.length / 3 - n;
+    for (let i = 0; i < n; i++) {
+      const k = fn(p.getX(i), p.getY(i), p.getZ(i));
+      for (let c = 0; c < 3; c++) this.col[(base + i) * 3 + c] *= k;
+    }
+  }
   build() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
@@ -93,16 +102,42 @@ function handGeometry() {
   return mergeSmall([palm, fing, th]);
 }
 
+// убор, плотно облегающий голову, с вырезом для лица: макушка целиком, по бокам
+// и сзади — ткань (или кольчуга), спереди открыто лицо; снизу — полоса под подбородком
+function openHood(r, t0, t1, t2, open = 0.9) {
+  const cap = new THREE.SphereGeometry(r, 14, 4, 0, Math.PI * 2, 0, t0);
+  const ring = new THREE.SphereGeometry(r, 12, 6, Math.PI / 2 + open, Math.PI * 2 - 2 * open, t0, t1 - t0);
+  const low = new THREE.SphereGeometry(r, 14, 2, 0, Math.PI * 2, t1, t2 - t1);
+  const g = mergeSmall([cap, ring, low]);
+  g.scale(1, 1.12, 1.06); // голова вытянута — убор тоже
+  return g;
+}
+// передник, облегающий тело: часть усечённого конуса спереди, завязки на поясе
+function apronGeo(len, w = 1.5) {
+  const g = new THREE.CylinderGeometry(0.205, 0.25 + len * 0.06, len, 9, 3, true, -w / 2, w);
+  const p = g.getAttribute('position');
+  for (let i = 0; i < p.count; i++) { // лёгкие складки к низу
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), k = (len / 2 - y) / len;
+    const f = 1 + 0.03 * k * Math.sin(Math.atan2(x, z) * 11);
+    p.setXYZ(i, x * f, y, z * f * 0.74);
+  }
+  g.computeVertexNormals();
+  g.translate(0, -len / 2, 0);
+  return g;
+}
+
 // общие заготовки геометрии (фигура ~1,7 м; начало координат — между ступнями)
 const G = {
   thigh: new THREE.CylinderGeometry(0.074, 0.06, 0.45, 10).translate(0, -0.225, 0),
   shin: new THREE.CylinderGeometry(0.058, 0.045, 0.43, 10).translate(0, -0.215, 0),
   knee: new THREE.SphereGeometry(0.06, 8, 6),
   shoe: (() => { const g = new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2); g.scale(0.058, 0.075, 0.135); g.translate(0, 0, 0.035); return g; })(),
-  upperArm: new THREE.CylinderGeometry(0.058, 0.05, 0.3, 10).translate(0, -0.15, 0),
-  foreArm: new THREE.CylinderGeometry(0.048, 0.04, 0.28, 10).translate(0, -0.14, 0),
+  upperArm: (() => { const g = new THREE.CylinderGeometry(0.056, 0.048, 0.3, 10, 3); const p = g.getAttribute('position'); for (let i = 0; i < p.count; i++) { const y = p.getY(i); const k = 1 + 0.08 * Math.sin((y + 0.15) / 0.3 * Math.PI); p.setXYZ(i, p.getX(i) * k, y, p.getZ(i) * k); } g.computeVertexNormals(); return g.translate(0, -0.15, 0); })(),
+  foreArm: new THREE.CylinderGeometry(0.047, 0.037, 0.28, 10).translate(0, -0.14, 0),
   joint: new THREE.SphereGeometry(0.05, 8, 6),
-  shoulder: new THREE.SphereGeometry(0.075, 10, 8),
+  shoulder: (() => { const g = new THREE.SphereGeometry(0.06, 10, 8); g.scale(1.0, 0.95, 1.1); return g; })(),
+  // дельтовидная «накладка» — плавный переход от плеча туловища к руке
+  deltoid: (() => { const g = new THREE.SphereGeometry(0.07, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55); g.scale(1.25, 0.7, 1.05); return g; })(),
   cuff: new THREE.CylinderGeometry(0.047, 0.047, 0.04, 10),
   hand: handGeometry(),
   head: (() => { const g = new THREE.SphereGeometry(0.1, 14, 10); g.scale(0.95, 1.12, 1.02); return g; })(),
@@ -125,9 +160,10 @@ const G = {
   capeline: new THREE.CylinderGeometry(0.12, 0.13, 0.12, 12),
   brim: new THREE.CylinderGeometry(0.21, 0.21, 0.025, 18),
   helmTop: new THREE.SphereGeometry(0.121, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-  coif: new THREE.SphereGeometry(0.128, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.7),
+  coif: openHood(0.128, Math.PI * 0.3, Math.PI * 0.64, Math.PI * 0.72, 0.85),
   mailCape: new THREE.CylinderGeometry(0.12, 0.27, 0.16, 16, 1, true),
-  wimple: new THREE.SphereGeometry(0.126, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.75),
+  wimple: openHood(0.124, Math.PI * 0.3, Math.PI * 0.66, Math.PI * 0.8, 0.88),
+  apron: apronGeo(0.62), apronLong: apronGeo(0.78, 1.7), apronW: apronGeo(0.66, 1.6),
   veil: new THREE.CylinderGeometry(0.11, 0.2, 0.3, 16, 1, true, Math.PI * 0.6, Math.PI * 1.8),
   shaft: new THREE.CylinderGeometry(0.018, 0.018, 1, 6).translate(0, 0.5, 0),
   tip: new THREE.ConeGeometry(0.04, 0.25, 6),
@@ -178,6 +214,15 @@ function tunicGeo(len = 1, flare = 1) {
   g.computeVertexNormals();
   g.scale(1, 1, 0.7);
   return g;
+}
+// объём ткани: вглубь складок темнее, к подолу темнее, под поясом — тень напуска
+function clothShade(x, y, z) {
+  const a = Math.atan2(z / 0.7, x);
+  const fold = Math.sin(a * 9) * 0.8 + Math.sin(a * 5 + 1.3) * 0.4;
+  const w = Math.max(0, Math.min(1, (0.98 - y) / 0.4));
+  const grad = 0.8 + 0.2 * Math.min(1, Math.max(0, (y - 0.4) / 0.9));
+  const belt = y > 0.9 && y < 0.98 ? 0.9 : 1;
+  return grad * (1 + 0.12 * fold * w) * belt;
 }
 const TUNIC = tunicGeo(), ROBE = tunicGeo(1.9, 1.15), DRESS = tunicGeo(2.1, 1.25);
 const HEM_Y = { tunic: 0.55, robe: 0.55 - 0.9 * 0.25, dress: 0.55 - 1.1 * 0.25 };
@@ -237,7 +282,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   const legs2 = parti ? pick(TRIM) : legs;
   const pointy = role === 'noble' || role === 'knight' || role === 'merchant' || role === 'minstrel';
   const wraps = poor && !female && !child && rnd() < 0.6; // обмотки на голенях
-  const trim = poor ? null : pick(TRIM);
+  const trim = poor || role === 'priest' ? null : pick(TRIM);
   const sw = seed;
 
   // ---- ноги: бедро, колено, голень, башмак ----
@@ -266,12 +311,15 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   const body = R.dress ? DRESS : R.robe ? ROBE : TUNIC;
   const bodyM = M(0, 0, 0, lean * 0.25);
   B.add(body, bodyM, tunic, 0.4, sw);
+  B.shadeLast && B.shadeLast(body, clothShade);
   const hemKind = R.dress ? 'dress' : R.robe ? 'robe' : 'tunic';
   const flare = R.dress ? 1.25 : R.robe ? 1.15 : 1;
   B.add(G.hem, C(bodyM, 0, HEM_Y[hemKind] + 0.02, 0, 0, 0, 0, 1).multiply(new THREE.Matrix4().makeScale(0.235 * flare, trim ? 2 : 1, 0.235 * flare * 0.7)), trim || shade(tunic, 0.6), 0.4, sw);
   if (trim) B.add(G.hem, C(bodyM, 0, HEM_Y[hemKind] + 0.09, 0).multiply(new THREE.Matrix4().makeScale(0.229 * flare, 0.6, 0.229 * flare * 0.7)), shade(trim, 0.7), 0.4, sw);
   // ворот
   B.add(G.hem, C(bodyM, 0, 1.47, 0).multiply(new THREE.Matrix4().makeScale(0.09, trim ? 2.2 : 1.6, 0.075)), trim || shade(tunic, 0.7), 0.4, sw);
+  // разрез ворота у мужской туники
+  if (!R.dress && !R.robe && !R.surcoat && !child) B.add(new THREE.BoxGeometry(0.012, 0.085, 0.006), C(bodyM, 0, 1.425, 0.151, -0.42), shade(tunic, 0.45), 0.4, sw);
   // заплаты на одежде бедняков
   if (poor && !child && rnd() < 0.55) for (let k = 0; k < 2; k++) {
     const a = (rnd() - 0.5) * 1.6 + (k ? Math.PI : 0), yy = 0.7 + rnd() * 0.35;
@@ -281,6 +329,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   if ((role === 'merchant' || role === 'townswoman' || role === 'noble') && rnd() < 0.5) {
     const sc = pick([0x7a1c1c, 0x1d3f8a, 0x2f5a3a, 0x6a4a2a, 0x5a2a6a].filter((c) => c !== tunic));
     B.add(female ? DRESS : TUNIC, M(0, female ? 0.12 : 0.05, 0, lean * 0.25, 0, 0, 1.07, 0.93, 1.1), sc, 0.4, sw);
+    B.shadeLast && B.shadeLast(female ? DRESS : TUNIC, clothShade);
     if (trim) B.add(G.hem, C(bodyM, 0, (female ? HEM_Y.dress + 0.14 : HEM_Y.tunic + 0.08), 0).multiply(new THREE.Matrix4().makeScale(0.25 * flare * 1.07, 1.5, 0.25 * flare * 0.77)), trim, 0.4, sw);
   }
   // плащ с застёжкой на груди
@@ -288,6 +337,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   if (!ride && !sit && rnd() < cloakP) {
     const cc = role === 'priest' ? 0x2a2622 : pick([0x5a1a1a, 0x1a2a4a, 0x3a3a2a, 0x2a4a2a, 0x6a4a2a]);
     B.add(G.cloak, M(0, 0, -0.01, lean * 0.25), cc, 0.4, sw);
+    B.shadeLast && B.shadeLast(G.cloak, (x, y, z) => (0.78 + 0.22 * Math.min(1, (y - 0.5) / 0.9)) * (1 + 0.1 * Math.sin(Math.atan2(z, x) * 7)));
     B.add(new THREE.SphereGeometry(0.025, 6, 4), M(0, 1.4, 0.12), 0xd6a632, 0.4, sw);
   }
   if (R.surcoat) {
@@ -296,7 +346,12 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(new THREE.BoxGeometry(0.05, 0.3, 0.01), M(0, 1.15, 0.165), 0xa01818, 0.4, sw);
     B.add(new THREE.BoxGeometry(0.2, 0.05, 0.01), M(0, 1.2, 0.165), 0xa01818, 0.4, sw);
   }
-  if (R.apron) B.add(new THREE.BoxGeometry(0.34, 0.62, 0.02), M(0, 0.84, 0.15, 0.06), R.apron, 0.4, sw);
+  if (R.apron) {
+    const lg = role === 'smith';
+    B.add(lg ? G.apronLong : G.apron, M(0, 1.02, 0.012, lean * 0.25), R.apron, 0.4, sw);
+    if (lg) B.add(new THREE.BoxGeometry(0.2, 0.26, 0.012), M(0, 1.17, 0.145, -0.12), R.apron, 0.4, sw); // нагрудник
+    for (const sd of [-1, 1]) B.add(new THREE.BoxGeometry(0.018, 0.16, 0.008), M(sd * 0.05, 0.9, -0.14, 0.1, 0, sd * 0.2), shade(R.apron, 0.85), 0.4, sw); // завязки сзади
+  }
   B.add(G.belt, M(0, 0.98, 0, lean * 0.25, 0, 0, 1, 1, 0.74), 0x2a1d14, 0.4, sw);
   if (!R.robe && !R.dress) B.add(G.pouch, M(0.14, 0.9, 0.08, 0, -0.5), 0x5a3a1e, 0.4, sw);
   if (!female && !child && !R.sword && role !== 'priest') { // нож в ножнах на поясе
@@ -308,7 +363,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(new THREE.BoxGeometry(0.025, 0.3, 0.012), M(0.06, 0.82, 0.155, 0.05), 0x2a1d14, 0.4, sw);
   }
   // передник у крестьянок
-  if (role === 'woman' && rnd() < 0.6) B.add(new THREE.BoxGeometry(0.36, 0.7, 0.015), M(0, 0.62, 0.17 + lean * 0.05, 0.08 + lean * 0.3), pick([0xd8d0bc, 0xc8bca0, 0xe0dccf]), 0.4, sw);
+  if (role === 'woman' && rnd() < 0.6) B.add(G.apronW, M(0, 1.0, 0.018 + lean * 0.02, lean * 0.3), pick([0xd8d0bc, 0xc8bca0, 0xe0dccf]), 0.4, sw);
 
   // ---- голова: шея, лицо (нос, глаза, брови, уши), волосы/борода, убор ----
   const hy = 1.6;
@@ -324,7 +379,8 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(G.brow, C(headM, sd * 0.034, 0.042, 0.096, 0, 0, sd * -0.12), shade(hair, 0.8), 1, sw);
     B.add(G.ear, C(headM, sd * 0.096, 0.005, -0.005), shade(skin, 0.95), 1, sw);
   }
-  // губы
+  // румянец на щеках и губы
+  for (const sd of [-1, 1]) B.add(G.eyeWhite, C(headM, sd * 0.052, -0.022, 0.078, 0, sd * 0.5).multiply(new THREE.Matrix4().makeScale(1.6, 1.3, 0.6)), new THREE.Color(skin).lerp(new THREE.Color(0xc0605a), 0.12).getHex(), 1, sw);
   B.add(new THREE.BoxGeometry(0.034, 0.008, 0.01), C(headM, 0, -0.05, 0.094), 0x8a4a3a, 1, sw);
   const bearded = !female && !child && role !== 'priest' && rnd() < 0.45;
   if (bearded) B.add(G.beard, C(headM, 0, -0.03, 0.02), hair, 1, sw);
@@ -370,7 +426,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
         B.add(new THREE.ConeGeometry(0.04, 0.12, 5), C(headM, 0, -0.03, -0.13, 2.4), kc, 1, sw);
         break;
       }
-      B.add(G.wimple, C(headM, 0, -0.02, -0.02, -0.3), 0xe8e2d2, 1, sw);
+      B.add(G.wimple, C(headM, 0, -0.015, -0.012, -0.04), 0xe8e2d2, 1, sw);
       B.add(G.veil, M(0, 1.48, -0.02, lean * 0.25, 0, 0, 1, 1, 0.85), 0xe0d8c4, 0.8, sw);
       break;
     case 'capeline':
@@ -379,7 +435,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
       break;
     case 'helm':
       // шапель — железная каска с широкими полями (типична для XIII века) и кольчужный капюшон
-      B.add(G.coif, C(headM, 0, -0.03, -0.018, -0.2), 0x8a8e94, 1, sw);
+      B.add(G.coif, C(headM, 0, -0.02, -0.012, -0.04), 0x8a8e94, 1, sw);
       B.add(G.mailCape, M(0, 1.44, 0, 0, 0, 0, 1, 1, 0.8), 0x7e8288, 0.8, sw);
       B.add(G.helmTop, C(headM, 0, 0.018, 0), 0x6e7074, 1, sw);
       B.add(G.brim, C(headM, 0, 0.018, 0, -0.08), 0x5e6064, 1, sw);
@@ -413,8 +469,9 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     const fixed = ride || sit || ['tray', 'lute', 'lance', 'basket'].includes(IT) || (i === 0 && IT === 'torch') || (i === 1 && IT === 'falcon');
     B.curLimb = fixed ? [0, 0] : [-sd * 0.6, 1.4 * s];
     if (i === 0) armLimb = B.curLimb; // рука — в противофазе с ногой
-    const sh = M(sd * 0.225, 1.4, lean * 0.1, fx + lean * 0.3, 0, sd * Math.abs(sz));
+    const sh = M(sd * 0.2, 1.37, lean * 0.1, fx + lean * 0.3, 0, sd * Math.abs(sz));
     B.add(G.shoulder, sh, sleeve, 0.6, sw);
+    B.add(G.deltoid, M(sd * 0.165, 1.365, lean * 0.1, lean * 0.3, 0, -sd * 0.3), sleeve, 0.6, sw);
     B.add(G.upperArm, sh, sleeve, 0.6, sw);
     const el = C(sh, 0, -0.3, 0, -eb);
     B.add(G.joint, el, sleeve, 0.6, sw);
