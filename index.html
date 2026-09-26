@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Рыцарский замок</title>
+    <style>html,body{background:#9fb3c8;height:100%;margin:0;font-family:Georgia,Times New Roman,serif;overflow:hidden}canvas{display:block}#loading{color:#e9dcc0;letter-spacing:.04em;z-index:10;background:#1d1a16;flex-direction:column;justify-content:center;align-items:center;font-size:22px;transition:opacity .8s;display:flex;position:fixed;inset:0}#loading small{opacity:.7;margin-top:10px;font-size:14px}#hud{color:#fff;text-shadow:0 1px 3px #000c;pointer-events:none;max-width:360px;font-size:14px;line-height:1.45;position:fixed;top:12px;left:14px}#hud h1{margin:0 0 4px;font-size:19px;font-weight:400}#fps{color:#fff;text-shadow:0 1px 2px #000;font:13px monospace;display:none;position:fixed;top:18px;right:56px}#help{color:#f3ead6;pointer-events:none;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#14100c9e;border:1px solid #e9dcc040;border-radius:8px;max-width:330px;padding:10px 14px;font-size:13px;line-height:1.55;position:fixed;bottom:12px;left:12px}#help.hidden{display:none}#help b{color:#ffd98a;font-weight:400}#help .fly-only,#help .orbit-only{display:none}#help[data-mode=fly] .fly-only,#help[data-mode=orbit] .orbit-only{display:block}#help .muted{opacity:.7}#mode{color:#fff;margin-bottom:4px;font-size:14px}#click-to-fly{pointer-events:none;color:#fff;background:#14100c8c;border-radius:16px;padding:6px 14px;font-size:15px;display:none;position:fixed;bottom:22px;left:50%;transform:translate(-50%)}#tour{color:#f3ead6;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:5;background:#14100ca8;border:1px solid #e9dcc040;border-radius:8px;width:250px;max-height:calc(100vh - 24px);padding:8px;font-size:14px;position:fixed;bottom:12px;right:12px;overflow-y:auto}#tour header{justify-content:space-between;align-items:center;margin:0 2px 6px;display:flex}#tour header b{color:#ffd98a;font-size:15px;font-weight:400}#tour button{font:inherit;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:5px}#tour-toggle{opacity:.8;padding:0 6px;font-size:16px}#tour-list button{text-align:left;width:100%;padding:4px 6px;line-height:1.3;display:flex}#tour-list button span{opacity:.55;flex:none;width:24px;font-family:monospace}#tour-list button:hover{background:#ffffff1a}#tour-list button.active{color:#fff;background:#ffd98a38}#tour-play-row{gap:6px;margin-top:6px;display:flex}#tour-play,#tour-play-all{flex:50%;background:#ffd98a2e!important;border:1px solid #ffd98a66!important;padding:6px!important}#tour-play:hover,#tour-play-all:hover{background:#ffd98a4d!important}#tour-list .tour-group{text-align:left;color:#ffd98a;border-bottom:1px solid #e9dcc026;border-radius:0;justify-content:space-between;width:100%;margin-top:2px;padding:5px 6px;display:flex}#tour-list .tour-group:before{content:"▸";opacity:.7;margin-right:6px}#tour-list .tour-group.open:before{content:"▾"}#tour-list .tour-group em{opacity:.5;margin-left:auto;font-size:12px;font-style:normal}#tour-list .tour-sec{padding:2px 0 4px 6px;display:none}#tour-list .tour-sec.open{display:block}#tour-tools{flex-wrap:wrap;gap:6px;margin:0 0 6px;display:flex}#tour-tools button{background:#ffffff14;border:1px solid #e9dcc040;flex:45%;padding:5px 4px;font-size:13px}#tour-tools button:hover{background:#ffffff29}#tour.collapsed #tour-list,#tour.collapsed #tour-play-row,#tour.collapsed #tour-tools{display:none}#tour.collapsed header{margin-bottom:0}#caption{box-sizing:border-box;color:#f3ead6;opacity:0;pointer-events:none;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:5;background:#14100cb8;border:1px solid #e9dcc04d;border-radius:10px;width:min(560px,100vw - 32px);padding:12px 40px 13px 16px;transition:opacity .4s,transform .4s;position:fixed;top:14px;left:50%;transform:translate(-50%,-12px)}#caption.show{opacity:1;pointer-events:auto;transform:translate(-50%)}#caption-num{opacity:.6;font:12px monospace}#caption-title{color:#ffd98a;margin:1px 0 4px;font-size:20px}#caption-text{font-size:15px;line-height:1.5}#caption-close{color:#f3ead6;cursor:pointer;opacity:.7;background:0 0;border:0;font:20px Georgia,serif;position:absolute;top:6px;right:8px}#caption-close:hover{opacity:1}@media (width<=900px){#help{display:none}}body.ui-hidden #help,body.ui-hidden #tour,body.ui-hidden #caption{display:none!important}#door-hint{pointer-events:none;z-index:6;color:#fff;background:#14100c99;border:1px solid #ffd98a66;border-radius:16px;padding:6px 14px;font-size:15px;display:none;position:fixed;bottom:64px;left:50%;transform:translate(-50%)}#door-hint.show{display:block}#ui-toggle{z-index:6;cursor:pointer;color:#f3ead6;opacity:.8;background:#14100c8c;border:1px solid #e9dcc04d;border-radius:17px;width:34px;height:34px;font-size:17px;line-height:1;position:fixed;top:10px;right:12px}#ui-toggle:hover{opacity:1}body.ui-hidden #ui-toggle{opacity:.35}#m-bar,#m-joy,#m-lift,#m-tip{display:none}body.phone{-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}body.phone button{touch-action:manipulation}body.phone #help,body.phone #click-to-fly{display:none!important}body.phone #ui-toggle{top:calc(8px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right));border-radius:21px;width:42px;height:42px;font-size:20px}body.phone #m-bar{z-index:6;top:calc(8px + env(safe-area-inset-top));right:calc(62px + env(safe-area-inset-right));gap:8px;display:flex;position:fixed}body.phone #m-bar button{color:#f3ead6;background:#14100c99;border:1px solid #e9dcc059;border-radius:21px;min-width:42px;height:42px;padding:0 12px;font:15px Georgia,serif}body.phone #tour{left:calc(8px + env(safe-area-inset-left));right:auto;top:calc(8px + env(safe-area-inset-top));width:min(270px,100vw - 150px);max-height:calc(100vh - 90px);font-size:15px;bottom:auto}body.phone #tour-list button{padding:7px 6px}body.phone #tour-tools button{padding:8px 4px}body.phone #tour-toggle{padding:2px 10px;font-size:20px}body.phone #tour.collapsed{width:auto}body.phone #tour.collapsed #tour-play-row{display:flex}body.phone #tour.collapsed header{margin-bottom:4px}body.phone #tour.collapsed header b:after{content:" ▸";opacity:.6}body.phone #caption{top:auto;bottom:calc(10px + env(safe-area-inset-bottom));width:min(520px,100vw - 20px);max-height:38vh;padding:9px 36px 10px 12px;overflow-y:auto;transform:translate(-50%,12px)}body.phone #caption.show{transform:translate(-50%)}body.phone #caption-title{font-size:17px}body.phone #caption-text{font-size:14px;line-height:1.4}body.phone #door-hint{pointer-events:auto;bottom:calc(24px + env(safe-area-inset-bottom));padding:10px 18px;font-size:16px}body.phone #door-hint:before{content:"👆 "}body.phone.fly-mode #door-hint{bottom:calc(150px + env(safe-area-inset-bottom))}body.phone.fly-mode #caption{display:none}body.phone.fly-mode #m-joy,body.phone.fly-mode #m-lift{display:block}#m-joy{z-index:6;left:calc(22px + env(safe-area-inset-left));bottom:calc(22px + env(safe-area-inset-bottom));touch-action:none;background:#14100c59;border:2px solid #e9dcc059;border-radius:62px;width:124px;height:124px;position:fixed}#m-knob{pointer-events:none;background:#ffd98a80;border:1px solid #fff0c8b3;border-radius:25px;width:50px;height:50px;position:absolute;top:37px;left:37px}#m-lift{z-index:6;right:calc(22px + env(safe-area-inset-right));bottom:calc(22px + env(safe-area-inset-bottom));position:fixed}#m-lift button{color:#f3ead6;touch-action:none;background:#14100c73;border:1px solid #e9dcc059;border-radius:14px;width:60px;height:56px;margin-top:10px;font-size:22px;display:block}#m-lift button.on{background:#ffd98a66}body.phone #m-tip{z-index:7;left:50%;bottom:calc(26px + env(safe-area-inset-bottom));text-align:center;color:#f3ead6;pointer-events:none;background:#14100cb3;border:1px solid #e9dcc04d;border-radius:12px;width:max-content;max-width:calc(100vw - 30px);padding:8px 14px;font-size:14px;line-height:1.5;transition:opacity .6s;display:block;position:fixed;transform:translate(-50%)}body.phone #m-tip.gone{opacity:0}body.phone.ui-hidden #m-bar,body.phone.ui-hidden #m-tip{display:none!important}</style>
+    <script type="module" crossorigin src="./build/index-rB24iylJ.js"></script>
+  </head>
+  <body>
+    <div id="loading">Строим замок…<small>загрузка</small></div>
+    <div id="fps"></div>
+    <button id="ui-toggle" type="button" title="Скрыть/показать интерфейс (H)">👁</button>
+    <div id="click-to-fly">Кликните по сцене, чтобы управлять мышью</div>
+    <div id="help" data-mode="orbit">
+      <div id="mode">Режим: орбита</div>
+      <div class="orbit-only">
+        <b>ЛКМ</b> — вращение · <b>колесо</b> — приближение<br />
+        <b>ПКМ</b> — сдвиг камеры<br />
+        <b>F</b> — свободный полёт<br />
+        <b>E</b> — открыть дверь рядом · <b>1–0</b>, <b>← →</b> — точки экскурсии · <b>T</b> — экскурсия<br />
+        <b>N</b> — время суток · <b>G</b> — ворота<br />
+        <b>P</b> — погода · <b>B</b> — штурм
+      </div>
+      <div class="fly-only">
+        <b>Клик</b> — захватить мышь · <b>Esc</b> — отпустить<br />
+        <b>W A S D</b> — движение · <b>мышь</b> — обзор<br />
+        <b>Пробел</b> — вверх · <b>C</b> или <b>Ctrl</b> — вниз<br />
+        <b>Shift</b> — ускорение · <b>колесо</b> — скорость полёта<br />
+        <b>F</b> — вернуться к орбите
+        <div id="speed"></div>
+      </div>
+      <div class="muted">H или 👁 — скрыть весь интерфейс</div>
+    </div>
+    <div id="caption">
+      <button id="caption-close" type="button" title="Закрыть (Esc)">×</button>
+      <div id="caption-num"></div>
+      <div id="caption-title"></div>
+      <div id="caption-text"></div>
+    </div>
+    <div id="tour">
+      <header><b>Экскурсия</b><button id="tour-toggle" type="button" title="Свернуть">–</button></header>
+      <div id="tour-tools">
+        <button id="btn-day" type="button" title="Время суток (N)">☀ День</button>
+        <button id="btn-gate" type="button" title="Подъёмный мост, решётка и ворота (G)">⇅ Закрыть ворота</button>
+        <button id="btn-weather" type="button" title="Погода: ясно, дождь, туман, снег (P)">☁ Ясно</button>
+        <button id="btn-siege" type="button" title="Штурм: требушет, лучники, смола (B)">⚔ Штурм</button>
+      </div>
+      <div id="tour-list"></div>
+      <div id="tour-play-row"><button id="tour-play" type="button" title="Все точки подряд (T)">▶ Экскурсия</button></div>
+    </div>
+  </body>
+</html>
