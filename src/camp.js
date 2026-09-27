@@ -9,7 +9,7 @@ import { GeoBuilder } from './walls.js';
 import { ColorBuilder } from './people.js';
 import { pbrMaterial } from './textures.js';
 import { horse } from './yard.js';
-import { cart } from './courtyard.js';
+import { cart, Smoke } from './courtyard.js';
 import { M, GEO, fire } from './extras.js';
 import { OBSTACLES } from './walkable.js';
 
@@ -464,6 +464,8 @@ export function siegeCamp(ctx, village, findCampSite) {
     }
     for (let k = 0; k < 4; k++) wood.addGeometry(new THREE.CylinderGeometry(0.06, 0.07, 0.8, 6), M(p.x, g + 0.1, p.z, k * 0.8, 1, 1, 1, Math.PI / 2 - 0.2));
     fire(glowB, p.x, g + 0.1, p.z, 0.8, rnd);
+    // дым костра (виден издалека — лагерь «живой»)
+    { const sm = new Smoke(scene, new V3(p.x, g + 1.4, p.z), { count: 6, size: 0.6, grow: 3, alpha: 0.28, life: 7, rise: 1.1 }); ctx.smokes.push(sm); (ctx.campSmokes = ctx.campSmokes || []).push(sm); }
     // тренога и котёл
     const topP = new V3(p.x, g + 1.75, p.z);
     for (let k = 0; k < 3; k++) {

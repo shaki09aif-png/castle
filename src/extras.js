@@ -1469,7 +1469,11 @@ export function createExtras(scene, terrain, walls, village) {
         const cp = camera.position;
         for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < (m.userData.maxDist || 190) && !(ctxRuins.on) && m.userData.night !== false;
         for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < (g.c.x === 0 && g.c.z === 0 ? 340 : 220) && !(ctxRuins.on); // за 220 м фигурки в пару пикселей
-        if (camp) { const dc = Math.hypot(camp.x - cp.x, camp.z - cp.z); for (const m of campMeshes) m.visible = dc < m.userData.far && !ctxRuins.on; }
+        if (camp) {
+          const dc = Math.hypot(camp.x - cp.x, camp.z - cp.z);
+          for (const m of campMeshes) m.visible = dc < m.userData.far && !ctxRuins.on;
+          for (const sm of ctx.campSmokes || []) for (const it of sm.items) it.s.visible = dc < 350 && !ctxRuins.on;
+        }
       }
       peopleUpd.update(t);
       walkers.update(dt);
