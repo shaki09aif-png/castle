@@ -533,7 +533,13 @@ export function createLife3(scene, ctx, village, walls) {
       colorB.add(GEO.box, M(x + len / 2, gh(x + len / 2, z) + 0.06, z, 0, len, 0.14, 0.9), 0x4a3424);
       for (let j = 0; j < 9; j++) {
         const px = x + 0.25 + j * 0.46, py = gh(px, z) + 0.16;
-        colorB.add(GEO.bush, M(px, py, z + (rnd() - 0.5) * 0.3, rnd() * 6, 0.2 + rnd() * 0.06, 0.13, 0.2 + rnd() * 0.06), herbs[(k + j) % herbs.length]);
+        // кочан/куст: розетка из нескольких листьев разного оттенка, а не один шар
+        const pz = z + (rnd() - 0.5) * 0.3, hc = herbs[(k + j) % herbs.length];
+        colorB.add(GEO.bush, M(px, py - 0.02, pz, rnd() * 6, 0.12, 0.1, 0.12), new THREE.Color(hc).multiplyScalar(0.8).getHex());
+        for (let l = 0; l < 4; l++) {
+          const la = l * 1.57 + rnd() * 0.6;
+          colorB.add(GEO.bush, M(px + Math.cos(la) * 0.1, py - 0.03, pz + Math.sin(la) * 0.1, -la, 0.13, 0.05, 0.08, 0, 0.5), new THREE.Color(hc).multiplyScalar(0.75 + rnd() * 0.35).getHex());
+        }
       }
     }
     // яблони и груши
