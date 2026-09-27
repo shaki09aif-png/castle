@@ -30,6 +30,7 @@ function buildBridge(wood, stone, metal, terrain, road) {
   const at = (s, o = 0) => a.clone().addScaledVector(D, s).addScaledVector(N, o);
   // настил: поперечные доски, чуть разной высоты
   const rnd = mulberry32(88);
+  const piers = [];
   for (let s = -1.5; s < L + 1.5; s += 0.3) {
     wood.box(at(s).setY(deck - 0.05 + (rnd() - 0.5) * 0.015), N, UP, D, hw, 0.05, 0.14, { grain: true });
   }
@@ -44,6 +45,7 @@ function buildBridge(wood, stone, metal, terrain, road) {
     for (const o of [-1.7, 0, 1.7]) {
       const p = at(s, o);
       const g = Math.min(bottom, terrain.heightAt(p.x, p.z) - 0.5);
+      if (terrain.heightAt(p.x, p.z) < RIVER.waterLevel - 0.1) piers.push([p.x, p.z]);
       const pile = new THREE.CylinderGeometry(0.16, 0.18, deck - 0.34 - g, 8);
       wood.addGeometry(pile, new THREE.Matrix4().makeTranslation(p.x, (deck - 0.34 + g) / 2, p.z));
     }
@@ -65,7 +67,7 @@ function buildBridge(wood, stone, metal, terrain, road) {
     stone.box(p.clone().setY((g + deck - 0.3) / 2), D, UP, N, 1.0, (deck - 0.3 - g) / 2, hw + 0.4);
   }
   void metal;
-  return { a, b };
+  return { a, b, piers };
 }
 
 // ---------------------------------------------------------------------------
@@ -619,6 +621,7 @@ export function createVillage(scene, terrain, walls) {
     mill: mill.center,
     fieldMask,
     millWheel: { c: mill.wheel, r: mill.wheelR, chute: mill.chute, f: mill.f },
+    piers: br.piers || [],
     update(t) {
       for (const u of updaters) u(t);
       for (const s of smokes) s.update(t);

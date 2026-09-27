@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { M, GEO, makeWalker, walkerMaterial, WALKERS, fire, cow, findFlat, riderBuild } from './extras.js';
 import { ColorBuilder, person, addPersonShading } from './people.js';
 import { chicken } from './details.js';
-import { horse } from './yard.js';
+import { horse, dog } from './yard.js';
 import { Smoke, cart, Frame } from './courtyard.js';
 import { KEEP, WELL, BUILDINGS, riverZ, riverHalfWidth, insideTower, GATE_PASSAGE, BARBICAN } from './layout.js';
 import { AUTUMN } from './materials.js';
@@ -267,7 +267,7 @@ export function createLife3(scene, ctx, village, walls) {
     const nearI = (x, z) => { let bi = 0, bd = 1e9; Pw.forEach((p, i) => { const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; bi = i; } }); return bi; };
     const sm = (a, b, x) => { const q = Math.min(1, Math.max(0, (x - a) / (b - a))); return q * q * (3 - 2 * q); };
     const pr = mulberry32(4242);
-    const routes = [[-48, 2, -30, -32, 'archer'], [20, -44, 46, -6, 'guard'], [46, 14, 26, 44, 'archer'], [-30, 40, -48, 18, 'guard'], [-12, -48, 12, -48, 'archer'], [6, 48, 30, 38, 'archer']];
+    const routes = [[-48, 2, -30, -32, 'guard'], [46, 14, 26, 44, 'archer'], [-30, 40, -48, 18, 'archer'], [6, 48, 30, 38, 'archer']];
     const toCampOf = () => (out.siege && out.siege.toCamp) || null;
     routes.forEach(([ax, az, bx, bz, role], k) => {
       let i0 = nearI(ax, az), i1 = nearI(bx, bz);
@@ -283,6 +283,8 @@ export function createLife3(scene, ctx, village, walls) {
       for (let i = 0; i < pts.length - 1; i++) { const l = pts[i].distanceTo(pts[i + 1]); seg.push(l); total += l; }
       if (total < 6) return;
       const r = rig(scene, (B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role, seed: 1300 + k, item: role === 'guard' ? 'spear' : 'bow' }), 0.45);
+      r.mesh.castShadow = false; // тень от фигурки на стене почти не видна, а стоит лишнего прохода
+      r.mesh.userData.maxDist = 170; // издалека фигурку на стене не разглядеть
       const st = { s: pr() * total, dir: pr() < 0.5 ? 1 : -1, mode: 'walk', left: 5 + pr() * 10, t: 0, yaw: 0, look: 0, seed: pr() * 10 };
       const pos = new V3(), n = new V3();
       const at = (sv) => {
@@ -375,9 +377,17 @@ export function createLife3(scene, ctx, village, walls) {
           return new V3(-dz / l * off, 0, dx / l * off);
         };
         for (let i = 2; i < Math.max(3, bi - 20); i += 4) { const o = nOff(i); pts.push(new V3(road[i].x + o.x, road[i].h + 0.05, road[i].z + o.z)); }
+        // где на пути ворота: перед закрытыми воротами всадники ждут
+        let sG0 = 0;
+        for (let i = 0; i < 2; i++) sG0 += pts[i].distanceTo(pts[i + 1]);
+        const sG1 = sG0 + pts[2].distanceTo(pts[3]) + pts[3].distanceTo(pts[4]);
         const w = makeWalker(scene, (B) => riderBuild(B, { horseCol: cols[k], role: 'knight', seed: 1400 + k, item: k < 2 ? 'lance' : 'sword', caparison: caps[k], rnd: mulberry32(1400 + k) }), pts, {
           loop: false, speed: 5.5, stride: 2.6, amp: 0.6, y: true, s0: 0,
           hold: (sv, dir, tot) => {
+            if (out.gate && out.gate.closed) {
+              if (dir > 0 && sv > sG0 - 4 - Math.floor(k / 2) * 3 && sv < sG0) return true;
+              if (dir < 0 && sv < sG1 + 6 + Math.floor(k / 2) * 3 && sv > sG1) return true;
+            }
             const on = out.siege && out.siege.active;
             if (on) return (dir > 0 && sv >= tot - 0.05) || (dir > 0 && sv <= 0.05 && out.alarmT < 2 + lag);
             return dir > 0 && sv <= 0.05;
@@ -391,6 +401,31 @@ export function createLife3(scene, ctx, village, walls) {
           w.mesh.userData.night = on || Math.hypot(w.mesh.position.x - home.x, w.mesh.position.z - home.z) > 0.3 ? undefined : false;
         });
       }
+    }
+  }
+
+  // ===================== ДЕТИ ИГРАЮТ В ДЕРЕВНЕ =====================
+  // двое детей гоняются друг за другом перед домом, за ними бегает собака
+  if (village && village.houses && village.houses.length > 3) {
+    for (const hi of [1, 4]) {
+      const h = village.houses[Math.min(hi, village.houses.length - 1)];
+      if (!h || !h.f) continue;
+      const pts = [];
+      const cz = h.W / 2 + 2.6, rx = h.L / 2 + 0.8, rz = 1.5;
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2;
+        const p = h.f.p(Math.cos(a) * rx, 0, cz + Math.sin(a) * rz);
+        pts.push(new V3(p.x, 0, p.z));
+      }
+      const per = pts.reduce((a, p, i) => a + p.distanceTo(pts[(i + 1) % pts.length]), 0);
+      [0, 0.35].forEach((off, k) => {
+        const w = makeWalker(scene, (B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role: 'child', seed: 1500 + hi * 10 + k }), pts, { loop: true, speed: 2.4, stride: 1.0, s0: per * off });
+        w.mesh.userData.maxDist = 150;
+        movers.push(w);
+      });
+      const dg = makeWalker(scene, (B) => dog(B, 0, 0, 0, 0, false, mulberry32(1600 + hi)), pts, { loop: true, speed: 2.4, stride: 0.9, amp: 0.5, s0: per * 0.6 });
+      dg.mesh.userData.maxDist = 150;
+      movers.push(dg);
     }
   }
 

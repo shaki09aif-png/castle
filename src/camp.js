@@ -5,10 +5,13 @@
 // станина из лежней и стоек с раскосами, ось на железе, сужающийся рычаг
 // с оковкой, подвесной ящик-противовес с камнями, праща в жёлобе, ворот.
 import * as THREE from 'three';
+import { GeoBuilder } from './walls.js';
+import { ColorBuilder } from './people.js';
 import { pbrMaterial } from './textures.js';
 import { horse } from './yard.js';
 import { cart } from './courtyard.js';
 import { M, GEO, fire } from './extras.js';
+import { OBSTACLES } from './walkable.js';
 
 const V3 = THREE.Vector3;
 const UP = new V3(0, 1, 0);
@@ -102,6 +105,7 @@ function tentKit({ terrain, wood, metal, colorB }, cloth, face) {
   const roundTent = (p, { R, hw, hr, n = 16, cols, stripe = false, val, door = 0, pennant }) => {
     const y0 = low(p, R + 0.3);
     const c = p.clone().setY(y0);
+    OBSTACLES.push({ x: p.x, z: p.z, r: R, door: [Math.sin(door), Math.cos(door)] });
     // дверь смотрит по направлению yaw = door; сегмент 0 — проём
     const a0 = Math.atan2(Math.cos(door), Math.sin(door)) - (Math.PI * 2 / n) * 0.5;
     const col = (j) => rgbOf(stripe ? cols[j % 2] : cols[0]);
@@ -197,7 +201,15 @@ function tentKit({ terrain, wood, metal, colorB }, cloth, face) {
 }
 
 export function siegeCamp(ctx, village, findCampSite) {
-  const { terrain, wood, colorB, glowB, straw, people, rnd, metal, scene } = ctx;
+  // своя геометрия лагеря (отдельные сетки): вдали от лагеря они отсекаются
+  // по видимости, а не рисуются вместе с остальными мелочами всего мира
+  const CB = {
+    wood: new GeoBuilder(ctx.wood.tile), metal: new GeoBuilder(ctx.metal.tile), stone: new GeoBuilder(ctx.stone.tile),
+    straw: new GeoBuilder(ctx.straw.tile), colorB: new ColorBuilder(),
+  };
+  ctx.campBuilders = CB;
+  const cc = { ...ctx, ...CB };
+  const { terrain, wood, colorB, glowB, straw, people, rnd, metal, scene } = cc;
   const site = findCampSite(terrain, village);
   if (!site) return null;
   const { x: cx, z: cz } = site;
@@ -206,7 +218,7 @@ export function siegeCamp(ctx, village, findCampSite) {
   const fw = new V3(Math.sin(face), 0, Math.cos(face)), rt = new V3(Math.cos(face), 0, -Math.sin(face));
   const at = (f, r) => new V3(cx + fw.x * f + rt.x * r, 0, cz + fw.z * f + rt.z * r);
   const cloth = new ClothB(1.6);
-  const { roundTent, ridgeTent, rope, peg, low } = tentKit(ctx, cloth, face);
+  const { roundTent, ridgeTent, rope, peg, low } = tentKit(cc, cloth, face);
 
   // ------------------------- улицы лагеря -------------------------
   const linen = 0xe6dcc6, linen2 = 0xd8ccb0, green = 0x3f6a34, ochre = 0xc79a3c;
@@ -346,7 +358,7 @@ export function siegeCamp(ctx, village, findCampSite) {
       const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * 1.3;
       const q0 = P(-6.5 + Math.cos(a) * rr, 0, 3.2 + Math.sin(a) * rr);
       const hh = (1.3 - rr) * 0.45;
-      ctx.stone.addGeometry(new THREE.IcosahedronGeometry(0.26 + rnd() * 0.06, 1), M(q0.x, gh(q0.x, q0.z) + 0.24 + hh, q0.z, rnd() * 3));
+      cc.stone.addGeometry(new THREE.IcosahedronGeometry(0.26 + rnd() * 0.06, 1), M(q0.x, gh(q0.x, q0.z) + 0.24 + hh, q0.z, rnd() * 3));
     }
     // обслуга: двое у ворота, один подносит ядро, мастер-инженер
     for (const [f, r, role, yaw, pose] of [[-4.1, 2.3, 'foe', -Math.PI / 2, 'work'], [-4.1, -2.3, 'foe', Math.PI / 2, 'work'], [-6.2, 2.1, 'peasant', Math.PI, 'work'], [-2.2, 3.6, 'noble', -Math.PI / 2 - 0.4, 'stand']]) {
@@ -448,7 +460,7 @@ export function siegeCamp(ctx, village, findCampSite) {
     const p = at(f, r), g = gh(p.x, p.z);
     for (let k = 0; k < 10; k++) {
       const a = (k / 10) * Math.PI * 2;
-      ctx.stone.addGeometry(new THREE.DodecahedronGeometry(0.16, 0), M(p.x + Math.cos(a) * 0.62, g + 0.08, p.z + Math.sin(a) * 0.62, a));
+      cc.stone.addGeometry(new THREE.DodecahedronGeometry(0.16, 0), M(p.x + Math.cos(a) * 0.62, g + 0.08, p.z + Math.sin(a) * 0.62, a));
     }
     for (let k = 0; k < 4; k++) wood.addGeometry(new THREE.CylinderGeometry(0.06, 0.07, 0.8, 6), M(p.x, g + 0.1, p.z, k * 0.8, 1, 1, 1, Math.PI / 2 - 0.2));
     fire(glowB, p.x, g + 0.1, p.z, 0.8, rnd);
@@ -603,4 +615,30 @@ export function yardPavilion(scene, ctx, x, z, doorYaw) {
   // точка экскурсии: заглянуть в шатёр через вход
   const tgt = P(-1.2, 1.0, 0), pos = P(R + 3.2, 2.0, 1.6);
   return { mesh, stop: { tgt, pos } };
+}
+
+// Набор ткани для других мест (турнир): шатры и навесы из той же парусины
+export function clothKit(ctx, face = 0) {
+  const cloth = new ClothB(1.6);
+  const kit = tentKit(ctx, cloth, face);
+  const quad = (pts, nrm, col) => {
+    const cc = rgbOf(col);
+    const d01 = pts[0].distanceTo(pts[1]), d03 = pts[0].distanceTo(pts[3]);
+    const ids = pts.map((q, i) => cloth.v(q, nrm, [0, d01, d01, 0][i], [0, 0, d03, d03][i], cc));
+    // лицевая сторона — туда, куда смотрит нормаль (иначе при двусторонней ткани верх тёмный)
+    const gn = pts[1].clone().sub(pts[0]).cross(pts[3].clone().sub(pts[0]));
+    if (gn.dot(nrm) >= 0) cloth.quad(ids[0], ids[1], ids[2], ids[3]);
+    else cloth.quad(ids[0], ids[3], ids[2], ids[1]);
+  };
+  return {
+    ...kit, quad, cloth,
+    finish(scene, name = 'extras') {
+      if (!cloth.pos.length) return null;
+      const mesh = new THREE.Mesh(cloth.build(), pbrMaterial('canvas', { vertexColors: true, side: THREE.DoubleSide }));
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.name = name;
+      scene.add(mesh);
+      return mesh;
+    },
+  };
 }

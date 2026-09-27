@@ -111,14 +111,19 @@ function shoreFoam(scene) {
   m.name = 'shore';
   m.frustumCulled = false;
   scene.add(m);
-  // пятно пены (у мельничного колеса, у камней): в центре пена гуще
-  const addSpot = (x, z, r) => {
-    const p2 = [x, RIVER.waterLevel + 0.04, z], u2 = [0.8, 0], i2 = [];
-    for (let k = 0; k <= 20; k++) {
-      const a = (k / 20) * Math.PI * 2, rr = r * (0.8 + 0.2 * Math.sin(k * 2.7));
-      p2.push(x + Math.cos(a) * rr, RIVER.waterLevel + 0.04, z + Math.sin(a) * rr); u2.push(0.3, k / 5);
-      if (k > 0) i2.push(0, k, k + 1);
+  // пятна пены (у мельничного колеса, у свай моста): в центре пена гуще; все — одной сеткой
+  const addSpot = (list) => {
+    const p2 = [], u2 = [], i2 = [];
+    for (const [x, z, r] of list) {
+      const base = p2.length / 3;
+      p2.push(x, RIVER.waterLevel + 0.04, z); u2.push(0.8, 0);
+      for (let k = 0; k <= 20; k++) {
+        const a = (k / 20) * Math.PI * 2, rr = r * (0.8 + 0.2 * Math.sin(k * 2.7 + x));
+        p2.push(x + Math.cos(a) * rr, RIVER.waterLevel + 0.04, z + Math.sin(a) * rr); u2.push(0.3, k / 5);
+        if (k > 0) i2.push(base, base + k, base + k + 1);
+      }
     }
+    if (!i2.length) return;
     const g2 = new THREE.BufferGeometry();
     g2.setAttribute('position', new THREE.Float32BufferAttribute(p2, 3));
     g2.setAttribute('uv', new THREE.Float32BufferAttribute(u2, 2));
@@ -126,6 +131,7 @@ function shoreFoam(scene) {
     g2.setIndex(i2);
     const sm = new THREE.Mesh(g2, mat);
     sm.renderOrder = 3;
+    sm.name = 'foam';
     scene.add(sm);
   };
   return { mesh: m, uT, addSpot };

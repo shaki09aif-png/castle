@@ -15,6 +15,39 @@ import { ATMO } from './lighting.js';
 // «дыра» в рельефе у входа в потайной ход (матрица мир → система хода)
 export const TERRAIN_HOLE = { m: { value: new THREE.Matrix4() }, on: { value: 0 } };
 
+// Вырезать из рельефа маленький кусок вокруг (cx, cz) в отдельную сетку со своим
+// вариантом шейдера (с discard для устья хода). Весь остальной рельеф рисуется
+// без discard — так видеокарта сохраняет раннюю проверку глубины (это быстрее).
+export function cutTerrainPatch(mesh, cx, cz, R) {
+  const g = mesh.geometry;
+  if (!g.index) return null;
+  const idx = g.index.array, pos = g.getAttribute('position');
+  const keep = [], patch = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+    const x = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3, z = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+    (Math.hypot(x - cx, z - cz) < R ? patch : keep).push(a, b, c);
+  }
+  if (!patch.length) return null;
+  g.setIndex(keep);
+  const g2 = new THREE.BufferGeometry();
+  for (const k of Object.keys(g.attributes)) g2.setAttribute(k, g.attributes[k]);
+  g2.setIndex(patch);
+  g2.computeBoundingSphere();
+  const base = mesh.material;
+  const m2 = base.clone();
+  m2.onBeforeCompile = base.onBeforeCompile;
+  m2.defines = { ...(base.defines || {}), TERRAIN_HOLE: '' };
+  const key = base.customProgramCacheKey.bind(base);
+  m2.customProgramCacheKey = () => key() + '-hole';
+  const pm = new THREE.Mesh(g2, m2);
+  pm.castShadow = mesh.castShadow; pm.receiveShadow = mesh.receiveShadow;
+  pm.name = 'terrain';
+  pm.position.copy(mesh.position); pm.quaternion.copy(mesh.quaternion); pm.scale.copy(mesh.scale);
+  (mesh.parent || mesh).add(pm);
+  return pm;
+}
+
 const nPlain = createNoise2D(101);
 const nHill = createNoise2D(202);
 const nRock = createNoise2D(303);
@@ -570,9 +603,18 @@ export function createTerrain(scene) {
 
   scene.add(buildRoadMesh(road));
   scene.add(buildRetainingWalls(road, walls, heightAt));
-  buildRocks(heightAt, grid, groundAt).forEach((r) => scene.add(r));
+  const rocks = buildRocks(heightAt, grid, groundAt);
+  rocks.forEach((r) => scene.add(r));
+  const smallRocks = rocks.filter((r) => r.userData.fadeDist);
+  // мелкие камни дальше ~170 м от камеры (с учётом размера сектора) не рисуются
+  const updateRocks = (cam) => {
+    for (const r of smallRocks) {
+      if (r.userData.ruinOff) continue;
+      r.visible = r.boundingSphere.center.distanceTo(cam.position) - r.boundingSphere.radius < r.userData.fadeDist;
+    }
+  };
 
-  return { mesh, heightAt, groundAt, road, roadNearest: (x, z) => grid.nearest(x, z) };
+  return { mesh, heightAt, groundAt, road, roadNearest: (x, z) => grid.nearest(x, z), updateRocks };
 }
 
 // ---------------------------------------------------------------------------
@@ -641,10 +683,12 @@ function makeTerrainMaterial() {
       )
       .replace(
         '#include <map_fragment>',
-        `if (uHoleOn > 0.5) { // устье потайного хода: земля не закрывает проход
+        `#ifdef TERRAIN_HOLE
+        if (uHoleOn > 0.5) { // устье потайного хода: земля не закрывает проход (только в маленьком куске рельефа)
           vec3 hl = (uHole * vec4(vWPos, 1.0)).xyz;
           if (hl.z > -0.3 && hl.z < 5.0 && abs(hl.x) < 1.05 && hl.y > -0.6 && hl.y < 2.45) discard;
         }
+        #endif
         {
           vec3 n = normalize(vWNrm);
           vec3 bw = triBlend(n);
@@ -1022,16 +1066,33 @@ function buildRocks(heightAt, roadGrid, groundAt) {
     if (rnd() > 0.25) continue;
     place(x, z, 0.2 + rnd() * rnd() * 0.9, 0.6, 2 + Math.floor(rnd() * 4), { allowWater: true, sink: 0.3 });
   }
-  return kinds.map((k, ki) => {
-    const im = new THREE.InstancedMesh(k.geo, mat, Math.max(1, k.list.length));
-    k.list.forEach((mm, i) => im.setMatrixAt(i, mm));
-    im.count = k.list.length;
-    // мелкие камни осыпей не отбрасывают тень и не отражаются в воде (экономия)
-    im.castShadow = ki < 4;
-    if (ki >= 4) im.layers.set(2);
-    im.receiveShadow = true;
-    im.computeBoundingSphere();
-    im.name = 'rocks';
-    return im;
+  // Камни разбиты на сектора вокруг холма (по углу и удалённости): сектора вне
+  // кадра видеокарта не рисует, а мелкие камни осыпей вдали скрываются совсем.
+  const out = [];
+  const tmpP = new THREE.Vector3();
+  kinds.forEach((k, ki) => {
+    const groups = new Map();
+    for (const mm of k.list) {
+      tmpP.setFromMatrixPosition(mm);
+      const a = Math.floor(((Math.atan2(tmpP.z, tmpP.x) + Math.PI) / (Math.PI * 2)) * 12) % 12;
+      const ring = Math.hypot(tmpP.x, tmpP.z) < 110 ? 0 : 1;
+      const key = a * 2 + ring;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(mm);
+    }
+    for (const list of groups.values()) {
+      const im = new THREE.InstancedMesh(k.geo, mat, list.length);
+      list.forEach((mm, i) => im.setMatrixAt(i, mm));
+      im.count = list.length;
+      // мелкие камни осыпей не отбрасывают тень и не отражаются в воде (экономия)
+      im.castShadow = ki < 4;
+      if (ki >= 4) im.layers.set(2);
+      im.receiveShadow = true;
+      im.computeBoundingSphere();
+      im.name = 'rocks';
+      if (ki >= 4) im.userData.fadeDist = 170; // мелочь вдали не видна
+      out.push(im);
+    }
   });
+  return out;
 }

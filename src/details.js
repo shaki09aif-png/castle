@@ -269,11 +269,47 @@ export function createDetails(scene, terrain, walls, village) {
     const z = BARBICAN.zS + 1.6;
     add({ x: s * 2.7, y: g(s * 2.7, z), z, yaw: 0, role: 'guard' });
   }
-  // кузнец у наковальни
+  // кузнец у наковальни: бьёт молотом (анимация в шейдере), от ударов летят искры
+  let sparks = null;
   {
     const f = new Frame(byId.forge);
     const p = f.p(-1.0, 0, 1.6);
-    add({ x: p.x, y: g(p.x, p.z) + 0.1, z: p.z, yaw: face(-f.N.x, -f.N.z), role: 'smith' });
+    const SEED = 777;
+    add({ x: p.x, y: g(p.x, p.z) + 0.1, z: p.z, yaw: face(-f.N.x, -f.N.z), role: 'smith', seed: SEED });
+    const ap = f.p(-1.0, 0, 0.95).setY(g(p.x, p.z) + 0.1 + 0.9);
+    const N = 16;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(N * 3), vel = new Float32Array(N * 3);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffb040, size: 0.065, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: true }));
+    pts.frustumCulled = false;
+    pts.visible = false;
+    scene.add(pts);
+    const ph = (SEED * 0.173) % 1;
+    let prevU = 0, age = 9, lastT = 0;
+    sparks = (t, camPos) => {
+      const dt = Math.min(0.1, Math.max(0, t - lastT)); lastT = t;
+      const near = !camPos || camPos.distanceTo(ap) < 45;
+      const u = (((t / 1.25 + ph) % 1) + 1) % 1;
+      if (near && prevU < 0.64 && u >= 0.64) { // молот ударил — сноп искр
+        age = 0;
+        for (let k = 0; k < N; k++) {
+          pos[k * 3] = ap.x; pos[k * 3 + 1] = ap.y; pos[k * 3 + 2] = ap.z;
+          const a = Math.random() * Math.PI * 2, sp = 1.2 + Math.random() * 2.2;
+          vel[k * 3] = Math.cos(a) * sp; vel[k * 3 + 1] = 1 + Math.random() * 2.5; vel[k * 3 + 2] = Math.sin(a) * sp;
+        }
+      }
+      prevU = u;
+      age += dt;
+      pts.visible = near && age < 0.45;
+      if (!pts.visible) return;
+      for (let k = 0; k < N; k++) {
+        vel[k * 3 + 1] -= 9.8 * dt;
+        pos[k * 3] += vel[k * 3] * dt; pos[k * 3 + 1] += vel[k * 3 + 1] * dt; pos[k * 3 + 2] += vel[k * 3 + 2] * dt;
+      }
+      geo.attributes.position.needsUpdate = true;
+      pts.material.opacity = 1 - age / 0.45;
+    };
   }
   // у колодца: женщина с ведром и дети
   add({ x: WELL.x + 0.3, y: g(WELL.x, WELL.z + 2), z: WELL.z + 2.1, yaw: Math.PI, role: 'woman' });
@@ -364,6 +400,6 @@ export function createDetails(scene, terrain, walls, village) {
       if (Math.hypot(x - E.coop.x, z - E.coop.z - 1) < 3) return 0.7;
       return yardExclude(x, z);
     },
-    update(t) { peopleUpd.update(t); },
+    update(t, cam) { peopleUpd.update(t); if (sparks) sparks(t, cam && cam.position); },
   };
 }

@@ -101,7 +101,9 @@ export function addPersonShading(mat) {
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vMat = aMat;
         vOP = position;
-        {
+        // дальние фигурки: мелкие движения не видны — не считаем их (экономия на вершинах)
+        float gViewD = length((modelViewMatrix * vec4(position, 1.0)).xyz);
+        if (gViewD < 90.0) {
           // подолы, плащи и рукава колышутся на ветру: сильнее внизу, у каждого в своей фазе
           float cm = floor(aMat + 0.5);
           if (cm > 0.5 && cm < 1.5 || cm > 6.5) {
@@ -135,6 +137,15 @@ export function addPersonShading(mat) {
               transformed.y += sin(t * 0.7 + ph * 6.28) * 0.035 + sin(t * 5.5 + ph * 3.0) * 0.006;
             } else if (ak < 5.5) {
               transformed.y += sin(t * 2.1 + ph * 6.28) * 0.008 * clamp((position.y - aAnim.y) / 0.25, 0.0, 1.0);
+            } else if (ak > 6.5) {
+              // 7 — удар молотом/киркой: рука поднимается и резко бьёт вниз (ось — плечо)
+              float yw = (aAnim.x - 6.8) / 0.4 * 6.2831853;
+              vec3 ax = vec3(cos(yw), 0.0, -sin(yw));
+              vec3 sh = vec3(aPivot.x, aAnim.y, aPivot.y) + ax * 0.2;
+              float u = fract(t / 1.25 + ph);
+              float a = u < 0.55 ? 0.75 * smoothstep(0.0, 0.55, u) : u < 0.66 ? mix(0.75, -0.3, smoothstep(0.55, 0.66, u)) : mix(-0.3, 0.0, smoothstep(0.66, 1.0, u));
+              vec3 v = transformed - sh;
+              transformed = sh + v * cos(a) + cross(ax, v) * sin(a) + ax * dot(ax, v) * (1.0 - cos(a));
             } else {
               // 6 — зритель: после удара на турнире вскидывает руки (кто-то раньше, кто-то позже)
               float since = t - uCheer - ph * 0.7;
@@ -522,7 +533,17 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   // дочерняя матрица: сдвиг и поворот относительно родителя
   const C = (parent, px, py, pz, rx = 0, ry = 0, rz = 0, sc = 1) =>
     parent.clone().multiply(new THREE.Matrix4().compose(new V3(px, py, pz), rot(rx, ry, rz), new V3(sc, sc, sc)));
-  const skin = pick(SKIN), hair = pick(HAIR), tunic = pick(R.tunic);
+  const skin = pick(SKIN), tunic = pick(R.tunic);
+  let hair = pick(HAIR);
+  // телосложение и возраст — свой генератор, чтобы не сбить остальные случайные черты
+  const rb = mulberry32(seed * 31 + 7);
+  const kid = (R.scale || 1) < 0.8;
+  const plump = role === 'merchant' || role === 'noble' || role === 'priest' || role === 'smith';
+  const girth = kid ? 1 : POOR[role] ? 0.9 + rb() * 0.1 : plump ? 1.0 + rb() * 0.2 : 0.93 + rb() * 0.14;
+  const old = !kid && !R.sword && role !== 'guard' && role !== 'archer' && role !== 'foe' && rb() < 0.18;
+  if (old) hair = rb() < 0.5 ? 0x9a968e : 0xc8c2b6; // седина
+  const stoop = old ? 0.1 + rb() * 0.08 : 0; // сутулость стариков
+  const gx = 1 + (girth - 1) * 0.5; // плечи шире у крепких
   const legs = R.legs;
   const female = !!R.dress;
   const child = (R.scale || 1) < 0.8;
@@ -564,7 +585,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
 
   // ---- туловище: туника / ряса / платье, кайма по подолу, пояс с кошелём ----
   const body = R.dress ? DRESS : R.robe ? ROBE : TUNIC;
-  const bodyM = M(0, 0, 0, lean * 0.25);
+  const bodyM = M(0, 0, 0, lean * 0.25 + stoop * 0.3, 0, 0, girth, 1, girth * (plump ? 1.08 : 1));
   const rich = role === 'noble' || role === 'merchant' && rnd() < 0.5 || role === 'minstrel';
   if (rich) MT(7);
   B.add(body, bodyM, tunic, 0.4, sw);
@@ -592,7 +613,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   // безрукавная котта поверх туники у зажиточных горожан
   if ((role === 'merchant' || role === 'townswoman' || role === 'noble') && rnd() < 0.5) {
     const sc = pick([0x7a1c1c, 0x1d3f8a, 0x2f5a3a, 0x6a4a2a, 0x5a2a6a].filter((c) => c !== tunic));
-    B.add(female ? DRESS : TUNIC, M(0, female ? 0.12 : 0.05, 0, lean * 0.25, 0, 0, 1.07, 0.93, 1.1), sc, 0.4, sw);
+    B.add(female ? DRESS : TUNIC, M(0, female ? 0.12 : 0.05, 0, lean * 0.25, 0, 0, 1.07 * girth, 0.93, 1.1 * girth), sc, 0.4, sw);
     B.shadeLast && B.shadeLast(female ? DRESS : TUNIC, clothShade);
     if (trim) B.add(G.hem, C(bodyM, 0, (female ? HEM_Y.dress + 0.14 : HEM_Y.tunic + 0.08), 0).multiply(new THREE.Matrix4().makeScale(0.25 * flare * 1.07, 1.5, 0.25 * flare * 0.77)), trim, 0.4, sw);
   }
@@ -600,26 +621,26 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   const cloakP = role === 'noble' ? 0.75 : role === 'merchant' ? 0.4 : role === 'townswoman' ? 0.3 : role === 'priest' ? 0.5 : 0;
   if (!ride && !sit && rnd() < cloakP) {
     const cc = role === 'priest' ? 0x2a2622 : pick([0x5a1a1a, 0x1a2a4a, 0x3a3a2a, 0x2a4a2a, 0x6a4a2a]);
-    B.add(G.cloak, M(0, 0, -0.01, lean * 0.25), cc, 0.4, sw);
+    B.add(G.cloak, M(0, 0, -0.01, lean * 0.25, 0, 0, girth, 1, girth), cc, 0.4, sw);
     B.shadeLast && B.shadeLast(G.cloak, (x, y, z) => (0.78 + 0.22 * Math.min(1, (y - 0.5) / 0.9)) * (1 + 0.1 * Math.sin(Math.atan2(z, x) * 7)));
     B.add(new THREE.SphereGeometry(0.025, 6, 4), M(0, 1.4, 0.12), 0xd6a632, 0.4, sw);
   }
   if (R.surcoat) {
-    B.add(tunicGeo(1.3, 1.1), M(0, 0.02, 0, lean * 0.25, 0, 0, 1.06, 0.98, 1.08), R.surcoat, 0.4, sw);
+    B.add(tunicGeo(1.3, 1.1), M(0, 0.02, 0, lean * 0.25, 0, 0, 1.06 * girth, 0.98, 1.08 * girth), R.surcoat, 0.4, sw);
     // крест на сюрко
-    B.add(new THREE.BoxGeometry(0.05, 0.3, 0.01), M(0, 1.15, 0.165), R.cross || 0xa01818, 0.4, sw);
-    B.add(new THREE.BoxGeometry(0.2, 0.05, 0.01), M(0, 1.2, 0.165), R.cross || 0xa01818, 0.4, sw);
+    B.add(new THREE.BoxGeometry(0.05, 0.3, 0.01), M(0, 1.15, 0.165 * girth), R.cross || 0xa01818, 0.4, sw);
+    B.add(new THREE.BoxGeometry(0.2, 0.05, 0.01), M(0, 1.2, 0.165 * girth), R.cross || 0xa01818, 0.4, sw);
   }
   if (R.apron) {
     const lg = role === 'smith';
     MT(lg ? 5 : 1);
-    B.add(lg ? G.apronLong : G.apron, M(0, 1.02, 0.012, lean * 0.25), R.apron, 0.4, sw);
+    B.add(lg ? G.apronLong : G.apron, M(0, 1.02, 0.012, lean * 0.25, 0, 0, girth, 1, girth * (plump ? 1.08 : 1)), R.apron, 0.4, sw);
     if (lg) B.add(new THREE.BoxGeometry(0.2, 0.26, 0.012), M(0, 1.17, 0.145, -0.12), R.apron, 0.4, sw); // нагрудник
     for (const sd of [-1, 1]) B.add(new THREE.BoxGeometry(0.018, 0.16, 0.008), M(sd * 0.05, 0.9, -0.14, 0.1, 0, sd * 0.2), shade(R.apron, 0.85), 0.4, sw); // завязки сзади
   }
   MT(5);
-  B.add(G.belt, M(0, 0.98, 0, lean * 0.25, 0, 0, 1, 1, 0.74), 0x2a1d14, 0.4, sw);
-  if (!R.robe && !R.dress) B.add(G.pouch, M(0.14, 0.9, 0.08, 0, -0.5), 0x5a3a1e, 0.4, sw);
+  B.add(G.belt, M(0, 0.98, 0, lean * 0.25, 0, 0, girth, 1, 0.74 * girth * (plump ? 1.08 : 1)), 0x2a1d14, 0.4, sw);
+  if (!R.robe && !R.dress) B.add(G.pouch, M(0.14 * girth, 0.9, 0.08 * girth, 0, -0.5), 0x5a3a1e, 0.4, sw);
   if (!female && !child && !R.sword && role !== 'priest') { // нож в ножнах на поясе
     B.add(new THREE.BoxGeometry(0.03, 0.2, 0.02), M(-0.16, 0.88, 0.06, 0, 0, 0.25), 0x3a2418, 0.4, sw);
     B.add(new THREE.BoxGeometry(0.02, 0.07, 0.02), M(-0.135, 1.0, 0.06, 0, 0, 0.25), 0x6a5a3a, 0.4, sw);
@@ -630,14 +651,14 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   }
   // передник у крестьянок
   MT(1);
-  if (role === 'woman' && rnd() < 0.6) B.add(G.apronW, M(0, 1.0, 0.018 + lean * 0.02, lean * 0.3), pick([0xd8d0bc, 0xc8bca0, 0xe0dccf]), 0.4, sw);
+  if (role === 'woman' && rnd() < 0.6) B.add(G.apronW, M(0, 1.0, 0.018 + lean * 0.02, lean * 0.3, 0, 0, girth, 1, girth), pick([0xd8d0bc, 0xc8bca0, 0xe0dccf]), 0.4, sw);
 
   // ---- голова: шея, лицо (нос, глаза, брови, уши), волосы/борода, убор ----
   const hy = 1.6;
   const look = (rnd() - 0.5) * 0.6;
   MT(2);
-  B.add(G.neck, M(0, 1.5, 0.01), skin, 1, sw);
-  const headM = M(0, hy, 0.01 + lean * 0.12, lean * 0.3, look);
+  B.add(G.neck, M(0, 1.5 - stoop * 0.1, 0.01 + stoop * 0.3, stoop * 1.2), skin, 1, sw);
+  const headM = M(0, hy - stoop * 0.22, 0.01 + lean * 0.12 + stoop * 0.55, lean * 0.3 - stoop * 0.3, look);
   B.add(G.head, headM, skin, 1, sw);
   B.shadeLast && B.shadeLast(G.head, (x, y, z) => {
     const ch = Math.exp(-((Math.abs(x) - 0.052) ** 2 + (y + 0.02) ** 2) / 0.0006) * Math.max(0, z / 0.1);
@@ -722,7 +743,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
       MT(1);
       if (role === 'woman' && rnd() < 0.45) { // цветной платок, завязанный сзади
         const kc = pick([0x8a3a2a, 0x3d5a7a, 0x6a6a3a, 0xc8b890]);
-        B.add(G.kerchief, C(headM, 0, 0.0, -0.015, -0.35), kc, 1, sw);
+        B.add(G.kerchief, C(headM, 0, 0.012, -0.012, -0.72), kc, 1, sw); // надвинут до лба — глаза открыты
         B.add(new THREE.ConeGeometry(0.04, 0.12, 5), C(headM, 0, -0.03, -0.13, 2.4), kc, 1, sw);
         if (rnd() < 0.6) { // коса из-под платка
           MT(4);
@@ -753,11 +774,11 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     case 'helm':
       // шапель — железная каска с широкими полями (типична для XIII века) и кольчужный капюшон
       MT(6);
-      B.add(G.coif, C(headM, 0, -0.02, -0.012, -0.04), 0x8a8e94, 1, sw);
+      B.add(G.coif, C(headM, 0, -0.012, -0.012, -0.04), 0x8a8e94, 1, sw);
       B.add(G.mailCape, M(0, 1.44, 0, 0, 0, 0, 1, 1, 0.8), 0x7e8288, 0.8, sw);
       MT(3);
-      B.add(G.helmTop, C(headM, 0, 0.018, 0), 0x6e7074, 1, sw);
-      B.add(G.brim, C(headM, 0, 0.018, 0, -0.08), 0x5e6064, 1, sw);
+      B.add(G.helmTop, C(headM, 0, 0.05, -0.006), 0x6e7074, 1, sw);
+      B.add(G.brim, C(headM, 0, 0.05, -0.006, -0.12), 0x5e6064, 1, sw);
       break;
   }
 
@@ -783,17 +804,21 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
   const sleeve = R.surcoat && !R.sword ? R.surcoat : R.mail ? 0x8a8e94 : tunic;
   const hands = [];
   let armLimb = [0, 0];
+  let strikeAnim = null; // молот/кирка двигаются вместе с рукой
   [1, -1].forEach((sd, i) => {
     const [fx, sz, eb] = armPose[i];
     const fixed = ride || (sit && !cheer) || ['tray', 'lute', 'lance', 'basket'].includes(IT) || (i === 0 && IT === 'torch') || (i === 1 && IT === 'falcon');
     B.curLimb = fixed ? [0, 0] : [-sd * 0.6, 1.4 * s];
     if (i === 0) armLimb = B.curLimb; // рука — в противофазе с ногой
-    const sh = M(sd * 0.2, 1.37, lean * 0.1, fx + lean * 0.3, 0, sd * Math.abs(sz));
+    const sh = M(sd * 0.2 * gx, 1.37 - stoop * 0.05, lean * 0.1 + stoop * 0.18, fx + lean * 0.3, 0, sd * Math.abs(sz));
     // работающие руки (помешивают, ткут, перебирают) — движение считает шейдер
-    B.curAnim = pose === 'work' && !fixed ? [2, new V3().setFromMatrixPosition(sh).y, (seed * 0.137) % 1] : cheer && !fixed ? [6, new V3().setFromMatrixPosition(sh).y, (seed * 0.2137) % 1] : [0, 0, 0];
+    const strike = i === 0 && !fixed && !sit && pose !== 'work' && (IT === 'hammer' || IT === 'pick');
+    const yN = (((yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2);
+    B.curAnim = strike ? [6.8 + yN * 0.4, new V3().setFromMatrixPosition(sh).y, (seed * 0.173) % 1] : pose === 'work' && !fixed ? [2, new V3().setFromMatrixPosition(sh).y, (seed * 0.137) % 1] : cheer && !fixed ? [6, new V3().setFromMatrixPosition(sh).y, (seed * 0.2137) % 1] : [0, 0, 0];
+    if (strike) strikeAnim = B.curAnim.slice();
     MT(1);
     B.add(G.shoulder, sh, sleeve, 0.6, sw);
-    B.add(G.deltoid, M(sd * 0.165, 1.365, lean * 0.1, lean * 0.3, 0, -sd * 0.3), sleeve, 0.6, sw);
+    B.add(G.deltoid, M(sd * 0.165 * gx, 1.365 - stoop * 0.05, lean * 0.1 + stoop * 0.18, lean * 0.3, 0, -sd * 0.3), sleeve, 0.6, sw);
     B.add(G.upperArm, sh, sleeve, 0.6, sw);
     const el = C(sh, 0, -0.3, 0, -eb);
     B.add(G.joint, el, sleeve, 0.6, sw);
@@ -825,6 +850,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(bow, M(0.15, 1.42, 0.62, 0, Math.PI / 2, Math.PI / 2 - Math.PI * 0.45), 0x6a4a2a, 0.3, sw);
     B.add(new THREE.CylinderGeometry(0.07, 0.06, 0.45, 8), M(0.12, 1.25, -0.16, 0.25), 0x5a3a1e, 0.3, sw); // колчан
   }
+  if (strikeAnim) B.curAnim = strikeAnim;
   if (IT === 'hammer') {
     const h = hands[0];
     B.add(G.shaft, new THREE.Matrix4().compose(h.clone().add(new V3(0, -0.08, 0)), new THREE.Quaternion(), new V3(1, 0.4, 1)), 0x5a3e24, 0.3, sw);
@@ -896,6 +922,7 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     B.add(G.shaft, new THREE.Matrix4().compose(h.clone().add(new V3(0, -0.2, 0)), new THREE.Quaternion(), new V3(1.3, 0.8, 1.3)), 0x5a3e24, 0.3, sw);
     B.add(new THREE.BoxGeometry(0.5, 0.045, 0.045), new THREE.Matrix4().compose(h.clone().add(new V3(0, 0.56, 0)), new THREE.Quaternion().setFromAxisAngle(up, yaw + Math.PI / 2), new V3(1, 1, 1)), 0x55585c, 0.3, sw);
   }
+  B.curAnim = [0, 0, 0];
   if (R.sword) {
     B.add(new THREE.BoxGeometry(0.05, 0.95, 0.015), M(-0.22, 0.55, 0.05, 0, 0, 0.12), 0xb0b4ba, 0.2, sw);
     B.add(new THREE.BoxGeometry(0.22, 0.03, 0.03), M(-0.2, 1.03, 0.05, 0, 0, 0.12), 0x6a5a3a, 0.2, sw);

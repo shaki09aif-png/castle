@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { setAnisotropy, setLoadedAssets, preloadTextureCache, saveTextureCache } from './textures.js';
 import { loadAssets } from './assets.js';
 import { createLighting } from './lighting.js';
-import { createTerrain } from './terrain.js';
+import { createTerrain, cutTerrainPatch } from './terrain.js';
 import { createRiver } from './water.js';
 import { createVegetation } from './vegetation.js';
 import { createWalls } from './walls.js';
@@ -129,12 +129,20 @@ async function init() {
   toLayer1(mark);
   await step('деревня у подножия');
   const village = createVillage(scene, terrain, walls);
+  // пена у свай моста (течение огибает их) и у мельничного колеса
+  if (river.addFoam) {
+    const spots = (village.piers || []).map(([x, z]) => [x, z, 0.55]);
+    const mw = village.millWheel;
+    if (mw) { spots.push([mw.c.x, mw.c.z, 1.9]); spots.push([mw.c.x + mw.f.X.x * 2.4, mw.c.z + mw.f.X.z * 2.4, 1.4]); }
+    river.addFoam(spots);
+  }
   await step('мелкие детали и люди');
   mark = scene.children.length;
   const details = createDetails(scene, terrain, walls, village);
   const torches = createTorches(scene, terrain, walls);
   await step('интерьер зала, осадный лагерь, птицы');
   const extras = createExtras(scene, terrain, walls, village);
+  if (extras.places && extras.places.tunnel) { const T = extras.places.tunnel; cutTerrainPatch(terrain.mesh, T.P.x, T.P.z, 9); }
   if (extras.places.well) extras.places.well.water = scene.getObjectByName('well-water');
   toLayer1(mark);
   // в осадном лагере не растут деревья и трава
@@ -162,7 +170,7 @@ async function init() {
   // ---- «Замок сегодня»: руины без крыш, дерева и людей, стены во мху ----
   {
     const CASTLE = new Set(['walls', 'towers', 'keep', 'gate', 'courtyard']);
-    const HIDE = new Set(['gate-oak', 'details', 'extras', 'extras-glow', 'people', 'walker', 'stained-glass', 'torch-iron', 'torch-wood', 'window-lights', 'paving', 'straw', 'soot', 'trodden']);
+    const HIDE = new Set(['gate-oak', 'details', 'extras', 'yard-pavilion', 'extras-glow', 'people', 'walker', 'stained-glass', 'torch-iron', 'torch-wood', 'window-lights', 'paving', 'straw', 'soot', 'trodden']);
     const KEEP = new Set(['terrain', 'sky', 'rain', 'snow', 'tree', 'rocks', 'grass', 'road', 'river', 'moat', 'ice', 'fields', 'village', 'retaining-walls', 'ruin-rubble', 'birds']);
     const isStone = (o) => [].concat(o.material).some((m) => m.customProgramCacheKey && /wall-stone/.test(m.customProgramCacheKey()));
     const tmp = new THREE.Vector3(), im = new THREE.Matrix4();
@@ -343,6 +351,7 @@ async function init() {
   // ограничители камеры в подземных ходах (не дают пройти сквозь стены)
   if (extras.places && extras.places.tunnel) cam.zones.push(extras.places.tunnel.limit);
   cam.walkable = createWalkable(terrain, walls, cam.zones);
+  cam.walkable.doors = doors.list || [];
   let entering = null;
   const easeIO = (x) => x * x * (3 - 2 * x);
   doors.setOnEnter && doors.setOnEnter((d) => {
@@ -399,6 +408,7 @@ async function init() {
     if (entering) updateEntering(Math.min(dt, 0.1));
     else if (!tour.update(Math.min(dt, 0.1))) cam.update(dt);
     lighting.update(t, camera, shadowFocus(), Math.min(dt, 0.1));
+    if (terrain.updateRocks) terrain.updateRocks(camera);
     river.update(t);
     windT += dt * WIND_K.value;
     flagT += dt * (0.6 + 0.4 * WIND_K.value);
@@ -411,7 +421,7 @@ async function init() {
     keep.update(t);
     court.update(t);
     village.update(t);
-    details.update(t);
+    details.update(t, camera);
     torches.update(t);
     extras.update(t, dt, camera);
     interiors.update(camera, t);
@@ -441,7 +451,7 @@ async function init() {
 
   // доступ из консоли браузера для отладки
   window.castle = {
-    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, weather, terrain, assets, village, doors, interiors,
+    scene, camera, controls, cam, tour, renderer, vegetation, REFLECT, lighting, gate, extras, weather, terrain, assets, village, doors, interiors, walls,
     snapshot() {
       frame();
       return renderer.domElement.toDataURL('image/jpeg', 0.9);

@@ -126,7 +126,7 @@ export function createCameraControls(camera, dom, terrain) {
   const feet = new THREE.Vector3(), expect = new THREE.Vector3();
   let vy = 0, grounded = true, bob = 0, jump = false, crouch = 0;
   const W = () => api.walkable;
-  const floorAt = (x, z) => (W() ? W().floorAt(x, z) : terrain.heightAt(x, z));
+  const floorAt = (x, z, y) => (W() ? W().floorAt(x, z, y) : terrain.heightAt(x, z));
   function startWalk(from) {
     let x = camera.position.x, z = camera.position.z;
     if (from === 'orbit') { x = orbit.target.x; z = orbit.target.z; }
@@ -151,7 +151,7 @@ export function createCameraControls(camera, dom, terrain) {
   function updateWalk(dt) {
     // камеру передвинули снаружи (вход в дом, экскурсия) — ноги встают под неё
     if (camera.position.distanceTo(expect) > 0.3) {
-      feet.set(camera.position.x, floorAt(camera.position.x, camera.position.z), camera.position.z);
+      feet.set(camera.position.x, floorAt(camera.position.x, camera.position.z, camera.position.y - 1.0), camera.position.z);
       vy = 0;
     }
     camera.getWorldDirection(fwd);
@@ -175,15 +175,18 @@ export function createCameraControls(camera, dom, terrain) {
     // шаг по осям отдельно — чтобы скользить вдоль стен, а не застревать
     const nx = feet.x + vel.x * dt, nz = feet.z + vel.z * dt;
     const ok = (x0, z0, x1, z1) => {
-      if (W() && !W().canMove(x0, z0, x1, z1)) return false;
+      if (W() && !W().canMove(x0, z0, x1, z1, feet.y)) return false;
       // слишком крутой подъём (обрыв, стена рва) — не пройти
-      const g0 = floorAt(x0, z0), g1 = floorAt(x1, z1);
-      return g1 - Math.max(g0, feet.y) < 0.65 + Math.hypot(x1 - x0, z1 - z0) * 1.2;
+      const g0 = floorAt(x0, z0, feet.y), g1 = floorAt(x1, z1, feet.y);
+      // и не шагнуть с края стены или лестницы (там перила / было бы падение)
+      if (grounded && g1 < Math.min(g0, feet.y) - 1.0) return false;
+      const stepMax = W() && W().nearOpenDoor(x1, z1) ? 1.3 : 0.65;
+      return g1 - Math.max(g0, feet.y) < stepMax + Math.hypot(x1 - x0, z1 - z0) * 1.2;
     };
     if (ok(feet.x, feet.z, nx, feet.z)) feet.x = nx; else vel.x = 0;
     if (ok(feet.x, feet.z, feet.x, nz)) feet.z = nz; else vel.z = 0;
     // сила тяжести и прыжок
-    const g = floorAt(feet.x, feet.z);
+    const g = floorAt(feet.x, feet.z, feet.y);
     if ((jump || touch.lift > 0) && grounded) { vy = 4.2; grounded = false; }
     jump = false;
     vy -= 9.8 * dt;

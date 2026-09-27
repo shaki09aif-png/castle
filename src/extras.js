@@ -10,7 +10,7 @@ import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth, GATEHOUSE, GATE_
 import { WINDOWS } from './towers.js';
 import { mulberry32 } from './noise.js';
 import { createLife3 } from './life3.js';
-import { siegeCamp, yardPavilion } from './camp.js';
+import { siegeCamp, yardPavilion, clothKit } from './camp.js';
 import { COURT_EXTRAS } from './details.js';
 
 const V3 = THREE.Vector3;
@@ -578,9 +578,11 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
   slingGrp.add(pouch);
   const loadedStone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.4, 1).translate(0, SL + 0.1, 0), new THREE.MeshStandardMaterial({ color: 0x8a8278, roughness: 1 }));
   slingGrp.add(loadedStone);
+  slingGrp.name = 'extras';
   scene.add(slingGrp);
   // канат ворота к концу рычага (виден, пока рычаг взводят и держат взведённым)
   const winchRope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1, 5).translate(0, 0.5, 0), new THREE.MeshStandardMaterial({ color: 0x7a6a4a, roughness: 0.95 }));
+  winchRope.name = 'extras';
   scene.add(winchRope);
   let curAng = 0, prevAng = 0, prevVel = 0, sw = 0, swV = 0, loaded = true;
   const DOWN = new V3(0, -1, 0), YUP = new V3(0, 1, 0);
@@ -701,12 +703,20 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
   function shootArrow() {
     const a = arrowSt.find((x) => !x.on);
     if (!a) return;
-    let from = null;
-    if (extraShooters.length && Math.random() < 0.75) from = extraShooters[Math.floor(Math.random() * extraShooters.length)]();
-    if (!from) from = shooters[Math.floor(Math.random() * shooters.length)];
-    // бьют по осадному лагерю: по щитам перед требушетом, частоколу и прислуге
-    const to = T.pivot.clone().addScaledVector(T.A, 4 + Math.random() * 16).addScaledVector(T.R, (Math.random() - 0.5) * 34);
-    to.y = gh(to.x, to.z) + 0.3;
+    let from = null, to;
+    if (Math.random() < 0.3) {
+      // лучники осаждающих отвечают из-за частокола — стрелы бьют в стену и зубцы
+      from = T.pivot.clone().addScaledVector(T.A, 9 + Math.random() * 7).addScaledVector(T.R, (Math.random() - 0.5) * 30);
+      from.y = gh(from.x, from.z) + 1.5;
+      const s0 = shooters[Math.floor(Math.random() * shooters.length)];
+      to = s0.clone().add(new V3((Math.random() - 0.5) * 4, -0.6 - Math.random() * 3, (Math.random() - 0.5) * 4)).addScaledVector(toCamp, 0.9);
+    } else {
+      if (extraShooters.length && Math.random() < 0.75) from = extraShooters[Math.floor(Math.random() * extraShooters.length)]();
+      if (!from) from = shooters[Math.floor(Math.random() * shooters.length)];
+      // бьют по осадному лагерю: по щитам перед требушетом, частоколу и прислуге
+      to = T.pivot.clone().addScaledVector(T.A, 4 + Math.random() * 16).addScaledVector(T.R, (Math.random() - 0.5) * 34);
+      to.y = gh(to.x, to.z) + 0.3;
+    }
     const dist = Math.hypot(to.x - from.x, to.z - from.z);
     const dur = dist / 62 + Math.random() * 0.4;
     a.p0.copy(from);
@@ -1051,6 +1061,7 @@ function createLife2(scene, ctx, village, walls) {
   const T = findFlat(terrain, village, { cx: br.b.x + 60, cz: br.b.z + 40, spread: 220, needR: 34, avoid }, rnd);
   if (T) {
     ctx.tourney = T;
+    const cloth = clothKit(ctx, 0);
     const U = new V3(1, 0, 0.35).normalize(), Vn = new V3(-U.z, 0, U.x);
     const at = (u, v) => T.clone().addScaledVector(U, u).addScaledVector(Vn, v);
     const yawU = Math.atan2(U.x, U.z);
@@ -1084,10 +1095,14 @@ function createLife2(scene, ctx, village, walls) {
           }
         }
       }
-      // навес над трибуной
+      // навес над трибуной — полосатая парусина, чуть провисает между стойками
       for (let k = 0; k < 11; k++) {
-        const c = at(-10 + k * 2, v0 + face * 1.2);
-        colorB.add(GEO.box, M(c.x, gh(c.x, c.z) + 3.6, c.z, yawU, 3.4, 0.04, 2.02, 0, face * 0.15), k % 2 ? 0x7a1c1c : 0xd6a632);
+        const u0 = -11 + k * 2, u1 = u0 + 2;
+        const yF = (u) => { const c = at(u, v0 + face * 1.2); return gh(c.x, c.z) + 3.6; };
+        const P4 = [at(u0, v0 - face * 0.5), at(u1, v0 - face * 0.5), at(u1, v0 + face * 2.9), at(u0, v0 + face * 2.9)];
+        const ys = [yF(u0) + 0.25, yF(u1) + 0.25, yF(u1) - 0.25, yF(u0) - 0.25];
+        P4.forEach((q, i) => { q.y = ys[i] - (i % 3 === 0 ? 0 : 0) - (k % 2 ? 0.03 : 0); });
+        cloth.quad(P4, UP.clone().addScaledVector(Vn, -face * 0.12).normalize(), k % 2 ? 0x8c2020 : 0xd6a632);
       }
       for (const u of [-10, 10]) for (const dv of [0, 2.4]) {
         const p = at(u, v0 + face * dv), g = gh(p.x, p.z);
@@ -1107,18 +1122,16 @@ function createLife2(scene, ctx, village, walls) {
       wood.addGeometry(new THREE.CylinderGeometry(0.05, 0.05, 5, 5), M(p.x, g + 2.5, p.z));
       colorB.add(GEO.box, M(p.x + U.x * 0.5, g + 4.4, p.z + U.z * 0.5, yawU + Math.PI / 2, 0.9, 1.3, 0.02), u < 0 ? 0x1d3f8a : 0x7a1c1c);
     }
-    // шатры рыцарей на концах поля
+    // шатры рыцарей на концах поля (та же парусина, что в лагере): синий и красный
     for (const [u, c] of [[-38, 0x1d3f8a], [38, 0x7a1c1c]]) {
       const p = at(u, 4), g = gh(p.x, p.z);
-      for (let k = 0; k < 10; k++) {
-        const col = k % 2 ? c : 0xe8e0c8;
-        colorB.add(new THREE.CylinderGeometry(2.4, 2.4, 2, 2, 1, true, (k / 10) * Math.PI * 2, Math.PI / 5 + 0.01), M(p.x, g + 1, p.z), col);
-        colorB.add(new THREE.ConeGeometry(2.7, 1.8, 2, 1, true, (k / 10) * Math.PI * 2, Math.PI / 5 + 0.01), M(p.x, g + 2.9, p.z), col);
-      }
+      cloth.roundTent(p, { R: 2.4, hw: 1.9, hr: 2.2, n: 16, cols: [c, 0xe8e0c8], stripe: true, val: c, door: Math.atan2(-U.x * Math.sign(u), -U.z * Math.sign(u)), pennant: c });
+      void g;
       people.push({ x: p.x + Vn.x * 3.2, y: gh(p.x + Vn.x * 3.2, p.z + Vn.z * 3.2), z: p.z + Vn.z * 3.2, yaw: yawU + (u < 0 ? 0 : Math.PI), role: 'servant' });
     }
     // герольд у барьера
     { const p = at(0, -3.2); people.push({ x: p.x, y: gh(p.x, p.z), z: p.z, yaw: Math.atan2(-Vn.x, -Vn.z), role: 'noble' }); }
+    cloth.finish(scene);
     // ПОЕДИНКИ: 2 рыцаря синих против 2 красных.
     // 1) сшибка на копьях у барьера: разгон, удар в щит, щепки, отдача, разворот;
     // 2) пеший бой на мечах в углу ристалища: удары, блоки, отходы.
@@ -1129,7 +1142,7 @@ function createLife2(scene, ctx, village, walls) {
       const { mat, uPhase, uAmp, uHuman } = walkerMaterial();
       uAmp.value = amp;
       const mesh = new THREE.Mesh(B.build(), mat);
-      mesh.receiveShadow = true; mesh.castShadow = true; mesh.name = 'walker';
+      mesh.receiveShadow = true; mesh.castShadow = false; mesh.name = 'walker';
       scene.add(mesh); WALKERS.push(mesh);
       return { mesh, uPhase, uAmp, uHuman };
     };
@@ -1403,6 +1416,20 @@ export function createExtras(scene, terrain, walls, village) {
     m.name = name;
     scene.add(m);
   }
+  // сетки осадного лагеря — отдельно (отсекаются, когда лагерь вне кадра или далеко)
+  const campMeshes = [];
+  if (ctx.campBuilders) {
+    const CB = ctx.campBuilders;
+    for (const [bld, mat, far] of [[CB.wood, walls.woodMaterial, 700], [CB.stone, walls.stoneMaterial, 220], [CB.metal, iron, 220], [CB.straw, strawMaterial(), 220], [CB.colorB, colorMat, 220]]) {
+      if (!bld.pos.length) continue;
+      const m = new THREE.Mesh(bld.build(), mat);
+      m.userData.far = far; // мелочи лагеря (лошади, верёвки, камни) издалека не видны
+      m.castShadow = m.receiveShadow = true;
+      m.name = 'extras';
+      scene.add(m);
+      campMeshes.push(m);
+    }
+  }
   if (ctx.ruinRubble && ctx.ruinRubble.pos.length) {
     const rm = new THREE.Mesh(ctx.ruinRubble.build(), walls.stoneMaterial);
     rm.name = 'ruin-rubble';
@@ -1440,8 +1467,9 @@ export function createExtras(scene, terrain, walls, village) {
       dt = Math.min(dt, 0.1);
       if (camera) {
         const cp = camera.position;
-        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < 260 && !(ctxRuins.on) && m.userData.night !== false;
-        for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < 340 && !(ctxRuins.on);
+        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < (m.userData.maxDist || 190) && !(ctxRuins.on) && m.userData.night !== false;
+        for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < (g.c.x === 0 && g.c.z === 0 ? 340 : 220) && !(ctxRuins.on); // за 220 м фигурки в пару пикселей
+        if (camp) { const dc = Math.hypot(camp.x - cp.x, camp.z - cp.z); for (const m of campMeshes) m.visible = dc < m.userData.far && !ctxRuins.on; }
       }
       peopleUpd.update(t);
       walkers.update(dt);
@@ -1460,7 +1488,7 @@ export function createExtras(scene, terrain, walls, village) {
     set ruinsOn(v) { ctxRuins.on = v; },
     get tourney() { return ctx.tourney; },
     cheerNow(ago = 0) { CHEER.value = SWAY_TIME.value - ago; },
-    setGate(g) { life2.setGate(g); },
+    setGate(g) { life2.setGate(g); life3.gate = g; },
   };
 }
 

@@ -349,8 +349,9 @@ export function createWalls(scene, terrain) {
   for (const i of hoardSegs) buildHoarding(wood, stone, P[i], segDir[i], segNrm[i], segLen[i], walk[i], walk[i + 1], T);
 
   // ---------- каменные лестницы со двора на стену ----------
+  const stairs = [];
   for (const { i, f } of pickStairs(P, segDir, segLen, segNrm)) {
-    buildStairs(stone, terrain, P[i], segDir[i], segNrm[i], segLen[i], walk[i], walk[i + 1], T, over, f);
+    stairs.push(buildStairs(stone, terrain, P[i], segDir[i], segNrm[i], segLen[i], walk[i], walk[i + 1], T, over, f));
   }
 
   const meshes = [
@@ -371,7 +372,7 @@ export function createWalls(scene, terrain) {
     return walk[best];
   }
   return {
-    trace, walk, walkAt, segDir, segNrm, points: P,
+    trace, walk, walkAt, segDir, segNrm, points: P, stairs, walkBand: { inner: T / 2 + over, outer: T / 2 - WALL.parapetThick },
     stoneMaterial: stoneMat, woodMaterial: woodMat,
     update() {},
   };
@@ -496,6 +497,8 @@ function buildStairs(stone, terrain, P0, D, N, L, w0, w1, T, over, f) {
   const top = P0.clone().addScaledVector(D, aTop + 0.6).addScaledVector(N, -T / 2 - over - width / 2 - 0.05);
   const gy = terrain.heightAt(top.x, top.z) - 0.4;
   stone.box(new V3(top.x, (yTop + gy) / 2, top.z), D, UP, N, 0.6, (yTop - gy) / 2, width / 2);
+  // для хождения пешком: где ступени и на какой они высоте
+  return { top: inner.clone(), D: D.clone(), N: N.clone(), yTop, run, rise, width, steps };
 }
 
 // ---------------------------------------------------------------------------
