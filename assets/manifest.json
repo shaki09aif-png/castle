@@ -1,0 +1,6 @@
+{
+  "source": "Poly Haven (https://polyhaven.com), CC0",
+  "note": "Пустой список: фотоскан-текстуры не скачаны. Запустите npm run assets, чтобы скачать их (файл будет перезаписан).",
+  "textures": {},
+  "hdri": {}
+}
