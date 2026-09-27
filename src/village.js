@@ -238,7 +238,7 @@ export function wattleFence(wood, terrain, pts, h = 1.0) {
 // Грядки с овощами (капуста, лук, горох) — комочки зелени
 export function gardenBeds(soilB, plantB, terrain, f, x0, z0, w, d, rnd) {
   const beds = Math.max(2, Math.floor(w / 1.4));
-  const plant = new THREE.IcosahedronGeometry(0.18, 1);
+  const plant = new THREE.IcosahedronGeometry(0.18, 1), leafG = new THREE.IcosahedronGeometry(0.18, 0);
   for (let k = 0; k < beds; k++) {
     const lx = x0 + (k + 0.5) * (w / beds);
     const c = f.p(lx, 0, z0 + d / 2);
@@ -248,7 +248,15 @@ export function gardenBeds(soilB, plantB, terrain, f, x0, z0, w, d, rnd) {
     for (let r = 0.3; r < d - 0.3; r += 0.45) {
       const p = f.p(lx + (rnd() - 0.5) * 0.3, 0, z0 + r);
       const s = kind === 0 ? 1.1 : kind === 1 ? 0.55 : 0.8;
-      plantB.addGeometry(plant, new THREE.Matrix4().compose(p.setY(g + 0.18 + 0.05 * s), new THREE.Quaternion(), new V3(s, s * (kind === 1 ? 1.8 : 0.8), s)));
+      if (kind === 1) { plantB.addGeometry(plant, new THREE.Matrix4().compose(p.setY(g + 0.18 + 0.05 * s), new THREE.Quaternion(), new V3(s, s * 1.8, s))); continue; }
+      // кочан/куст — розетка: сердцевина и 4 раскинутых листа
+      const py = g + 0.12 + 0.04 * s;
+      plantB.addGeometry(plant, new THREE.Matrix4().compose(p.clone().setY(py + 0.03), new THREE.Quaternion(), new V3(s * 0.55, s * 0.5, s * 0.55)));
+      for (let l = 0; l < 4; l++) {
+        const la = l * 1.571 + rnd() * 0.5;
+        const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -la, 0.45));
+        plantB.addGeometry(leafG, new THREE.Matrix4().compose(new V3(p.x + Math.cos(la) * 0.13 * s, py - 0.02, p.z + Math.sin(la) * 0.13 * s), q, new V3(s * 0.7, s * 0.22, s * 0.45)));
+      }
     }
   }
 }
