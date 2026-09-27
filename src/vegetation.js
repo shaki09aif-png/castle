@@ -322,11 +322,11 @@ function leafGeometry(out) {
 const SPECIES = {
   oak: {
     height: [8, 13], trunkR: 0.34, branches: 6, branchStart: 0.38, spread: 0.75, crownR: 2.1,
-    clumpCards: 32, card: 1.35, bark: 'bark', leafHue: [0.19, 0.3, 0.09], leaf: 'broad', droop: 0,
+    clumpCards: 29, card: 1.35, bark: 'bark', leafHue: [0.19, 0.3, 0.09], leaf: 'broad', droop: 0,
   },
   beech: {
     height: [11, 16], trunkR: 0.3, branches: 7, branchStart: 0.45, spread: 0.6, crownR: 2.3,
-    clumpCards: 30, card: 1.3, bark: 'bark', leafHue: [0.22, 0.33, 0.08], leaf: 'broad', droop: 0.1,
+    clumpCards: 27, card: 1.3, bark: 'bark', leafHue: [0.22, 0.33, 0.08], leaf: 'broad', droop: 0.1,
   },
   birch: {
     height: [9, 13], trunkR: 0.17, branches: 5, branchStart: 0.45, spread: 0.35, crownR: 1.3,
@@ -391,7 +391,7 @@ function buildSpecies(name, variant) {
       const sc = c.clone().add(new THREE.Vector3(Math.cos(a) * d, (rnd() - 0.4) * r * 0.5, Math.sin(a) * d));
       leafClump(sc, r * (0.52 + rnd() * 0.22), Math.round(sp.clumpCards / subs), sp.card * 0.95, rnd, leaves, sp.droop, tint * (0.92 + rnd() * 0.16));
     }
-    leafClump(c, r * 0.9, Math.max(5, Math.round(sp.clumpCards / 4)), sp.card * 1.8, rnd, leavesFar, sp.droop, tint);
+    leafClump(c, r * 0.9, Math.max(5, Math.round(sp.clumpCards / (sp.clumpCards >= 27 ? 4.8 : 4))) /* вдали — столько же листвы, сколько раньше (FPS) */, sp.card * 1.8, rnd, leavesFar, sp.droop, tint);
   }
   return {
     trunk: mergeGeometries(trunks),

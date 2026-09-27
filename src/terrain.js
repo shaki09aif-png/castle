@@ -722,6 +722,15 @@ function makeTerrainMaterial() {
               float crack = (1.0 - smoothstep(0.0, 0.012, abs(crs.x - 0.5))) + (1.0 - smoothstep(0.0, 0.009, abs(crs.y - 0.5))) * 0.8;
               c1 *= 1.0 - min(1.0, crack) * 0.6;
               c1 *= 0.88 + 0.28 * smoothstep(0.35, 0.75, o1.r);
+            // живой камень: тёмные потёки на отвесах, мох на уступах, пятна лишайника
+              float steep = 1.0 - abs(n.y);
+              float st = (0.5 + 0.5 * sin((vWPos.x + vWPos.z) * 2.3 + sin((vWPos.x - vWPos.z) * 0.7) * 3.0)) * 0.6 + crs.y * 0.4 + 0.05;
+              c1 *= 1.0 - smoothstep(0.5, 0.74, st) * 0.4 * steep;
+              float ledge = smoothstep(0.5, 0.85, n.y);
+              c1 = mix(c1, c1 * vec3(0.55, 0.72, 0.38), ledge * smoothstep(0.4, 0.62, macro2.g + (o1.r - 0.5) * 0.4) * 0.75);
+              float lich = smoothstep(0.74, 0.82, o1.r * 0.55 + macro2.r * 0.45);
+              c1 = mix(c1, vec3(0.5, 0.5, 0.34) * (0.8 + 0.4 * macro2.b), lich * 0.3);
+              c1 *= mix(vec3(0.72, 0.71, 0.68), vec3(0.9, 0.86, 0.78), macro.r); // темнее и с тёплыми пятнами
             }
           }
           if (w.z > 0.004) { sc = tileInv.z; planarSampleArr(tArrC, tArrN, tArrO, 2.0, vWPos * sc, dx * sc, dy * sc, n, 1.0, c2, o2, n2); }
@@ -733,7 +742,7 @@ function makeTerrainMaterial() {
           c0 = mix(c0, c0 * vec3(0.72, 0.84, 0.7), smoothstep(0.55, 0.3, macro.g) * 0.45);
           // луг среднего масштаба: сочные и подсохшие куртины, клевер, пятна цветов
           {
-            float m3 = texture2D(tMacro, vWPos.xz * 0.027 + 0.13).r;
+            float m3 = macro2.b; // без лишней выборки текстуры (рельеф — самый дорогой проход)
             c0 *= mix(vec3(0.82, 0.92, 0.8), vec3(1.14, 1.08, 0.84), smoothstep(0.25, 0.8, m3));
             c0 = mix(c0, c0 * vec3(1.18, 1.1, 0.7), smoothstep(0.62, 0.8, macro2.g) * 0.5);
           }

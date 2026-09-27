@@ -173,11 +173,12 @@ function stall(B, terrain, s, rnd, people) {
 // мордой, ноги с суставами и копытами, грива, хвост, седло и уздечка
 const HG = {
   barrel: (() => { const g = new THREE.CapsuleGeometry(0.34, 0.9, 8, 18); g.rotateX(Math.PI / 2); g.scale(0.95, 1.08, 1); return g; })(),
-  neck: (() => { const g = new THREE.CylinderGeometry(0.13, 0.24, 0.78, 14, 4).translate(0, 0.39, 0); const p = g.getAttribute('position'); for (let i = 0; i < p.count; i++) { const y = p.getY(i) / 0.78; if (p.getZ(i) < 0) p.setZ(i, p.getZ(i) * (1 + 0.25 * Math.sin(y * Math.PI))); } g.computeVertexNormals(); return g; })(),
+  neck: (() => { const g = new THREE.CylinderGeometry(0.14, 0.27, 0.78, 14, 4).translate(0, 0.39, 0); const p = g.getAttribute('position'); for (let i = 0; i < p.count; i++) { const y = p.getY(i) / 0.78; if (p.getZ(i) < 0) p.setZ(i, p.getZ(i) * (1 + 0.25 * Math.sin(y * Math.PI))); } g.computeVertexNormals(); return g; })(),
   head: (() => { const g = new THREE.CylinderGeometry(0.075, 0.125, 0.52, 10).translate(0, -0.26, 0); g.scale(0.85, 1, 1.15); return g; })(),
   cheek: new THREE.SphereGeometry(0.12, 10, 8),
   muzzle: new THREE.SphereGeometry(0.085, 10, 8),
-  upper: new THREE.CylinderGeometry(0.1, 0.065, 0.46, 8).translate(0, -0.23, 0),
+  upper: new THREE.CylinderGeometry(0.115, 0.065, 0.46, 10).translate(0, -0.23, 0),
+  pastern: new THREE.CylinderGeometry(0.042, 0.05, 1, 8).translate(0, -0.5, 0),
   lower: new THREE.CylinderGeometry(0.045, 0.04, 0.4, 8).translate(0, -0.2, 0),
   joint: new THREE.SphereGeometry(0.058, 8, 6),
   hoof: new THREE.CylinderGeometry(0.055, 0.07, 0.09, 10),
@@ -196,7 +197,7 @@ export function horse(colorB, x, y, z, yaw, col, rnd) {
   colorB.add(G.sph, L(r, 0, 1.52, -0.45, 0.28, 0.12, 0.3), col); // верх крупа
   const down = rnd() < 0.5 ? 0.3 : 0;
   // шея наклонена вперёд, голова вниз
-  const neck = L(r, 0, 1.45, 0.62, 0.55 + down * 0.6);
+  const neck = L(r, 0, 1.45, 0.62, 1, 1, 1, 0.55 + down * 0.6);
   // голова и шея помечены: у идущей лошади они кивают в такт шагу
   const headPh = rnd();
   const HB = { add: (g, m, c) => { if (colorB.curAnim) colorB.curAnim = [4, y + 1.45, headPh]; colorB.add(g, m, c, 3, y + 1.45); if (colorB.curAnim) colorB.curAnim = [0, 0, 0]; } }; // голова кивает и жуёт (шейдер)
@@ -227,7 +228,7 @@ export function horse(colorB, x, y, z, yaw, col, rnd) {
   // ноги: передние прямые, задние с изгибом в скакательном суставе
   for (const [lx, lz, hind] of [[-0.19, 0.55, 0], [0.19, 0.55, 0], [-0.19, -0.62, 1], [0.19, -0.62, 1]]) {
     colorB.curLimb = [(lx < 0) === !hind ? 0.7 : -0.7, 1.12]; // диагональные пары ног шагают вместе
-    const hip = L(r, lx, 1.12, lz, hind ? -0.25 : 0.03);
+    const hip = L(r, lx, 1.12, lz, 1, 1, 1, hind ? -0.25 : 0.03);
     colorB.add(HG.upper, hip, col);
     const knee = hip.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.46, 0)).multiply(new THREE.Matrix4().makeRotationX(hind ? 0.3 : -0.03));
     colorB.add(HG.joint, knee, col);
@@ -235,22 +236,34 @@ export function horse(colorB, x, y, z, yaw, col, rnd) {
     const fet = knee.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.4, 0));
     colorB.add(HG.joint, fet.clone().multiply(new THREE.Matrix4().makeScale(0.85, 0.85, 0.85)), col);
     const p = new V3().setFromMatrixPosition(fet);
+    // бабка: от путового сустава к копыту, чуть наклонена
+    const pl = Math.max(0.05, p.y - (y + 0.08));
+    colorB.add(HG.pastern, fet.clone().multiply(new THREE.Matrix4().makeRotationX(hind ? -0.3 : 0.03)).multiply(new THREE.Matrix4().makeScale(1, pl, 1)), col);
+    // мышцы: лопатка и предплечье спереди, бедро и голень сзади — живой силуэт
+    if (hind) {
+      colorB.add(G.sph, L(r, lx * 1.1, 1.2, lz + 0.02, 0.17, 0.32, 0.25), col);
+      colorB.add(G.sph, hip.clone().multiply(new THREE.Matrix4().compose(new V3(0, -0.3, 0.02), new THREE.Quaternion(), new V3(0.1, 0.17, 0.13))), col);
+    } else {
+      colorB.add(G.sph, L(r, lx * 1.05, 1.28, lz + 0.05, 0.15, 0.3, 0.2, -0.35), col);
+      colorB.add(G.sph, hip.clone().multiply(new THREE.Matrix4().compose(new V3(0, -0.14, 0.01), new THREE.Quaternion(), new V3(0.11, 0.17, 0.12))), col);
+    }
     colorB.add(HG.hoof, M(p.x, y + 0.045, p.z, yaw), dark);
     colorB.add(HG.feather, M(p.x, y + 0.11, p.z, yaw), col === 0xe8e0d0 ? 0xd8d0c0 : sh); // щётка над копытом
   }
   colorB.curLimb = [0, 0];
   // хвост из двух частей
-  const tr = L(r, 0, 1.45, -0.95, 0.5);
+  const tr = L(r, 0, 1.45, -0.95, 1, 1, 1, 0.5);
   const tailRoot = y + 1.45; // для покачивания хвоста в шейдере
   colorB.add(new THREE.CylinderGeometry(0.05, 0.06, 0.2, 8).translate(0, -0.1, 0), tr, mane);
   colorB.add(HG.tail, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.18, 0)).multiply(new THREE.Matrix4().makeRotationX(-0.45)), mane, 2, tailRoot);
-  colorB.add(HG.tail, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.5, -0.05)).multiply(new THREE.Matrix4().makeRotationX(-0.1)).multiply(new THREE.Matrix4().makeScale(0.8, 1.2, 0.8)), mane, 2, tailRoot);
+  colorB.add(G.sph, tr.clone().multiply(new THREE.Matrix4().makeTranslation(0, -0.52, -0.06)).multiply(new THREE.Matrix4().makeRotationX(-0.25)).multiply(new THREE.Matrix4().makeScale(0.09, 0.26, 0.07)), mane, 2, tailRoot); // пышная кисть хвоста
   // попона, седло с лукой, стремена
   const cloth = [0x7a1c1c, 0x1d3f8a, 0x3a5a2a][Math.floor(rnd() * 3)];
-  colorB.add(new THREE.CylinderGeometry(0.4, 0.4, 0.62, 16, 1, true, -Math.PI * 0.45, Math.PI * 0.9).rotateX(Math.PI / 2), L(r, 0, 1.28, 0.02, 0, 0, 0, 1.0), cloth);
-  colorB.add(G.box, L(r, 0, 1.66, 0.05, 0.3, 0.05, 0.4), 0x4a2e18);
-  colorB.add(G.box, L(r, 0, 1.73, 0.22, 0.2, 0.07, 0.05), 0x4a2e18);
-  colorB.add(G.box, L(r, 0, 1.72, -0.13, 0.26, 0.09, 0.05), 0x4a2e18);
+  colorB.add(new THREE.CylinderGeometry(0.4, 0.4, 0.62, 16, 1, true, -Math.PI * 0.45, Math.PI * 0.9).rotateX(Math.PI / 2), L(r, 0, 1.28, 0.02), cloth);
+  // седло: округлое сиденье, высокая лука спереди и задняя лука-спинка
+  colorB.add(G.sph, L(r, 0, 1.63, 0.04, 0.2, 0.06, 0.3), 0x4a2e18);
+  colorB.add(new THREE.CylinderGeometry(0.1, 0.13, 0.12, 12, 1, false, 0, Math.PI).rotateY(-Math.PI / 2), L(r, 0, 1.7, 0.27, 1, 1, 0.5), 0x3e2614);
+  colorB.add(new THREE.CylinderGeometry(0.13, 0.16, 0.16, 12, 1, false, 0, Math.PI).rotateY(Math.PI / 2), L(r, 0, 1.71, -0.18, 1, 1, 0.45), 0x3e2614);
   for (const sd of [-1, 1]) {
     colorB.add(G.box, L(r, sd * 0.37, 1.35, 0.05, 0.015, 0.5, 0.03), 0x2a1a10);
     colorB.add(new THREE.TorusGeometry(0.05, 0.01, 4, 10), L(r, sd * 0.37, 1.06, 0.05, 1, 1, 1, 0, 0), 0x6a6a70);

@@ -907,7 +907,7 @@ export function createCourtyard(scene, terrain, walls) {
   const shootFrom = new V3(14, 0, -6);
   for (const tp of targets) archeryTarget(scene, strawB, wood, terrain, tp, shootFrom);
   // стойка с копьями у стрельбища
-  spearRack(wood, metal, terrain, new V3(15, 0, -9), new V3(0.5, 0, -0.86).normalize(), rnd);
+  spearRack(wood, metal, terrain, new V3(26.5, 0, -1.2), new V3(0.2, 0, -0.98).normalize(), rnd); // в стороне от балагана
 
   // ======================= МОЩЕНИЕ ДВОРА =======================
   const gateIn = new V3(GATEHOUSE.x, 0, GATE_PASSAGE.rampEndZ + 1);

@@ -137,6 +137,13 @@ function shoreFoam(scene) {
   return { mesh: m, uT, addSpot };
 }
 
+// вода почти не рассеивает солнце и не так рябит: меньше «молока», чётче отражения
+export function calmWater(material, ripple) {
+  material.fragmentShader = material.fragmentShader
+    .replace('normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) )', `normalize( noise.xzy * vec3( ${ripple.toFixed(2)}, 1.0, ${ripple.toFixed(2)} ) )`)
+    .replace('sunColor * diffuseLight * 0.3 + scatter', 'sunColor * diffuseLight * 0.07 + scatter * 1.25');
+}
+
 export function createRiver(scene) {
   const geo = riverGeometry(-2400, 2400, 3);
   let mesh;
@@ -147,13 +154,16 @@ export function createRiver(scene) {
       waterNormals: waterNormalTexture(),
       sunDirection: SUN_DIR.clone(),
       sunColor: SUN_COLOR,
-      waterColor: 0x14302c,
-      distortionScale: 2.2,
+      waterColor: 0x16403a,
+      distortionScale: 1.6,
       alpha: 0.93,
       fog: true,
     });
     mesh.material.transparent = true;
     mesh.material.uniforms.size.value = 1.6;
+    // вода почти не рассеивает солнце (иначе на свету она «молочная»), рябь спокойнее —
+    // в реке чётче отражаются берега и небо, а в глубине видна тёмная зелень
+    calmWater(mesh.material, 0.85);
     guardReflection(mesh);
     // на среднем качестве отражение обновляется через кадр (заметно только при резком повороте)
     if (Q.reflectionEvery > 1) {

@@ -809,11 +809,12 @@ export function createLife3(scene, ctx, village, walls) {
           vineB.add(GEO.cylLo, M(px, py + 0.4, pz, 0, 0.035, 0.8, 0.035, lean, (rr() - 0.5) * 0.2), 0x3a2a1c);
           vineB.add(GEO.cylLo, M(px, py + 0.82, pz, yaw, 0.025, 0.8, 0.025, Math.PI / 2), 0x4a3422); // рукав вдоль проволоки
           // листья: нижний ярус у проволоки и верхние побеги
-          for (let k = 0; k < 5; k++) {
-            const t = (k / 5 - 0.5) * 0.85, up = k % 2 ? 0.95 + rr() * 0.35 : 0.72 + rr() * 0.2;
-            const side = (rr() - 0.5) * 0.28;
+          // листва сплошной шпалерой: соседние кусты смыкаются в зелёную стенку
+          for (let k = 0; k < 10; k++) {
+            const t = (k / 10 - 0.5) * 1.15, up = 0.58 + rr() * 0.7;
+            const side = (rr() - 0.5) * 0.36;
             const lx = px + S.x * t + U.x * side, lz = pz + S.z * t + U.z * side;
-            vineB.add(leafG, M(lx, py + up, lz, rr() * 6, 0.2 + rr() * 0.07, 0.09 + rr() * 0.04, 0.17 + rr() * 0.05, (rr() - 0.5) * 1.0, (rr() - 0.5) * 1.0), leaf[Math.floor(rr() * 4)]);
+            vineB.add(leafG, M(lx, py + up, lz, rr() * 6, 0.22 + rr() * 0.08, 0.1 + rr() * 0.05, 0.19 + rr() * 0.06, (rr() - 0.5) * 2.2, (rr() - 0.5) * 2.2), leaf[Math.floor(rr() * 4)]);
           }
           // гроздь: конус из ягод под листьями
           if (rr() < 0.45) {

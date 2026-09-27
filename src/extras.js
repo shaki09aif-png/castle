@@ -1312,6 +1312,16 @@ function createLife2(scene, ctx, village, walls) {
             cow(colorB, o.x, gh(o.x, o.z), o.z, Math.atan2(X2.x, X2.z), rnd, 0x7a5030);
           }
         }
+        // вязальщица носит снопы от косарей к возу (у второго поля — к суслонам)
+        {
+          const from = new V3(c.x + (rnd() - 0.5) * 4, 0, c.z - 1.5), to = si === 0 ? new V3(c.x + 7, 0, c.z + 1.8) : new V3(c.x + 3, 0, c.z - 8);
+          movers.push(makeWalker(scene, (B) => {
+            person(B, { x: 0, y: 0, z: 0, yaw: 0, role: 'woman', seed: 560 + si, item: 'basket' });
+            B.add(new THREE.CylinderGeometry(0.14, 0.18, 0.8, 7), M(0.28, 1.25, 0.1, 0, 1, 1, 1, 1.3), 0xd8b860); // сноп на плече
+          }, [from, to], { loop: false, speed: 1.1, stride: 0.8, amp: 0.4 }));
+          movers.push(makeWalker(scene, (B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role: 'child', seed: 570 + si }),
+            [new V3(c.x - 6, 0, c.z - 5), new V3(c.x + 6, 0, c.z - 12), new V3(c.x + 2, 0, c.z - 3)], { speed: 1.6, stride: 0.7, amp: 0.55 })); // ребёнок собирает колоски
+        }
       } else {
         // пахарь с волами ходит взад-вперёд по полосе
         const a = new V3(c.x - 14, 0, c.z), b = new V3(c.x + 14, 0, c.z);

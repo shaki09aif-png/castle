@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { addWeathering } from './materials.js';
 import { Water } from 'three/addons/objects/Water.js';
 import { GATEHOUSE, GATE_PASSAGE, BARBICAN, MOAT, DITCH, GATE_RADIUS } from './layout.js';
-import { guardReflection } from './water.js';
+import { guardReflection, calmWater } from './water.js';
 import { GeoBuilder } from './walls.js';
 import { makeTowerContext, finishTowerContext, buildTower, arrowSlit, windowWithShutters } from './towers.js';
 import { pbrMaterial, waterNormalTexture } from './textures.js';
@@ -441,13 +441,14 @@ function createMoatWater(scene, terrain) {
       waterNormals: waterNormalTexture(),
       sunDirection: SUN_DIR.clone(),
       sunColor: SUN_COLOR,
-      waterColor: 0x1f4a3a,
-      distortionScale: 2.6,
+      waterColor: 0x1c4434,
+      distortionScale: 1.4,
       alpha: 0.92,
       fog: true,
     });
     mesh.material.transparent = true;
     mesh.material.uniforms.size.value = 1.1;
+    calmWater(mesh.material, 0.6); // стоячая вода рва — гладкая, с чёткими отражениями стен
     guardReflection(mesh);
     if (Q.reflectionEvery > 1) {
       const orig = mesh.onBeforeRender;

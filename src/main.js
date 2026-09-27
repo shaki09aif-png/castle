@@ -146,12 +146,20 @@ async function init() {
   if (extras.places.well) extras.places.well.water = scene.getObjectByName('well-water');
   toLayer1(mark);
   // в осадном лагере не растут деревья и трава
-  const campEx = (x, z) => ((extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30) || (extras.pasture && Math.hypot(x - extras.pasture.x, z - extras.pasture.z) < 30) || (extras.tourney && Math.hypot(x - extras.tourney.x, z - extras.tourney.z) < 50) || extras.areas.some((q) => Math.hypot(x - q.x, z - q.z) < q.r) ? 1 : 0);
+  const campEx = (x, z) => ((extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30) || (extras.tourney && Math.hypot(x - extras.tourney.x, z - extras.tourney.z) < 50) || extras.areas.some((q) => Math.hypot(x - q.x, z - q.z) < q.r) ? 1 : 0);
   const bField = extras.battle && extras.battle.field; // поле боя — без деревьев
+  // деревья не должны закрывать вид с остановок экскурсии: отрезок камера → цель без стволов и крон
+  const viewLines = Object.values(extras.places || {}).filter((q) => q && q.pos && q.tgt && q.pos.isVector3).map((q) => [q.pos, q.tgt]);
+  const onViewLine = (x, z) => viewLines.some(([a, b]) => {
+    const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / L2));
+    if (t > 0.85) return false; // у самой цели деревья можно
+    return Math.hypot(a.x + dx * t - x, a.z + dz * t - z) < 6 + t * 4;
+  });
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain, {
     exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z), campEx(x, z))),
-    excludeTrees: (x, z) => village.exclude(x, z) > 0 || campEx(x, z) > 0 || (bField && Math.hypot(x - bField.x, z - bField.z) < 34),
+    excludeTrees: (x, z) => village.exclude(x, z) > 0 || campEx(x, z) > 0 || (extras.pasture && Math.hypot(x - extras.pasture.x, z - extras.pasture.z) < 30) || (bField && Math.hypot(x - bField.x, z - bField.z) < 34) || onViewLine(x, z),
     extraTrees: details.extraTrees,
   });
   // интерьеры построек и открывающиеся двери (E)

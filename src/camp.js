@@ -773,7 +773,7 @@ export function circusTent(scene, ctx, x, z, doorYaw, walkerMaterial) {
   mesh.castShadow = false; mesh.receiveShadow = true; // парусина просвечивает, внутри светло
   mesh.name = 'yard-pavilion';
   scene.add(mesh);
-  const tgt = P(-0.6, 1.4, 0), pos = P(R + 5.5, 3.0, 2.0);
+  const tgt = P(-0.6, 1.6, 0), pos = P(R + 7.5, 4.6, 0.6);
   void glowB;
   return { mesh, stop: { tgt, pos }, update: (t) => { for (const f of upd) f(t); } };
 }
