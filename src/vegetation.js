@@ -410,6 +410,8 @@ function foliageMaterial(tex, evergreen = false) {
   const mat = new THREE.MeshStandardMaterial({
     map: tex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, metalness: 0, vertexColors: true,
   });
+  // при MSAA края листьев сглаживаются покрытием (alpha to coverage) — без «зубцов» и мерцания
+  if (Q.msaa) { mat.alphaToCoverage = true; mat.alphaTest = 0.3; }
   const sun = FOLIAGE_SUN; // общий для всех крон: ночью ослабляется (нет просвета листвы)
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = WIND.uTime;

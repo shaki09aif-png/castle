@@ -14,7 +14,9 @@ import { AUTUMN } from './materials.js';
 import { mulberry32 } from './noise.js';
 import { beginDoor, endDoor } from './doors.js';
 import { TERRAIN_HOLE } from './terrain.js';
-import { materialTextures } from './textures.js';
+import { materialTextures, foliageTexture } from './textures.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Q } from './quality.js';
 
 const V3 = THREE.Vector3;
 const UP = new V3(0, 1, 0);
@@ -535,17 +537,34 @@ export function createLife3(scene, ctx, village, walls) {
       }
     }
     // яблони и груши
+    const orchardCards = [];
     for (const [x, z] of [[10, -17], [10.5, -13], [8, -15.2]]) {
       const y = gh(x, z);
       wood.addGeometry(new THREE.CylinderGeometry(0.09, 0.13, 1.8, 7), M(x, y + 0.9, z));
       // крона из многих неровных пучков: внутри темнее, снаружи и сверху светлее
-      for (let k = 0; k < 14; k++) {
-        const a2 = rnd() * Math.PI * 2, d = 0.3 + rnd() * 0.8, hh = 1.9 + rnd() * 1.1;
-        const outer = d > 0.7 || hh > 2.6;
-        colorB.add(GEO.bush, M(x + Math.cos(a2) * d, y + hh, z + Math.sin(a2) * d, rnd() * 6, 0.35 + rnd() * 0.25, 0.28 + rnd() * 0.15, 0.35 + rnd() * 0.25), outer ? [0x4a7a2a, 0x5a8a30][k % 2] : [0x2e5a1e, 0x365f22][k % 2]);
+      // крона: тёмная сердцевина из пары пучков и листва из карточек с текстурой листьев
+      for (let k = 0; k < 4; k++) {
+        const a2 = rnd() * Math.PI * 2, d = rnd() * 0.35;
+        colorB.add(GEO.bush, M(x + Math.cos(a2) * d, y + 2.2 + rnd() * 0.5, z + Math.sin(a2) * d, rnd() * 6, 0.36, 0.3, 0.36), 0x2a4a1c);
+      }
+      for (let k = 0; k < 120; k++) {
+        const u = rnd() * 2 - 1, th = rnd() * Math.PI * 2, rr = 0.35 + Math.sqrt(rnd()) * 0.75;
+        const dir = new THREE.Vector3(Math.sqrt(1 - u * u) * Math.cos(th), Math.abs(u) * 0.7 + 0.1, Math.sqrt(1 - u * u) * Math.sin(th));
+        const pc = new THREE.Vector3(x, y + 2.3, z).addScaledVector(dir, rr);
+        const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rnd() * Math.PI, rnd() * Math.PI, rnd() * Math.PI));
+        const sz = 0.42 + rnd() * 0.22;
+        orchardCards.push(new THREE.PlaneGeometry(sz, sz).applyMatrix4(new THREE.Matrix4().compose(pc, q, new THREE.Vector3(1, 1, 1))));
       }
       for (let k = 0; k < 3; k++) wood.addGeometry(new THREE.CylinderGeometry(0.03, 0.05, 0.9, 5), M(x, y + 1.9, z, k * 2.1, 1, 1, 1, 0.7, 0)); // ветви
       for (let k = 0; k < 10; k++) { const a = rnd() * 6.28, r = 0.6 + rnd() * 0.5; colorB.add(GEO.sph, M(x + Math.cos(a) * r, y + 1.9 + rnd() * 1.1, z + Math.sin(a) * r, 0, 0.07, 0.07, 0.07), rnd() < 0.5 ? 0xc0301a : 0xd8b030); }
+    }
+    {
+      const lm = new THREE.MeshStandardMaterial({ map: foliageTexture('broad', [0.14, 0.24, 0.06]), alphaTest: Q.msaa ? 0.3 : 0.5, side: THREE.DoubleSide, roughness: 0.75 });
+      if (Q.msaa) lm.alphaToCoverage = true;
+      const om = new THREE.Mesh(mergeGeometries(orchardCards), lm);
+      om.castShadow = om.receiveShadow = true;
+      om.name = 'orchard';
+      scene.add(om);
     }
     // ульи-колоды и садовник
     for (const [x, z] of [[2.6, -17.8], [3.6, -18]]) { const y = gh(x, z); straw.addGeometry(new THREE.SphereGeometry(0.34, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 1.4, 1), M(x, y + 0.02, z)); }
