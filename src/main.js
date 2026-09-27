@@ -147,10 +147,11 @@ async function init() {
   toLayer1(mark);
   // в осадном лагере не растут деревья и трава
   const campEx = (x, z) => ((extras.camp && Math.hypot(x - extras.camp.x, z - extras.camp.z) < 30) || (extras.pasture && Math.hypot(x - extras.pasture.x, z - extras.pasture.z) < 30) || (extras.tourney && Math.hypot(x - extras.tourney.x, z - extras.tourney.z) < 50) || extras.areas.some((q) => Math.hypot(x - q.x, z - q.z) < q.r) ? 1 : 0);
+  const bField = extras.battle && extras.battle.field; // поле боя — без деревьев
   await step('трава и деревья');
   const vegetation = createVegetation(scene, terrain, {
     exclude: (x, z) => (insideBuilding(x, z, 0.4) ? 1 : Math.max(court.paveMask(x, z), village.exclude(x, z), details.exclude(x, z), campEx(x, z))),
-    excludeTrees: (x, z) => village.exclude(x, z) > 0 || campEx(x, z) > 0,
+    excludeTrees: (x, z) => village.exclude(x, z) > 0 || campEx(x, z) > 0 || (bField && Math.hypot(x - bField.x, z - bField.z) < 34),
     extraTrees: details.extraTrees,
   });
   // интерьеры построек и открывающиеся двери (E)
@@ -351,6 +352,8 @@ async function init() {
   // ограничители камеры в подземных ходах (не дают пройти сквозь стены)
   if (extras.places && extras.places.tunnel) cam.zones.push(extras.places.tunnel.limit);
   cam.walkable = createWalkable(terrain, walls, cam.zones);
+  // переход по потайному ходу (из конца хода во двор и обратно): орбита — вокруг новой точки
+  if (extras.setOnTeleport) extras.setOnTeleport((pos, look) => { if (cam.mode === 'orbit') { cam.orbit.target.copy(look); cam.orbit.update(); } });
   cam.walkable.doors = doors.list || [];
   let entering = null;
   const easeIO = (x) => x * x * (3 - 2 * x);

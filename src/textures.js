@@ -973,7 +973,7 @@ function makeMasonry({
       const parts = rubble > 0 || rnd() > 0.85 ? splitStone(sx, cy, len, ch, rnd, rubble, PK) : [[sx, cy, len, ch]];
       for (const [px, py, pw, ph] of parts) {
         const col = stoneColor(base, tint, rnd);
-        const bulge = 0.6 + rnd() * 0.5;
+        const bulge = 0.35 + rnd() * 0.3; // тёсаный камень: грань почти плоская, край скруглён чуть-чуть
         const tilt = (rnd() - 0.5) * 0.4;
         const rough0 = 0.72 + rnd() * 0.2;
         const cornerR = Math.min(pw, ph) * (0.15 + rubble * 0.3);
@@ -993,12 +993,13 @@ function makeMasonry({
             d += (n.noise(u + seedOff, v, 64) - 0.5) * jitter * 2 + (n.noise(u, v + seedOff, 16) - 0.5) * jitter * (1 + rubble * 2);
             if (d < mortar) continue;
             const i = y * W + x;
-            const edge = smoothstep(mortar, mortar + 7 * PK, d);
+            const edge = smoothstep(mortar, mortar + 4 * PK, d);
             const surf = n.fbm(u + seedOff * 0.1, v, 32, 4);
             const fine = n.noise(u * 4 + seedOff, v * 4, 64);
             // сколы на гранях
             const chipped = chip > 0.6 ? smoothstep(0.55, 0.7, n.noise(u + seedOff, v + seedOff, 32)) * (1 - edge * 0.5) : 0;
-            const h = edge * bulge + surf * 0.35 + fine * 0.1 + tilt * (lx / pw - 0.5) - chipped * 0.4;
+            const tool = n.noise(u * 9 + seedOff, v * 2, 64); // следы тёски — мелкие штрихи
+            const h = edge * bulge + surf * 0.22 + fine * 0.12 + tool * 0.06 + tilt * (lx / pw - 0.5) - chipped * 0.4;
             hgt[i] = 0.25 + h;
             const shade = (0.8 + 0.35 * surf + 0.08 * fine) * (0.75 + 0.25 * edge) * (1 - chipped * 0.15);
             rgb[i * 3] = col[0] * shade; rgb[i * 3 + 1] = col[1] * shade; rgb[i * 3 + 2] = col[2] * shade;
@@ -1022,7 +1023,7 @@ function makeMasonry({
       rgb[i * 3 + 2] += (0.42 - rgb[i * 3 + 2]) * lichen * 0.3;
     }
   }
-  return finishSet(rgb, hgt, rough, S, { normal: 2.6 * PK, ao: 2.2, aoRadius: Math.round(6 * PK), tileMeters });
+  return finishSet(rgb, hgt, rough, S, { normal: 1.9 * PK, ao: 2.2, aoRadius: Math.round(6 * PK), tileMeters });
 }
 
 function stoneColor(base, tint, rnd) {

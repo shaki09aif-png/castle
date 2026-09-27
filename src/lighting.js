@@ -8,7 +8,7 @@ import { Q } from './quality.js';
 export const SUN_DIR = new THREE.Vector3(-0.62, 0.6, 0.5).normalize();
 export const SUN_COLOR = new THREE.Color(1.0, 0.93, 0.82);
 
-const HORIZON = new THREE.Color(0.6, 0.68, 0.78);
+const HORIZON = new THREE.Color(0.6, 0.7, 0.84);
 const ZENITH = new THREE.Color(0.12, 0.28, 0.6);
 
 // ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@ const ZENITH = new THREE.Color(0.12, 0.28, 0.6);
 // применяется ко всем материалам (рельеф, стены, вода, трава).
 // ---------------------------------------------------------------------------
 export const FOG = {
-  density: 0.0014, // плотность у земли
+  density: 0.00095, // плотность у земли (воздух прозрачнее — дали видны чётче)
   base: 0, // высота, от которой считается плотность
   falloff: 0.03, // как быстро туман редеет с высотой
   haze: 0.00007, // воздушная перспектива (не зависит от высоты)
@@ -397,7 +397,7 @@ export function createLighting(scene, renderer, assets, windK = { value: 1 }) {
   // лёгкая голубоватая подсветка от неба (дополняет HDRI)
   const hemi = Q.envLight
     ? new THREE.HemisphereLight(0xa9c4ff, 0x4a4630, 0.4)
-    : new THREE.HemisphereLight(0xb4ccf0, 0x5a5238, 1.9);
+    : new THREE.HemisphereLight(0xbcd4ff, 0x5a5238, 2.05); // небо подсвечивает тени голубым
   scene.add(hemi);
 
   // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@
 // с оковкой, подвесной ящик-противовес с камнями, праща в жёлобе, ворот.
 import * as THREE from 'three';
 import { GeoBuilder } from './walls.js';
-import { ColorBuilder } from './people.js';
+import { ColorBuilder, person } from './people.js';
 import { pbrMaterial } from './textures.js';
 import { horse } from './yard.js';
 import { cart, Smoke } from './courtyard.js';
@@ -102,14 +102,15 @@ function tentKit({ terrain, wood, metal, colorB }, cloth, face) {
   const low = (p, R) => { let m = gh(p.x, p.z); for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; m = Math.min(m, gh(p.x + Math.cos(a) * R, p.z + Math.sin(a) * R)); } return m - 0.06; };
 
   // ------------------------- круглый шатёр -------------------------
-  const roundTent = (p, { R, hw, hr, n = 16, cols, stripe = false, val, door = 0, pennant }) => {
+  const roundTent = (p, { R, hw, hr, n = 16, cols, stripe = false, val, door = 0, pennant, doorW = 1 }) => {
     const y0 = low(p, R + 0.3);
     const c = p.clone().setY(y0);
     OBSTACLES.push({ x: p.x, z: p.z, r: R, door: [Math.sin(door), Math.cos(door)] });
     // дверь смотрит по направлению yaw = door; сегмент 0 — проём
     const a0 = Math.atan2(Math.cos(door), Math.sin(door)) - (Math.PI * 2 / n) * 0.5;
     const col = (j) => rgbOf(stripe ? cols[j % 2] : cols[0]);
-    revolve(cloth, c, [[R, -0.1], [R, hw * 0.5], [R * 1.005, hw]], n, { color: col, skip: (j) => j === 0, a0 });
+    const half = (doorW - 1) / 2;
+    revolve(cloth, c, [[R, -0.1], [R, hw * 0.5], [R * 1.005, hw]], n, { color: col, skip: (j) => j === 0 || (half >= 1 && (j <= half || j >= n - half)), a0 });
     // крыша с лёгким провисом между швами
     const prof = [];
     for (let k = 0; k <= 5; k++) {
@@ -119,7 +120,7 @@ function tentKit({ terrain, wood, metal, colorB }, cloth, face) {
     revolve(cloth, c, prof, n, { color: col, a0 });
     valance(cloth, c, R + 0.31, hw - 0.04, 0.42, n * 2, val, a0);
     // откинутые и подвязанные полы входа
-    const aL = a0, aR = a0 + Math.PI * 2 / n;
+    const aL = a0 - half * Math.PI * 2 / n, aR = a0 + (1 + half) * Math.PI * 2 / n;
     for (const [a, s] of [[aL, 1], [aR, -1]]) {
       const base = new V3(c.x + Math.cos(a) * R, 0, c.z + Math.sin(a) * R);
       const out = new V3(Math.cos(a), 0, Math.sin(a));
@@ -358,7 +359,32 @@ export function siegeCamp(ctx, village, findCampSite) {
       const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * 1.3;
       const q0 = P(-6.5 + Math.cos(a) * rr, 0, 3.2 + Math.sin(a) * rr);
       const hh = (1.3 - rr) * 0.45;
-      cc.stone.addGeometry(new THREE.IcosahedronGeometry(0.26 + rnd() * 0.06, 1), M(q0.x, gh(q0.x, q0.z) + 0.24 + hh, q0.z, rnd() * 3));
+      // тёсаные ядра: серый камень с разным оттенком (не кладка стены)
+      const tone = 0.78 + rnd() * 0.3;
+      // грубо обтёсанный камень: вершины сдвинуты по хешу позиции (без щелей между гранями)
+      const ball = new THREE.IcosahedronGeometry(0.26 + rnd() * 0.06, 1), bp = ball.getAttribute('position'), sd = k * 7.13;
+      for (let v = 0; v < bp.count; v++) {
+        const x = bp.getX(v), y = bp.getY(v), z = bp.getZ(v);
+        const h = Math.sin(Math.round(x * 97) * 12.9898 + Math.round(y * 97) * 78.233 + Math.round(z * 97) * 37.719 + sd) * 43758.5453;
+        const f = 1 + ((h - Math.floor(h)) - 0.5) * 0.14;
+        bp.setXYZ(v, x * f, y * f, z * f);
+      }
+      ball.computeVertexNormals();
+      colorB.add(ball, M(q0.x, gh(q0.x, q0.z) + 0.24 + hh, q0.z, rnd() * 3, 1, 0.94, 1), new THREE.Color(0x4a463f).multiplyScalar(tone).getHex());
+    }
+    // ложе для ядра в конце жёлоба: круглое углубление в толстой колоде —
+    // сюда в покое ложится кошель пращи с ядром
+    {
+      const SL = 3.0;
+      const tip = pivot.clone().addScaledVector(arm, armLen + 0.35);
+      const gy = g + 0.34;
+      const dy = tip.y - gy;
+      const run = Math.sqrt(Math.max(0.5, SL * SL - dy * dy));
+      const cp = tip.clone().addScaledVector(A, run).setY(gy);
+      ctx.treb.cradle = cp.clone();
+      wood.addGeometry(new THREE.CylinderGeometry(0.46, 0.5, 0.26, 16), M(cp.x, g + 0.12, cp.z));
+      colorB.add(new THREE.TorusGeometry(0.34, 0.07, 6, 18).rotateX(Math.PI / 2), M(cp.x, g + 0.26, cp.z), 0x3a2a1a);
+      colorB.add(new THREE.CircleGeometry(0.33, 16).rotateX(-Math.PI / 2), M(cp.x, g + 0.2, cp.z), 0x2a1c12);
     }
     // обслуга: двое у ворота, один подносит ядро, мастер-инженер
     for (const [f, r, role, yaw, pose] of [[-4.1, 2.3, 'foe', -Math.PI / 2, 'work'], [-4.1, -2.3, 'foe', Math.PI / 2, 'work'], [-6.2, 2.1, 'peasant', Math.PI, 'work'], [-2.2, 3.6, 'noble', -Math.PI / 2 - 0.4, 'stand']]) {
@@ -643,4 +669,111 @@ export function clothKit(ctx, face = 0) {
       return mesh;
     },
   };
+}
+
+// БАЛАГАН во дворе: большой полосатый шатёр для представлений. Внутри манеж с
+// опилками, акробат на канате, жонглёр, глотатель огня, музыканты, зрители
+// на скамьях. Шатёр стоит прямо на земле, вход широкий.
+export function circusTent(scene, ctx, x, z, doorYaw, walkerMaterial) {
+  const { terrain, wood, colorB, glowB, people } = ctx;
+  const cloth = new ClothB(1.6);
+  const kit = tentKit(ctx, cloth, doorYaw);
+  const p = new V3(x, 0, z);
+  const R = 4.3, hw = 2.6, hr = 3.4;
+  kit.roundTent(p, { R, hw, hr, n: 24, cols: [0xb81e24, 0xe8c040], stripe: true, val: 0x1f3a8a, door: doorYaw, pennant: 0xb81e24, doorW: 3 });
+  const gh = (xx, zz) => terrain.heightAt(xx, zz);
+  const d = new V3(Math.sin(doorYaw), 0, Math.cos(doorYaw)), s = new V3(Math.cos(doorYaw), 0, -Math.sin(doorYaw));
+  const P = (u, h, v) => { const q = p.clone().addScaledVector(d, u).addScaledVector(s, v); q.y = gh(q.x, q.z) + h; return q; };
+  // манеж: круг опилок и низкий барьер
+  const c0 = P(-0.4, 0.02, 0);
+  colorB.add(new THREE.CircleGeometry(2.1, 24).rotateX(-Math.PI / 2), M(c0.x, c0.y + 0.02, c0.z), 0xc8a870);
+  for (let k = 0; k < 20; k++) {
+    const a = (k / 20) * Math.PI * 2;
+    if (Math.abs(Math.atan2(Math.sin(a - Math.atan2(d.z, d.x)), Math.cos(a - Math.atan2(d.z, d.x)))) < 0.35) continue; // проход
+    const q = c0.clone().add(new V3(Math.cos(a) * 2.2, 0, Math.sin(a) * 2.2));
+    colorB.add(GEO.box, M(q.x, gh(q.x, q.z) + 0.17, q.z, -a, 0.07, 0.34, 0.74), k % 2 ? 0xb81e24 : 0xe8e0c8);
+  }
+  // скамьи зрителей полукругом у стенки и зрители
+  for (let k = 0; k < 9; k++) {
+    const a = Math.atan2(-d.z, -d.x) + (k - 4) * 0.36;
+    const q = c0.clone().add(new V3(Math.cos(a) * 3.3, 0, Math.sin(a) * 3.3));
+    wood.box(q.clone().setY(gh(q.x, q.z) + 0.42), new V3(-Math.sin(a), 0, Math.cos(a)), UP, new V3(Math.cos(a), 0, Math.sin(a)), 0.55, 0.04, 0.16, { grain: true });
+    for (const sd of [-0.45, 0.45]) { const l = q.clone().addScaledVector(new V3(-Math.sin(a), 0, Math.cos(a)), sd); wood.box(l.setY(gh(l.x, l.z) + 0.2), UP, new V3(1, 0, 0), new V3(0, 0, 1), 0.2, 0.04, 0.04, { grain: true }); }
+    if (k % 3 !== 1) people.push({ x: q.x, y: gh(q.x, q.z) + 0.47, z: q.z, yaw: Math.atan2(c0.x - q.x, c0.z - q.z), role: ['townswoman', 'peasant', 'child', 'merchant', 'noble'][k % 5], pose: 'sit', cheer: true, seed: 2100 + k });
+  }
+  // стоящие зрители у входа
+  for (const [u, v] of [[2.6, -1.4], [2.9, 1.2], [3.4, 0.2]]) { const q = P(u, 0, v); people.push({ x: q.x, y: q.y, z: q.z, yaw: Math.atan2(c0.x - q.x, c0.z - q.z), role: ['peasant', 'townswoman', 'servant'][Math.round(u * 3) % 3], cheer: true }); }
+  // музыканты у стенки: лютня и дудка
+  for (const [v, seed] of [[-2.6, 2150], [-1.9, 2151]]) { const q = P(-2.6, 0, v); people.push({ x: q.x, y: q.y, z: q.z, yaw: Math.atan2(c0.x - q.x, c0.z - q.z), role: 'minstrel', seed }); }
+  // канат между двумя шестами, по нему ходит акробат с шестом-балансиром
+  const pa = P(-0.4, 0, -1.9), pb = P(-0.4, 0, 1.9);
+  for (const q of [pa, pb]) wood.addGeometry(new THREE.CylinderGeometry(0.06, 0.07, 2.6, 6), M(q.x, q.y + 1.3, q.z));
+  const ropeH = 2.35;
+  { const a = pa.clone().setY(pa.y + ropeH), b = pb.clone().setY(pb.y + ropeH); const dd = b.clone().sub(a), l = dd.length();
+    colorB.add(new THREE.CylinderGeometry(0.012, 0.012, 1, 4), new THREE.Matrix4().compose(a.clone().addScaledVector(dd, 0.5), new THREE.Quaternion().setFromUnitVectors(UP, dd.normalize()), new V3(1, l, 1)), 0x8f8062); }
+  const upd = [];
+  if (walkerMaterial) {
+    const mk = (build) => {
+      const B = new ColorBuilder(); build(B);
+      const { mat, uPhase, uAmp } = walkerMaterial();
+      const mesh = new THREE.Mesh(B.build(), mat);
+      mesh.name = 'walker'; mesh.castShadow = false; mesh.receiveShadow = true;
+      scene.add(mesh);
+      return { mesh, uPhase, uAmp };
+    };
+    // акробат
+    const ac = mk((B) => {
+      person(B, { x: 0, y: 0, z: 0, yaw: 0, role: 'minstrel', seed: 2160 });
+      B.add(new THREE.CylinderGeometry(0.015, 0.015, 2.4, 5).rotateZ(Math.PI / 2), new THREE.Matrix4().makeTranslation(0, 1.15, 0.25), 0x6a4a2a); // балансир
+    });
+    ac.uAmp.value = 0.25;
+    // жонглёр и мячи
+    const jg = P(0.4, 0, 0.9);
+    people.push({ x: jg.x, y: jg.y, z: jg.z, yaw: doorYaw, role: 'minstrel', seed: 2170, item: null, pose: 'work' });
+    const balls = [];
+    const ballMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 });
+    for (let k = 0; k < 3; k++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), ballMat.clone());
+      b.material.color.set([0xd02020, 0x2040c0, 0xe0c020][k]);
+      b.name = 'walker'; scene.add(b); balls.push(b);
+    }
+    // глотатель огня: огонь у лица то вспыхивает, то гаснет
+    const fe = P(-0.9, 0, -0.8);
+    people.push({ x: fe.x, y: fe.y, z: fe.z, yaw: doorYaw + 0.6, role: 'peasant', seed: 2180, item: 'torch' });
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.45, 8).translate(0, 0.22, 0), new THREE.MeshBasicMaterial({ color: 0xffa030, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
+    flame.name = 'walker'; scene.add(flame);
+    const fwd = new V3(Math.sin(doorYaw + 0.6), 0, Math.cos(doorYaw + 0.6));
+    const fpos = fe.clone().addScaledVector(fwd, 0.35).setY(fe.y + 1.55);
+    const dRope = pb.clone().sub(pa).setY(0).normalize();
+    upd.push((t) => {
+      // акробат медленно идёт по канату туда и обратно, покачиваясь
+      const u = 0.5 + 0.4 * Math.sin(t * 0.25);
+      const q = pa.clone().lerp(pb, u);
+      ac.mesh.position.set(q.x, pa.y + ropeH + 0.03, q.z);
+      ac.mesh.rotation.set(0, Math.atan2(dRope.x, dRope.z) * (Math.cos(t * 0.25) > 0 ? 1 : -1) + (Math.cos(t * 0.25) > 0 ? 0 : 0), Math.sin(t * 2.1) * 0.12);
+      ac.uPhase.value = t * 2.2;
+      // мячи летают по дуге над руками жонглёра
+      for (let k = 0; k < 3; k++) {
+        const ph = ((t * 1.3 + k / 3) % 1);
+        const side = ph < 0.5 ? -1 : 1;
+        const e = ph < 0.5 ? ph * 2 : (ph - 0.5) * 2;
+        const lat = side * (0.22 - 0.44 * e);
+        const h = 1.15 + Math.sin(e * Math.PI) * (side < 0 ? 0.75 : 0.35);
+        balls[k].position.copy(jg).addScaledVector(d, 0.32).addScaledVector(s, lat).setY(jg.y + h);
+      }
+      const on = Math.max(0, Math.sin(t * 1.4));
+      flame.visible = on > 0.3;
+      flame.position.copy(fpos);
+      flame.scale.set(0.35 + on * 0.4, 0.3 + on * 0.9, 0.35 + on * 0.4);
+      flame.rotation.set(-1.3, doorYaw + 0.6, 0);
+    });
+  }
+  const mat = pbrMaterial('canvas', { vertexColors: true, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(cloth.build(), mat);
+  mesh.castShadow = false; mesh.receiveShadow = true; // парусина просвечивает, внутри светло
+  mesh.name = 'yard-pavilion';
+  scene.add(mesh);
+  const tgt = P(-0.6, 1.4, 0), pos = P(R + 5.5, 3.0, 2.0);
+  void glowB;
+  return { mesh, stop: { tgt, pos }, update: (t) => { for (const f of upd) f(t); } };
 }

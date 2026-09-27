@@ -17,7 +17,7 @@ const UP = new V3(0, 1, 0);
 export const COURT_EXTRAS = {
   linden: { x: 22, z: -3 },
   garden: { x: -35, z: -2, w: 9, d: 7 },
-  tents: [{ x: 16.8, z: -18.6, r: 3.9, c: 0x9c1b1b }], // один шатёр рыцаря (строится в camp.js → yardPavilion)
+  tents: [{ x: 18.5, z: -16.0, r: 5.2, c: 0x9c1b1b }], // один шатёр рыцаря (строится в camp.js → yardPavilion)
   coop: { x: -32.5, z: 19 },
   quintain: { x: 27, z: 18 },
   table: { x: 7.5, z: 15 },

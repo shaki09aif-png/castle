@@ -9,7 +9,7 @@ import { ColorBuilder, person, addPersonShading } from './people.js';
 import { chicken } from './details.js';
 import { horse, dog } from './yard.js';
 import { Smoke, cart, Frame } from './courtyard.js';
-import { KEEP, WELL, BUILDINGS, riverZ, riverHalfWidth, insideTower, GATE_PASSAGE, BARBICAN } from './layout.js';
+import { KEEP, WELL, BUILDINGS, riverZ, riverHalfWidth, insideTower, insideBuilding, GATE_PASSAGE, BARBICAN } from './layout.js';
 import { AUTUMN } from './materials.js';
 import { mulberry32 } from './noise.js';
 import { beginDoor, endDoor } from './doors.js';
@@ -224,40 +224,8 @@ export function createLife3(scene, ctx, village, walls) {
     upd.push((t) => { poolMat.uniforms.uT.value = t; });
   }
 
-  // ===================== СБОР РЫЦАРЕЙ ПРИ ШТУРМЕ =====================
-  // по тревоге рыцари и стражники выходят из казармы и строятся у ворот,
-  // когда штурм кончается — возвращаются обратно
-  {
-    const bar = b('barracks'), fb = new Frame(bar);
-    const muster = [];
-    const roles = ['knight', 'knight', 'knight', 'guard', 'guard', 'guard', 'knight', 'guard'];
-    roles.forEach((role, k) => {
-      const door = fb.p(k % 2 ? 3.6 : -3.6, 0, bar.W / 2 + 1.2);
-      const mid = fb.p((k % 2 ? 3.6 : -3.6) * 0.5, 0, bar.W / 2 + 5 + (k % 4));
-      const row = Math.floor(k / 4), col = k % 4;
-      const end = new V3(-2.6 + col * 1.9, 0, 22.6 + row * 1.5); // строй во дворе перед воротами
-      const lag = k * 0.9;
-      const w = makeWalker(scene, (B) => person(B, { x: 0, y: 0, z: 0, yaw: 0, role, seed: 900 + k, item: role === 'guard' ? 'spear' : 'sword' }),
-        [door, mid, end], {
-          loop: false, speed: 1.6, stride: 1.5, s0: 0,
-          hold: (sv, dir, tot) => {
-            const on = out.siege && out.siege.active;
-            if (on) return (dir > 0 && sv >= tot - 0.05) || (dir > 0 && out.alarmT < lag); // по одному, с задержкой
-            return dir > 0 && sv <= 0.05;
-          },
-        });
-      w.mesh.userData.night = undefined;
-      movers.push(w);
-      muster.push(w);
-    });
-    out.alarmT = 0;
-    upd.push((t, dt) => {
-      const on = out.siege && out.siege.active;
-      out.alarmT = on ? out.alarmT + dt : 0;
-      // стоящие у казармы рыцари видны только во время тревоги и на пути туда-обратно
-      for (const w of muster) w.mesh.userData.night = on || w.mesh.position.distanceTo(w.home || (w.home = w.mesh.position.clone())) > 0.3 ? undefined : false;
-    });
-  }
+  out.alarmT = 0;
+  upd.push((t, dt) => { out.alarmT = out.siege && out.siege.active ? out.alarmT + dt : 0; });
 
   // ===================== ДОЗОР НА СТЕНАХ (днём) =====================
   // стражники и лучники ходят по боевому ходу, останавливаются у зубцов и
@@ -344,64 +312,6 @@ export function createLife3(scene, ctx, village, walls) {
         r.mesh.rotation.y = st.yaw;
       });
     });
-  }
-
-  // ===================== ВЫЛАЗКА КОННЫХ РЫЦАРЕЙ =====================
-  // по тревоге четверо рыцарей выезжают из ворот и скачут по дороге навстречу
-  // лагерю; когда штурм кончается — возвращаются во двор
-  {
-    const road = terrain.road;
-    const campC = ctx.campSite;
-    if (road && road.length > 20 && campC) {
-      let bi = 0, bd = 1e9;
-      road.forEach((q, i) => { const d = Math.hypot(q.x - campC.x, q.z - campC.z); if (d < bd) { bd = d; bi = i; } });
-      const G = GATE_PASSAGE;
-      const ty = G.thresholdY + 0.05;
-      const cols = [0xe8e0d0, 0x2a1e16, 0x6a4424, 0x8a8a8a];
-      const caps = [0x1d3f8a, 0x7a1c1c, 0x1d3f8a, 0xd6a632];
-      for (let k = 0; k < 4; k++) {
-        const off = (k % 2 ? 1 : -1) * 0.9;
-        const lag = k * 1.6;
-        const pts = [
-          new V3(off, 0, G.rampEndZ - 6 - Math.floor(k / 2) * 3.2),
-          new V3(off, 0, G.rampEndZ),
-          new V3(off * 0.6, ty, G.backZ),
-          new V3(off * 0.6, ty, G.frontZ),
-          new V3(off * 0.6, ty, BARBICAN.zN),
-          new V3(off * 0.6, 0, BARBICAN.zS + 0.5),
-        ];
-        pts.forEach((p) => { if (!p.y) p.y = gh(p.x, p.z); });
-        const nOff = (i) => {
-          const a = road[Math.max(0, i - 1)], b = road[Math.min(road.length - 1, i + 1)];
-          const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
-          return new V3(-dz / l * off, 0, dx / l * off);
-        };
-        for (let i = 2; i < Math.max(3, bi - 20); i += 4) { const o = nOff(i); pts.push(new V3(road[i].x + o.x, road[i].h + 0.05, road[i].z + o.z)); }
-        // где на пути ворота: перед закрытыми воротами всадники ждут
-        let sG0 = 0;
-        for (let i = 0; i < 2; i++) sG0 += pts[i].distanceTo(pts[i + 1]);
-        const sG1 = sG0 + pts[2].distanceTo(pts[3]) + pts[3].distanceTo(pts[4]);
-        const w = makeWalker(scene, (B) => riderBuild(B, { horseCol: cols[k], role: 'knight', seed: 1400 + k, item: k < 2 ? 'lance' : 'sword', caparison: caps[k], rnd: mulberry32(1400 + k) }), pts, {
-          loop: false, speed: 5.5, stride: 2.6, amp: 0.6, y: true, s0: 0,
-          hold: (sv, dir, tot) => {
-            if (out.gate && out.gate.closed) {
-              if (dir > 0 && sv > sG0 - 4 - Math.floor(k / 2) * 3 && sv < sG0) return true;
-              if (dir < 0 && sv < sG1 + 6 + Math.floor(k / 2) * 3 && sv > sG1) return true;
-            }
-            const on = out.siege && out.siege.active;
-            if (on) return (dir > 0 && sv >= tot - 0.05) || (dir > 0 && sv <= 0.05 && out.alarmT < 2 + lag);
-            return dir > 0 && sv <= 0.05;
-          },
-        });
-        w.mesh.userData.night = false;
-        movers.push(w);
-        const home = pts[0].clone();
-        upd.push(() => {
-          const on = out.siege && out.siege.active;
-          w.mesh.userData.night = on || Math.hypot(w.mesh.position.x - home.x, w.mesh.position.z - home.z) > 0.3 ? undefined : false;
-        });
-      }
-    }
   }
 
   // ===================== ДЕТИ ИГРАЮТ В ДЕРЕВНЕ =====================
@@ -1133,9 +1043,9 @@ export function createLife3(scene, ctx, village, walls) {
         const vt = new THREE.CylinderGeometry(bw, bw, u1 - u0 + 0.05, 12, 1, true, Math.PI / 2, Math.PI).rotateX(Math.PI / 2);
         SB.add(vt, tM(um, fl + bH, 0, 1, 1, 1), 0x958a7e, 0, 0, true);
       }
-      // решётка и тёмный подъём за ней
-      for (let k = -3; k <= 3; k++) PB.add(box1, tM(B1 - 1, floorB(B1) + 1.0, k * 0.2, 0.04, 2.0, 0.04), 0x2a2826);
-      for (const h of [0.5, 1.4]) PB.add(box1, tM(B1 - 1, floorB(B1) + h, 0, 1.5, 0.05, 0.05), 0x2a2826);
+      // поднятая решётка (видна только нижняя кромка) и подъём к люку во двор замка
+      for (let k = -3; k <= 3; k++) PB.add(box1, tM(B1 - 1, floorB(B1) + bH + 0.55, k * 0.2, 0.04, 0.4, 0.04), 0x2a2826);
+      PB.add(box1, tM(B1 - 1, floorB(B1) + bH + 0.36, 0, 1.5, 0.05, 0.05), 0x2a2826);
       for (let k = 0; k < 6; k++) SB.add(box1, tM(B1 - 0.6 + k * 0.35, floorB(B1) + 0.1 + k * 0.2, 0, 2 * bw, 0.2 + k * 0.4, 0.35), 0x8a8078);
       PB.add(box1, tM(B1 + 1.6, floorB(B1) + 1.8, 0, 2 * bw, 3.6, 0.1), 0x050404);
       // сквозь щели люка наверху — полосы дневного света
@@ -1187,6 +1097,45 @@ export function createLife3(scene, ctx, village, walls) {
       let minCover = 1e9;
       for (let u = 5; u < B1; u += 2) { const q = F.p(u, 0, 0); const top = u < C0 ? fy + wallH + w : u < C1 ? fy + CH : floorB(u) + bH + bw; minCover = Math.min(minCover, gh(q.x, q.z) - top); }
       out.tunnelCover = minCover;
+      // ---- выход в замок: люк во дворе у донжона. Дошёл до конца хода —
+      // поднимаешься по лестнице и выходишь во двор; встал на люк во дворе — спускаешься в ход
+      {
+        const kd = new V3(-KEEP.x, 0, -KEEP.z).normalize();
+        let E = new V3(KEEP.x + kd.x * 11, 0, KEEP.z + kd.z * 11);
+        for (let k = 0; k < 30 && (insideTower(E.x, E.z, 1.5) || (typeof insideBuilding === 'function' && insideBuilding(E.x, E.z, 1.2))); k++) E.addScaledVector(kd, 0.8);
+        const eg = gh(E.x, E.z);
+        // каменная рама и откинутая крышка люка
+        for (const [dx, dz, sx, sz] of [[0.7, 0, 0.15, 1.55], [-0.7, 0, 0.15, 1.55], [0, 0.7, 1.25, 0.15], [0, -0.7, 1.25, 0.15]]) stone.box(new V3(E.x + dx, eg + 0.08, E.z + dz), new V3(1, 0, 0), UP, new V3(0, 0, 1), sx / 2, 0.1, sz / 2);
+        colorB.add(GEO.box, M(E.x, eg + 0.02, E.z, 0, 1.25, 0.02, 1.25), 0x050404);
+        wood.box(new V3(E.x - 0.2, eg + 0.62, E.z - 0.78), new V3(1, 0, 0), new V3(0, 0.98, -0.2).normalize(), new V3(0, 0.2, 0.98).normalize(), 0.62, 0.62, 0.04, { grain: true });
+        const exitPos = E.clone().addScaledVector(kd, 1.6).setY(eg + 1.65);
+        const exitLook = E.clone().addScaledVector(kd, 8).setY(eg + 1.5);
+        const endPos = F.p(B1 - 4.5, 0, 0).setY(floorB(B1 - 4.5) + 1.6), endLook = F.p(B1 - 12, 0, 0).setY(floorB(B1 - 12) + 1.4);
+        const fade = document.createElement('div');
+        fade.style.cssText = 'position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .45s;z-index:50';
+        document.body.appendChild(fade);
+        let cool = 0, pending = null;
+        const jump = (cam, pos, look) => {
+          fade.style.opacity = '1';
+          pending = () => {
+            cam.position.copy(pos); cam.lookAt(look);
+            if (out.onTeleport) out.onTeleport(pos, look);
+            fade.style.opacity = '0';
+          };
+          setTimeout(() => { if (pending) { pending(); pending = null; } }, 480);
+          cool = 2.5;
+        };
+        const lt = new V3();
+        upd.push((t, dt, cam) => {
+          if (!cam) return;
+          cool = Math.max(0, cool - dt);
+          if (cool > 0 || pending) return;
+          lt.copy(cam.position).sub(P).applyMatrix4(inv);
+          if (lt.z > B1 - 1.8 && lt.z < B1 + 3 && Math.abs(lt.x) < 1.5) jump(cam, exitPos, exitLook);
+          else if (Math.hypot(cam.position.x - E.x, cam.position.z - E.z) < 0.65 && cam.position.y < eg + 2.2) jump(cam, endPos, endLook);
+        });
+        out.places.tunnelHatch = { E: E.clone(), exitPos, exitLook, endPos, endLook };
+      }
       upd.push((t, dt, cam) => {
         if (!cam) return;
         const d = cam.position.distanceTo(P);

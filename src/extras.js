@@ -10,7 +10,8 @@ import { KEEP, TOWERS, WELL, BUILDINGS, riverZ, riverHalfWidth, GATEHOUSE, GATE_
 import { WINDOWS } from './towers.js';
 import { mulberry32 } from './noise.js';
 import { createLife3 } from './life3.js';
-import { siegeCamp, yardPavilion, clothKit } from './camp.js';
+import { siegeCamp, circusTent, clothKit } from './camp.js';
+import { createBattle } from './battle.js';
 import { COURT_EXTRAS } from './details.js';
 
 const V3 = THREE.Vector3;
@@ -189,6 +190,7 @@ function createWalkers(scene, terrain, walls, ctx = {}) {
       out.push(w);
     }
   }
+  for (const w of out) w.mesh.userData.civil = true; // по тревоге прячутся
   return {
     update(dt) {
       for (const w of out) w.update(dt, terrain.heightAt);
@@ -586,7 +588,9 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
   scene.add(winchRope);
   let curAng = 0, prevAng = 0, prevVel = 0, sw = 0, swV = 0, loaded = true;
   const DOWN = new V3(0, -1, 0), YUP = new V3(0, 1, 0);
-  const restSling = T.A.clone().addScaledVector(DOWN, 0.2).normalize();
+  // в покое праща тянется от конца рычага к ложу в жёлобе, ядро лежит в кошеле
+  let restSling = T.A.clone().addScaledVector(DOWN, 0.2).normalize();
+  if (T.cradle) restSling = T.cradle.clone().sub(T.pivot.clone().addScaledVector(armDirAt(0), T.armLen + 0.35)).normalize();
   const poseMachine = (dt, c) => {
     const tip = T.pivot.clone().addScaledVector(armDirAt(curAng), T.armLen + 0.35);
     // противовес: шарнир на коротком плече, раскачка от ускорения рычага
@@ -704,7 +708,12 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
     const a = arrowSt.find((x) => !x.on);
     if (!a) return;
     let from = null, to;
-    if (Math.random() < 0.3) {
+    if (siegeApi.assault) {
+      // враги у стен: стрелы летят вниз, к подножию барбакана
+      from = shooters[Math.floor(Math.random() * shooters.length)];
+      to = new V3((Math.random() - 0.5) * 18, 0, BARBICAN.zS + 2 + Math.random() * 10);
+      to.y = gh(to.x, to.z) + 0.3;
+    } else if (Math.random() < 0.3) {
       // лучники осаждающих отвечают из-за частокола — стрелы бьют в стену и зубцы
       from = T.pivot.clone().addScaledVector(T.A, 9 + Math.random() * 7).addScaledVector(T.R, (Math.random() - 0.5) * 30);
       from.y = gh(from.x, from.z) + 1.5;
@@ -724,7 +733,8 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
     Object.assign(a, { t: 0, dur, stuck: 0, on: true });
   }
 
-  return {
+  const siegeApi = {
+    assault: false,
     target,
     toCamp,
     extraShooters,
@@ -809,6 +819,7 @@ function createSiege(scene, ctx, walls, terrain, armMats) {
       }
     },
   };
+  return siegeApi;
 }
 
 
@@ -1379,7 +1390,8 @@ export function createExtras(scene, terrain, walls, village) {
   const ctx = { terrain, wood, stone, metal, straw, colorB, glowB, people, rnd, armWood, armMetal, cwWood, cwMetal, cwStone, scene, smokes: [] };
   hallInterior(ctx);
   const camp = siegeCamp(ctx, village, findCampSite);
-  for (const t of COURT_EXTRAS.tents) ctx.pavilion = yardPavilion(scene, ctx, t.x, t.z, Math.atan2(-t.x, -t.z)).stop; // вход — к середине двора
+  let circus = null;
+  for (const t of COURT_EXTRAS.tents) { circus = circusTent(scene, ctx, t.x, t.z, Math.atan2(-t.x, -t.z), walkerMaterial); ctx.pavilion = circus.stop; } // вход — к середине двора
   if (camp) ctx.campSite = { x: camp.x, z: camp.z };
   const country = createCountryLife(scene, ctx, village); // коровы — в общую сетку, поэтому до сборки
   ctx.stoneTile = walls.stoneMaterial.userData.tileMeters;
@@ -1439,6 +1451,7 @@ export function createExtras(scene, terrain, walls, village) {
   }
   const siege = createSiege(scene, ctx, walls, terrain, { wood: walls.woodMaterial, iron, stone: walls.stoneMaterial });
   life3.siege = siege;
+  const battle = createBattle(scene, ctx, terrain, siege);
   const windows = createWindowLights(scene);
   // люди разбиты на группы по местам: далёкие группы не рисуются (меньше треугольников)
   const anchors = [new V3(0, 0, 0)];
@@ -1467,8 +1480,9 @@ export function createExtras(scene, terrain, walls, village) {
       dt = Math.min(dt, 0.1);
       if (camera) {
         const cp = camera.position;
-        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < (m.userData.maxDist || 190) && !(ctxRuins.on) && m.userData.night !== false;
-        for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < (g.c.x === 0 && g.c.z === 0 ? 340 : 220) && !(ctxRuins.on); // за 220 м фигурки в пару пикселей
+        const alarm = battle.alarm;
+        for (const m of WALKERS) m.visible = Math.hypot(m.position.x - cp.x, m.position.z - cp.z) < (m.userData.maxDist || 190) && !(ctxRuins.on) && m.userData.night !== false && !(alarm && m.userData.civil);
+        for (const g of peopleGroups) if (g.c && g.upd.mesh) g.upd.mesh.visible = Math.hypot(g.c.x - cp.x, g.c.z - cp.z) < (g.c.x === 0 && g.c.z === 0 ? 340 : 220) && !(ctxRuins.on) && !(alarm && g.c.x === 0 && g.c.z === 0); // по тревоге жители двора прячутся // за 220 м фигурки в пару пикселей
         if (camp) {
           const dc = Math.hypot(camp.x - cp.x, camp.z - cp.z);
           for (const m of campMeshes) m.visible = dc < m.userData.far && !ctxRuins.on;
@@ -1479,6 +1493,8 @@ export function createExtras(scene, terrain, walls, village) {
       walkers.update(dt);
       birds.update(t);
       if (siege) siege.update(dt);
+      battle.update(dt, t);
+      if (circus && camera && Math.hypot(camera.position.x - COURT_EXTRAS.tents[0].x, camera.position.z - COURT_EXTRAS.tents[0].z) < 90) circus.update(t);
       country.update(t, dt);
       for (const sm of ctx.smokes) sm.update(t);
       if (life2) life2.update(t, dt);
@@ -1491,8 +1507,10 @@ export function createExtras(scene, terrain, walls, village) {
     get pasture() { return ctx.pasture; },
     set ruinsOn(v) { ctxRuins.on = v; },
     get tourney() { return ctx.tourney; },
+    battle,
     cheerNow(ago = 0) { CHEER.value = SWAY_TIME.value - ago; },
     setGate(g) { life2.setGate(g); life3.gate = g; },
+    setOnTeleport(f) { life3.onTeleport = f; },
   };
 }
 

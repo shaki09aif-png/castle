@@ -321,12 +321,12 @@ function leafGeometry(out) {
 // Описание пород
 const SPECIES = {
   oak: {
-    height: [8, 13], trunkR: 0.34, branches: 6, branchStart: 0.38, spread: 0.75, crownR: 1.9,
-    clumpCards: 26, card: 1.25, bark: 'bark', leafHue: [0.19, 0.3, 0.09], leaf: 'broad', droop: 0,
+    height: [8, 13], trunkR: 0.34, branches: 6, branchStart: 0.38, spread: 0.75, crownR: 2.1,
+    clumpCards: 32, card: 1.35, bark: 'bark', leafHue: [0.19, 0.3, 0.09], leaf: 'broad', droop: 0,
   },
   beech: {
-    height: [11, 16], trunkR: 0.3, branches: 7, branchStart: 0.45, spread: 0.6, crownR: 2.1,
-    clumpCards: 24, card: 1.2, bark: 'bark', leafHue: [0.22, 0.33, 0.08], leaf: 'broad', droop: 0.1,
+    height: [11, 16], trunkR: 0.3, branches: 7, branchStart: 0.45, spread: 0.6, crownR: 2.3,
+    clumpCards: 30, card: 1.3, bark: 'bark', leafHue: [0.22, 0.33, 0.08], leaf: 'broad', droop: 0.1,
   },
   birch: {
     height: [9, 13], trunkR: 0.17, branches: 5, branchStart: 0.45, spread: 0.35, crownR: 1.3,
@@ -500,9 +500,9 @@ function scatterTrees(terrain, excludeTrees) {
     // выбор породы
     const r = rnd();
     let sp;
-    if (lush > 0.3 && r < 0.5) sp = 'birch';
+    if (lush > 0.3 && r < 0.25) sp = 'birch'; // берёз меньше: белые стволы рябили
     else if (g.h > 40 || g.rock > 0.1) sp = r < 0.45 ? 'pine' : r < 0.8 ? 'bush' : 'oak';
-    else sp = r < 0.35 ? 'oak' : r < 0.6 ? 'beech' : r < 0.72 ? 'birch' : r < 0.82 ? 'pine' : 'bush';
+    else sp = r < 0.38 ? 'oak' : r < 0.66 ? 'beech' : r < 0.72 ? 'birch' : r < 0.82 ? 'pine' : 'bush';
     const s = sp === 'bush' ? 0.7 + rnd() * 0.8 : 0.75 + rnd() * 0.5;
     out[sp].push({ x, y: g.h - 0.15, z, s, rot: rnd() * Math.PI * 2, tint: 0.8 + rnd() * 0.4, v: Math.floor(rnd() * 3) });
   };

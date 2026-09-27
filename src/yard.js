@@ -198,7 +198,8 @@ export function horse(colorB, x, y, z, yaw, col, rnd) {
   // шея наклонена вперёд, голова вниз
   const neck = L(r, 0, 1.45, 0.62, 0.55 + down * 0.6);
   // голова и шея помечены: у идущей лошади они кивают в такт шагу
-  const HB = { add: (g, m, c) => colorB.add(g, m, c, 3, y + 1.45) };
+  const headPh = rnd();
+  const HB = { add: (g, m, c) => { if (colorB.curAnim) colorB.curAnim = [4, y + 1.45, headPh]; colorB.add(g, m, c, 3, y + 1.45); if (colorB.curAnim) colorB.curAnim = [0, 0, 0]; } }; // голова кивает и жуёт (шейдер)
   HB.add(HG.neck, neck, col);
   const poll = neck.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0.74, 0));
   // голова смотрит вперёд-вниз (ось головы — локальная −Y, темя — локальная +Z)

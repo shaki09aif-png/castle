@@ -731,6 +731,12 @@ function makeTerrainMaterial() {
           c0 *= mix(vec3(0.82, 0.88, 0.8), vec3(1.1, 1.05, 0.92), macro.r);
           c0 = mix(c0, c0 * vec3(1.28, 1.08, 0.72), smoothstep(0.5, 0.72, macro.g) * 0.6);
           c0 = mix(c0, c0 * vec3(0.72, 0.84, 0.7), smoothstep(0.55, 0.3, macro.g) * 0.45);
+          // луг среднего масштаба: сочные и подсохшие куртины, клевер, пятна цветов
+          {
+            float m3 = texture2D(tMacro, vWPos.xz * 0.027 + 0.13).r;
+            c0 *= mix(vec3(0.82, 0.92, 0.8), vec3(1.14, 1.08, 0.84), smoothstep(0.25, 0.8, m3));
+            c0 = mix(c0, c0 * vec3(1.18, 1.1, 0.7), smoothstep(0.62, 0.8, macro2.g) * 0.5);
+          }
           float alt = smoothstep(40.0, 84.0, vWPos.y) * (1.0 - smoothstep(160.0, 220.0, length(vWPos.xz)));
           c0 = mix(c0, c0 * vec3(1.12, 1.0, 0.78), alt * 0.5);
           float farK = smoothstep(420.0, 900.0, length(vWPos.xz));

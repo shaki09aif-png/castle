@@ -137,6 +137,15 @@ export function addPersonShading(mat) {
               transformed.y += sin(t * 0.7 + ph * 6.28) * 0.035 + sin(t * 5.5 + ph * 3.0) * 0.006;
             } else if (ak < 5.5) {
               transformed.y += sin(t * 2.1 + ph * 6.28) * 0.008 * clamp((position.y - aAnim.y) / 0.25, 0.0, 1.0);
+            } else if (ak > 7.5) {
+              // 8 — разговор: рука то поднимается с жестом, то опускается (у каждого своё время)
+              float yw = (aAnim.x - 7.8) / 0.4 * 6.2831853;
+              vec3 ax = vec3(cos(yw), 0.0, -sin(yw));
+              vec3 sh = vec3(aPivot.x, aAnim.y, aPivot.y) - ax * 0.2;
+              float g = pow(max(0.0, sin(t * (0.55 + ph * 0.5) + ph * 6.28)), 3.0);
+              float a = -g * (0.75 + 0.15 * sin(t * 3.7 + ph * 9.0));
+              vec3 v = transformed - sh;
+              transformed = sh + v * cos(a) + cross(ax, v) * sin(a) + ax * dot(ax, v) * (1.0 - cos(a));
             } else if (ak > 6.5) {
               // 7 — удар молотом/киркой: рука поднимается и резко бьёт вниз (ось — плечо)
               float yw = (aAnim.x - 6.8) / 0.4 * 6.2831853;
@@ -814,7 +823,8 @@ export function person(B, { x, y, z, yaw = 0, role = 'peasant', seed = 1, pose =
     // работающие руки (помешивают, ткут, перебирают) — движение считает шейдер
     const strike = i === 0 && !fixed && !sit && pose !== 'work' && (IT === 'hammer' || IT === 'pick');
     const yN = (((yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2);
-    B.curAnim = strike ? [6.8 + yN * 0.4, new V3().setFromMatrixPosition(sh).y, (seed * 0.173) % 1] : pose === 'work' && !fixed ? [2, new V3().setFromMatrixPosition(sh).y, (seed * 0.137) % 1] : cheer && !fixed ? [6, new V3().setFromMatrixPosition(sh).y, (seed * 0.2137) % 1] : [0, 0, 0];
+    const talk = i === 1 && !fixed && !sit && pose === 'stand' && !IT && !R.sword && !['guard', 'archer', 'foe', 'priest', 'child'].includes(role) && ((seed * 0.618) % 1) < 0.7;
+    B.curAnim = talk ? [7.8 + yN * 0.4, new V3().setFromMatrixPosition(sh).y, (seed * 0.311) % 1] : strike ? [6.8 + yN * 0.4, new V3().setFromMatrixPosition(sh).y, (seed * 0.173) % 1] : pose === 'work' && !fixed ? [2, new V3().setFromMatrixPosition(sh).y, (seed * 0.137) % 1] : cheer && !fixed ? [6, new V3().setFromMatrixPosition(sh).y, (seed * 0.2137) % 1] : [0, 0, 0];
     if (strike) strikeAnim = B.curAnim.slice();
     MT(1);
     B.add(G.shoulder, sh, sleeve, 0.6, sw);
